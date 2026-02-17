@@ -1,0 +1,36 @@
+[project]
+name = "index-creator"
+version = "0.1.0"
+description = "Minimal index creator for backtesting and research"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "yfinance>=1.0",
+    "pyarrow>=14",
+    "scipy>=1.10",
+    "openpyxl>=3.1",
+    "pydantic>=2.0",
+    "plotly",
+    "dash",
+]
+
+# Command-line entry point: `backtest`
+# (this runs main() from main.py in the project root)
+[project.scripts]
+index_builder = "main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# Package with all engine code: backtester_lib/*
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["index_lib*"]
+
+# Standalone top-level module for the CLI driver
+[tool.setuptools]
+py-modules = ["main"]
