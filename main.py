@@ -670,10 +670,17 @@ def build_index_series(
     for dt in px.index:
         # 1) Rebalance: reset weights using history up to dt
         if dt in rb_dates:
-            if method == "inv_vol":
-                hist = px.loc[:dt].tail(max(lookback + 1, 2))
+            # Use information available at start of day dt (i.e., up to previous close)
+            hist_end = px.index.get_loc(dt)
+            if hist_end == 0:
+                hist = px.iloc[:1]  # first day fallback
             else:
-                hist = px.loc[:dt]
+                hist_px = px.iloc[:hist_end]  # up to dt-1
+                if method == "inv_vol":
+                    hist = hist_px.tail(max(lookback + 1, 2))
+                else:
+                    hist = hist_px
+
             w = compute_weights(hist, method, lookback=lookback, cap=cap)
             weights_hist[dt] = w
 
