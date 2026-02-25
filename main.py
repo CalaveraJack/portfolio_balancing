@@ -14,7 +14,7 @@ import numpy as np  # type: ignore
 import pandas as pd  # type: ignore
 import plotly.graph_objects as go  # type: ignore
 import plotly.io as pio  # type: ignore
-from dash import Dash, Input, Output, dash_table, dcc, html  # type: ignore
+from dash import Dash, Input, Output, State, dash_table, dcc, html
 
 from index_lib.loaders import load_universe_close_volume_cached
 
@@ -590,6 +590,57 @@ def apply_vol_target_overlay(
 
     return vc_returns, leverage, vol_est_ann
 
+def run_monte_carlo_simulation(
+    close: pd.DataFrame,
+    constituents: Sequence[str],
+    weights: pd.Series,
+    *,
+    num_simulations: int,
+    horizon_days: int,
+    vol_target_on: bool,
+    target_vol_ann: float,
+    vol_lookback: int,
+    max_leverage: float,
+    min_leverage: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+
+    px = close[constituents].dropna(how="all")
+    returns = px.pct_change().dropna()
+
+    mean_vec = returns.mean().values
+    cov_mat = returns.cov().values
+
+    weights_vec = weights.reindex(px.columns).fillna(0).values
+
+    np.random.seed(42)
+    results = np.zeros((num_simulations, horizon_days))
+
+    for i in range(num_simulations):
+
+        simulated_rets = np.random.multivariate_normal(
+            mean_vec,
+            cov_mat,
+            horizon_days
+        )
+
+        port_rets = simulated_rets @ weights_vec
+
+        if vol_target_on:
+            r_series = pd.Series(port_rets)
+            vc_returns, _, _ = apply_vol_target_overlay(
+                r_series,
+                target_vol_ann=target_vol_ann,
+                vol_lookback=vol_lookback,
+                max_leverage=max_leverage,
+                min_leverage=min_leverage,
+            )
+            port_rets = vc_returns.fillna(0.0).values
+
+        results[i] = np.cumprod(1 + port_rets)
+
+    final_values = results[:, -1]
+
+    return results, final_values
 
 def build_index_series(
     close: pd.DataFrame,
@@ -1092,6 +1143,47 @@ def build_app(data: UniverseData) -> Dash:
                         dcc.Graph(id="comp_realized_vol_fig"),
                     ],
                 ),
+                html.Hr(),
+                html.H4("Monte Carlo Simulation"),
+                html.Div(
+                    style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"},
+                    children=[
+                        html.Div(
+                            children=[
+                                html.Div("Simulations"),
+                                dcc.Input(
+                                    id="mc_num_sim",
+                                    type="number",
+                                    value=1000,
+                                    min=100,
+                                    step=100,
+                                    style={"width": "140px"},
+                                ),
+                            ]
+                        ),
+                        html.Div(
+                            children=[
+                                html.Div("Horizon (days)"),
+                                dcc.Input(
+                                    id="mc_horizon",
+                                    type="number",
+                                    value=252,
+                                    min=20,
+                                    step=10,
+                                    style={"width": "140px"},
+                                ),
+                            ]
+                        ),
+                        html.Button(
+                            "Calculate Monte Carlo",
+                            id="mc_button",
+                            n_clicks=0,
+                            style={"height": "38px"},
+                        ),
+                    ],
+                ),
+                dcc.Graph(id="mc_fig"),
+                html.Div(id="mc_summary"),
             ]
         )
 
@@ -1249,7 +1341,108 @@ def build_app(data: UniverseData) -> Dash:
         weights_tbl = make_latest_weights_table(weights_history)
 
         return fig_index, fig_weights, lev_fig, vol_fig, stats_tbl, weights_tbl
+    @app.callback(
+        Output("mc_fig", "figure"),
+        Output("mc_summary", "children"),
+        Input("mc_button", "n_clicks"),
+        State("comp_constituents", "value"),
+        State("comp_method", "value"),
+        State("comp_rebalance", "value"),
+        State("comp_lookback", "value"),
+        State("comp_cap", "value"),
+        State("comp_start", "date"),
+        State("comp_end", "date"),
+        State("comp_vol_on", "value"),
+        State("comp_target_vol", "value"),
+        State("comp_vol_lb", "value"),
+        State("comp_max_lev", "value"),
+        State("comp_min_lev", "value"),
+        State("mc_num_sim", "value"),
+        State("mc_horizon", "value"),
+    )
+    def run_mc(
+        n_clicks,
+        constituents,
+        method,
+        rebalance,
+        lookback,
+        cap_pct,
+        start_date,
+        end_date,
+        vol_on,
+        target_vol_pct,
+        vol_lb,
+        max_lev,
+        min_lev,
+        num_sim,
+        horizon,
+    ):
 
+        if n_clicks == 0:
+            return empty_fig(title="Monte Carlo Simulation"), html.Div("-")
+
+        cap = float(cap_pct) / 100 if cap_pct else None
+
+        index_level, weights_history, _, _ = build_index_series(
+            close=data.close,
+            constituents=constituents,
+            method=method,
+            start=start_date,
+            end=end_date,
+            rebalance_freq=rebalance,
+            lookback=int(lookback),
+            cap=cap,
+        )
+
+        if weights_history.empty:
+            return empty_fig(title="Monte Carlo Simulation"), html.Div("No weights.")
+
+        latest_weights = weights_history.iloc[-1]
+
+        results, final_vals = run_monte_carlo_simulation(
+            close=data.close,
+            constituents=constituents,
+            weights=latest_weights,
+            num_simulations=int(num_sim),
+            horizon_days=int(horizon),
+            vol_target_on=(vol_on == "on"),
+            target_vol_ann=float(target_vol_pct) / 100 if target_vol_pct else 0.10,
+            vol_lookback=int(vol_lb),
+            max_leverage=float(max_lev),
+            min_leverage=float(min_lev),
+        )
+
+        mean_path = results.mean(axis=0)
+        p5 = np.percentile(results, 5, axis=0)
+        p95 = np.percentile(results, 95, axis=0)
+
+        best_idx = np.argmax(final_vals)
+        worst_idx = np.argmin(final_vals)
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=p95, line=dict(width=0), showlegend=False))
+        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=p5, fill="tonexty", name="5–95% band", opacity=0.25))
+        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=mean_path, name="Mean", line=dict(width=3)))
+        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=results[best_idx], name="Best", line=dict(color="green", width=2)))
+        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=results[worst_idx], name="Worst", line=dict(color="red", width=2)))
+
+        fig.update_layout(
+            title="Monte Carlo Simulation",
+            xaxis_title="Trading Days",
+            yaxis_title="Growth (1.0 = start)",
+            height=500,
+        )
+
+        summary = html.Div([
+            html.Div(f"Median: {np.percentile(final_vals,50):.2f}x"),
+            html.Div(f"10th pct: {np.percentile(final_vals,10):.2f}x"),
+            html.Div(f"90th pct: {np.percentile(final_vals,90):.2f}x"),
+            html.Div(f"Worst: {final_vals[worst_idx]:.2f}x"),
+            html.Div(f"Best: {final_vals[best_idx]:.2f}x"),
+        ])
+
+        return fig, summary
     return app
 
 
