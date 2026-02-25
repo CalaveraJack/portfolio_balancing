@@ -63,6 +63,74 @@ This allows verification of:
 
 This graph was instrumental in validating the equal-weight methodology correction (see Version Log).
 
+### Monte Carlo Simulation
+
+The Monte Carlo Simulation module allows forward-looking scenario
+analysis of a composed index under stochastic return assumptions.
+
+It extends the deterministic backtest engine by simulating correlated
+asset return paths and re-applying the full index construction logic
+(weighting, rebalancing, caps, optional vol targeting).
+
+#### Example Screenshot
+
+![Universe Inspector](docs/screenshots/mc_simulation.png)
+
+#### What it does
+
+-   Simulates correlated multivariate return paths
+-   Rebuilds the index under the selected weighting methodology
+-   Applies rebalancing rules dynamically
+-   Enforces weight caps
+-   Optionally applies a volatility targeting overlay
+-   Computes percentile bands (VaR-style)
+-   Displays best / worst / mean simulated paths
+
+#### Configuration
+
+In the Monte Carlo Simulation panel:
+
+-   Simulations — number of independent paths
+-   Horizon (days) — forward simulation length
+-   VaR alpha (%) — percentile band width
+
+If Vol Targeting is enabled in the Index Composer, the same overlay
+logic is applied inside the simulation.
+
+#### Output
+
+The simulation graph shows:
+
+-   Mean path
+-   Best path
+-   Worst path
+-   Alpha-based percentile band (e.g., 5%–95%)
+
+Below the graph, summary statistics include:
+
+-   Median terminal value
+-   Lower percentile terminal value
+-   Upper percentile terminal value
+-   Best terminal value
+-   Worst terminal value
+
+#### Methodology Notes
+
+-   Returns are simulated using a multivariate normal distribution
+    estimated from historical data.
+-   Rebalancing occurs at the same frequency selected in the Index
+    Composer.
+-   Weight drift between rebalances follows the same mechanics as the
+    historical backtest.
+-   Vol targeting (if enabled) is applied using trailing realized
+    volatility without look-ahead bias.
+
+
+This feature allows scenario-based risk exploration beyond historical
+backtests and provides a forward-looking distribution of potential index
+outcomes.
+
+
 ---
 
 ## Data + caching
@@ -106,6 +174,11 @@ In `apply_vol_target_overlay()`:
 
 ## Version Log
 
+### 2026-02-25
+**Monte-Carlo simulation framework (slow)**
+
+For the robustness of model, the Monte-Carlo simulation was implemented, which simulates constituent's returns, then simulates rebalancing and overlay per path. The method is built upon normal dist sampling, and is not vectorized. The next iteration will use the GBM block bootstrap and will be vectorized - to ensure execution speed (currently around 3 min per run with default parameters)
+
 ### 2026-02-20
 
 **Equal-weight methodology correction.**
@@ -124,8 +197,6 @@ Correction implemented:
 - Methodology aligned structurally with price-weight and inverse-vol logic.
 
 This materially improves correctness and transparency of the backtest engine.
-
----
 
 ### 2025-02-18
 

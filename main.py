@@ -268,7 +268,7 @@ def make_line_fig(title: str, s: pd.Series, y_title: str, *, height: int = 320) 
         title=title,
         xaxis_title="Date",
         yaxis_title=y_title,
-        margin=dict(l=30, r=20, t=40, b=30),
+        margin=dict(l=60, r=40, t=50, b=40),
         height=height,
     )
     return fig
@@ -593,7 +593,10 @@ def apply_vol_target_overlay(
 def run_monte_carlo_simulation(
     close: pd.DataFrame,
     constituents: Sequence[str],
-    weights: pd.Series,
+    method: str,
+    rebalance_freq: str,
+    lookback: int,
+    cap: Optional[float],
     *,
     num_simulations: int,
     horizon_days: int,
@@ -604,14 +607,22 @@ def run_monte_carlo_simulation(
     min_leverage: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
 
-    px = close[constituents].dropna(how="all")
-    returns = px.pct_change().dropna()
+    px_hist = close[constituents].dropna(how="all")
+    returns_hist = px_hist.pct_change().dropna()
 
-    mean_vec = returns.mean().values
-    cov_mat = returns.cov().values
+    mean_vec = returns_hist.mean().values
+    cov_mat = returns_hist.cov().values
 
-    weights_vec = weights.reindex(px.columns).fillna(0).values
+    tickers = px_hist.columns.tolist()
+    # Use last observed real prices as simulation starting point
+    last_prices = px_hist.iloc[-1].values.astype(float)
 
+    # Create synthetic future trading dates starting after last historical date
+    last_hist_date = px_hist.index[-1]
+    sim_dates = pd.bdate_range(
+        start=last_hist_date + pd.Timedelta(days=1),
+        periods=horizon_days
+    )
     np.random.seed(42)
     results = np.zeros((num_simulations, horizon_days))
 
@@ -623,10 +634,30 @@ def run_monte_carlo_simulation(
             horizon_days
         )
 
-        port_rets = simulated_rets @ weights_vec
+        price_paths = np.cumprod(1 + simulated_rets, axis=0)
+        price_paths = price_paths * last_prices  # scale by real last prices
+
+        sim_prices = pd.DataFrame(
+            price_paths,
+            columns=tickers
+        )
+        sim_prices.index = sim_dates
+        sim_index, _, base_returns, _ = build_index_series(
+            close=sim_prices,
+            constituents=tickers,
+            method=method,
+            start=None,
+            end=None,
+            rebalance_freq=rebalance_freq,
+            lookback=lookback,
+            cap=cap,
+            base_level=1.0,
+        )
+
+        port_rets = base_returns.values
 
         if vol_target_on:
-            r_series = pd.Series(port_rets)
+            r_series = pd.Series(port_rets, index=sim_dates)
             vc_returns, _, _ = apply_vol_target_overlay(
                 r_series,
                 target_vol_ann=target_vol_ann,
@@ -1174,6 +1205,20 @@ def build_app(data: UniverseData) -> Dash:
                                 ),
                             ]
                         ),
+                        html.Div(
+                            children=[
+                                html.Div("VaR alpha (%)"),
+                                dcc.Input(
+                                    id="mc_alpha",
+                                    type="number",
+                                    value=5.0,
+                                    min=0.1,
+                                    max=49.0,
+                                    step=0.5,
+                                    style={"width": "140px"},
+                                ),
+                            ]
+                        ),
                         html.Button(
                             "Calculate Monte Carlo",
                             id="mc_button",
@@ -1182,8 +1227,15 @@ def build_app(data: UniverseData) -> Dash:
                         ),
                     ],
                 ),
-                dcc.Graph(id="mc_fig"),
-                html.Div(id="mc_summary"),
+                dcc.Loading(
+                    id="mc_loading",
+                    type="circle",
+                    fullscreen=True,
+                    children=[
+                        dcc.Graph(id="mc_fig"),
+                        html.Div(id="mc_summary"),
+                    ],
+                ),
             ]
         )
 
@@ -1359,6 +1411,7 @@ def build_app(data: UniverseData) -> Dash:
         State("comp_min_lev", "value"),
         State("mc_num_sim", "value"),
         State("mc_horizon", "value"),
+        State("mc_alpha", "value"),
     )
     def run_mc(
         n_clicks,
@@ -1376,6 +1429,7 @@ def build_app(data: UniverseData) -> Dash:
         min_lev,
         num_sim,
         horizon,
+        alpha,
     ):
 
         if n_clicks == 0:
@@ -1398,31 +1452,65 @@ def build_app(data: UniverseData) -> Dash:
             return empty_fig(title="Monte Carlo Simulation"), html.Div("No weights.")
 
         latest_weights = weights_history.iloc[-1]
+        # Slice historical panel consistently with backtest window
+        px_hist = data.close.copy()
+        if start_date:
+            px_hist = px_hist.loc[pd.to_datetime(start_date):]
+        if end_date:
+            px_hist = px_hist.loc[:pd.to_datetime(end_date)]
+        # Safe defaults
+        num_sim = int(num_sim) if num_sim is not None else 100
+        horizon = int(horizon) if horizon is not None else 252
+        lookback = int(lookback) if lookback is not None else 126
+        vol_lb = int(vol_lb) if vol_lb is not None else 63
+        max_lev = float(max_lev) if max_lev is not None else 2.0
+        min_lev = float(min_lev) if min_lev is not None else 0.0
+        target_vol_pct = float(target_vol_pct) if target_vol_pct is not None else 10.0
 
         results, final_vals = run_monte_carlo_simulation(
-            close=data.close,
+            close=px_hist,   # assuming you fixed earlier slice issue
             constituents=constituents,
-            weights=latest_weights,
-            num_simulations=int(num_sim),
-            horizon_days=int(horizon),
+            method=method,
+            rebalance_freq=rebalance,
+            lookback=lookback,
+            cap=cap,
+            num_simulations=num_sim,
+            horizon_days=horizon,
             vol_target_on=(vol_on == "on"),
-            target_vol_ann=float(target_vol_pct) / 100 if target_vol_pct else 0.10,
-            vol_lookback=int(vol_lb),
-            max_leverage=float(max_lev),
-            min_leverage=float(min_lev),
+            target_vol_ann=target_vol_pct / 100.0,
+            vol_lookback=vol_lb,
+            max_leverage=max_lev,
+            min_leverage=min_lev,
         )
 
         mean_path = results.mean(axis=0)
-        p5 = np.percentile(results, 5, axis=0)
-        p95 = np.percentile(results, 95, axis=0)
+
+        alpha = float(alpha) if alpha else 5.0
+        lower_q = alpha
+        upper_q = 100 - alpha
+
+        p_low = np.percentile(results, lower_q, axis=0)
+        p_high = np.percentile(results, upper_q, axis=0)
 
         best_idx = np.argmax(final_vals)
         worst_idx = np.argmin(final_vals)
 
         fig = go.Figure()
 
-        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=p95, line=dict(width=0), showlegend=False))
-        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=p5, fill="tonexty", name="5–95% band", opacity=0.25))
+        fig.add_trace(go.Scatter(
+            x=np.arange(len(mean_path)),
+            y=p_high,
+            line=dict(width=0),
+            showlegend=False
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=np.arange(len(mean_path)),
+            y=p_low,
+            fill="tonexty",
+            name=f"{lower_q:.1f}–{upper_q:.1f}% band",
+            opacity=0.25,
+        ))
         fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=mean_path, name="Mean", line=dict(width=3)))
         fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=results[best_idx], name="Best", line=dict(color="green", width=2)))
         fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=results[worst_idx], name="Worst", line=dict(color="red", width=2)))
@@ -1436,8 +1524,8 @@ def build_app(data: UniverseData) -> Dash:
 
         summary = html.Div([
             html.Div(f"Median: {np.percentile(final_vals,50):.2f}x"),
-            html.Div(f"10th pct: {np.percentile(final_vals,10):.2f}x"),
-            html.Div(f"90th pct: {np.percentile(final_vals,90):.2f}x"),
+            html.Div(f"{lower_q:.1f}th pct: {np.percentile(final_vals,lower_q):.2f}x"),
+            html.Div(f"{upper_q:.1f}th pct: {np.percentile(final_vals,upper_q):.2f}x"),
             html.Div(f"Worst: {final_vals[worst_idx]:.2f}x"),
             html.Div(f"Best: {final_vals[best_idx]:.2f}x"),
         ])
