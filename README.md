@@ -231,6 +231,11 @@ In `apply_vol_target_overlay()`:
 
 ## Version Log
 
+### 2026-03-01
+**Community suggestion: Monte-Carlo simulation framework (optimized)**
+
+In order to increase the speed of calculations, new vectorized simulation methodology is used. The robustness is being tested.
+
 ### 2026-02-25
 **Monte-Carlo simulation framework (slow)**
 
