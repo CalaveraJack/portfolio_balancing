@@ -135,6 +135,8 @@ Below the chart:
 
 All paths are shown in **growth space (1.0 = start)**.
 
+---
+
 <details>
 <summary><strong>Methodology Details (click to expand)</strong></summary>
 
@@ -188,6 +190,7 @@ Adjusted return:
 $R_t^{VC} = \lambda_t R_t^{port}$
 
 </details>
+
 ---
 
 ## Data + caching
