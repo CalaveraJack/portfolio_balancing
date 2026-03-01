@@ -144,7 +144,7 @@ All paths are shown in **growth space (1.0 = start)**.
 
 <br>
 
-#### Block Bootstrap
+### Block Bootstrap
 
 Let daily historical returns be $r_t \in \mathbb{R}^N$.
 
@@ -156,38 +156,40 @@ $$
 \{ r_{t_2}, \dots \}
 $$
 
-Portfolio returns follow:
+Portfolio returns:
 
 $$
-R_t^{port} = w_t^\top r_t
+R_t^{port} = w_t' r_t
 $$
 
-where weights evolve according to the same rebalancing and drift
-rules as in the historical backtest.
+where $w_t'$ denotes the transpose of the weight vector.
 
-#### Correlated GBM
 
-Log-returns are defined as:
+### Correlated GBM
+
+Log-returns:
 
 $$
 x_t = \log(1 + r_t)
 $$
 
-Estimate:
+Parameter estimates:
 
 $$
-\mu = \mathbb{E}[x_t], \quad
-\Sigma = \mathrm{Cov}(x_t)
+\mu = E[x_t], \quad
+\Sigma = Cov(x_t)
 $$
 
 Simulated log-returns:
 
 $$
-x_t^{sim} = (\mu - \tfrac{1}{2}\mathrm{diag}(\Sigma)) + L z_t,
-\quad z_t \sim \mathcal{N}(0, I)
+x_t^{sim} = (\mu - \tfrac{1}{2} diag(\Sigma)) + L z_t
 $$
 
-where $L$ is the Cholesky factor of $\Sigma$.
+where:
+
+- $z_t \sim N(0, I)$  
+- $L$ is the Cholesky factor of $\Sigma$
 
 Arithmetic returns:
 
@@ -195,26 +197,26 @@ $$
 r_t^{sim} = e^{x_t^{sim}} - 1
 $$
 
-#### Volatility Target Overlay
 
-If enabled, leverage is computed per path using trailing realized
-volatility without look-ahead bias:
+### Volatility Target Overlay
+
+Leverage per path:
 
 $$
 \lambda_t =
 \frac{\sigma^{target}}{\hat{\sigma}_{t-1}}
 $$
 
-clipped to:
+Clipped to:
 
 $$
-\lambda_t \in [\text{min leverage}, \text{max leverage}]
+\lambda_t \in [min\ leverage,\ max\ leverage]
 $$
 
-Adjusted portfolio return:
+Adjusted return:
 
 $$
-R_t^{VC} = \lambda_t \cdot R_t^{port}
+R_t^{VC} = \lambda_t R_t^{port}
 $$
 
 </details>
