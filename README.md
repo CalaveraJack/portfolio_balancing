@@ -151,40 +151,27 @@ Let daily historical returns be $r_t \in \mathbb{R}^N$.
 Blocks of length $L$ are sampled and concatenated to construct
 a horizon of length $H$:
 
-$$
-\{ r_{t_1}, \dots, r_{t_1+L-1} \}, 
-\{ r_{t_2}, \dots \}
-$$
+$ \{ r_{t_1}, \dots, r_{t_1+L-1} \}, \{ r_{t_2}, \dots \} $
 
 Portfolio returns:
 
-$$
-R_t^{port} = w_t' r_t
-$$
+$ R_t^{port} = w_t' r_t $
 
 where $w_t'$ denotes the transpose of the weight vector.
-
 
 ### Correlated GBM
 
 Log-returns:
 
-$$
-x_t = \log(1 + r_t)
-$$
+$ x_t = \log(1 + r_t) $
 
 Parameter estimates:
 
-$$
-\mu = E[x_t], \quad
-\Sigma = Cov(x_t)
-$$
+$ \mu = E[x_t], \quad \Sigma = Cov(x_t) $
 
 Simulated log-returns:
 
-$$
-x_t^{sim} = (\mu - \tfrac{1}{2} diag(\Sigma)) + L z_t
-$$
+$ x_t^{sim} = (\mu - \tfrac{1}{2} diag(\Sigma)) + L z_t $
 
 where:
 
@@ -193,34 +180,23 @@ where:
 
 Arithmetic returns:
 
-$$
-r_t^{sim} = e^{x_t^{sim}} - 1
-$$
-
+$ r_t^{sim} = e^{x_t^{sim}} - 1 $
 
 ### Volatility Target Overlay
 
 Leverage per path:
 
-$$
-\lambda_t =
-\frac{\sigma^{target}}{\hat{\sigma}_{t-1}}
-$$
+$ \lambda_t = \frac{\sigma^{target}}{\hat{\sigma}_{t-1}} $
 
 Clipped to:
 
-$$
-\lambda_t \in [min\ leverage,\ max\ leverage]
-$$
+$ \lambda_t \in [min\ leverage,\ max\ leverage] $
 
 Adjusted return:
 
-$$
-R_t^{VC} = \lambda_t R_t^{port}
-$$
+$ R_t^{VC} = \lambda_t R_t^{port} $
 
 </details>
-
 ---
 
 ## Data + caching
