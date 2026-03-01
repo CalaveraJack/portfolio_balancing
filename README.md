@@ -70,8 +70,7 @@ analysis of a composed index under stochastic return assumptions.
 
 ![MonteCarloExample](docs/screenshots/mc_simulation.png)
 
-Unlike the historical backtest, which shows one realized path, Monte
-Carlo simulates many possible future paths and re-applies the **exact
+Monte Carlo simulates many possible future paths and re-applies the **exact
 same index construction logic**:
 
 - Constituent return simulation  
@@ -79,9 +78,6 @@ same index construction logic**:
 - Weight caps  
 - Daily weight drift  
 - Optional volatility targeting  
-
-The simulation therefore respects the full rule-based mechanics of the
-index engine.
 
 #### Simulation Methods
 
@@ -97,7 +93,7 @@ returns. This preserves:
 - Empirical distribution shape  
 - Tail behavior observed in history  
 
-This is the default method, as it is robust and distribution-free.
+This is the default method.
 
 
 ##### 2) Correlated GBM
