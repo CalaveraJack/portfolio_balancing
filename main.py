@@ -1033,7 +1033,7 @@ def build_app(data: UniverseData) -> Dash:
                                                 dcc.Input(
                                                     id="comp_cap",
                                                     type="number",
-                                                    value=10.0,
+                                                    value=100.0,
                                                     min=0.0,
                                                     step=0.5,
                                                     style={"width": "120px"},
@@ -1202,6 +1202,21 @@ def build_app(data: UniverseData) -> Dash:
                                     min=20,
                                     step=10,
                                     style={"width": "140px"},
+                                ),
+                            ]
+                        ),
+                        html.Div(
+                            children=[
+                                html.Div("MC method"),
+                                dcc.Dropdown(
+                                    id="mc_method",
+                                    options=[
+                                        {"label": "Bootstrap (blocks)", "value": "bootstrap"},
+                                        {"label": "GBM (correlated)", "value": "gbm"},
+                                    ],
+                                    value="bootstrap",
+                                    clearable=False,
+                                    style={"width": "220px"},
                                 ),
                             ]
                         ),
@@ -1409,6 +1424,7 @@ def build_app(data: UniverseData) -> Dash:
         State("comp_vol_lb", "value"),
         State("comp_max_lev", "value"),
         State("comp_min_lev", "value"),
+        State("mc_method", "value"),
         State("mc_num_sim", "value"),
         State("mc_horizon", "value"),
         State("mc_alpha", "value"),
@@ -1427,6 +1443,7 @@ def build_app(data: UniverseData) -> Dash:
         vol_lb,
         max_lev,
         min_lev,
+        mc_method,
         num_sim,
         horizon,
         alpha,
@@ -1437,83 +1454,100 @@ def build_app(data: UniverseData) -> Dash:
 
         cap = float(cap_pct) / 100 if cap_pct else None
 
-        index_level, weights_history, _, _ = build_index_series(
-            close=data.close,
-            constituents=constituents,
-            method=method,
-            start=start_date,
-            end=end_date,
-            rebalance_freq=rebalance,
-            lookback=int(lookback),
-            cap=cap,
-        )
-
-        if weights_history.empty:
-            return empty_fig(title="Monte Carlo Simulation"), html.Div("No weights.")
-
-        latest_weights = weights_history.iloc[-1]
         # Slice historical panel consistently with backtest window
         px_hist = data.close.copy()
         if start_date:
             px_hist = px_hist.loc[pd.to_datetime(start_date):]
         if end_date:
             px_hist = px_hist.loc[:pd.to_datetime(end_date)]
+
         # Safe defaults
-        num_sim = int(num_sim) if num_sim is not None else 100
+        num_sim = int(num_sim) if num_sim is not None else 1000
         horizon = int(horizon) if horizon is not None else 252
         lookback = int(lookback) if lookback is not None else 126
         vol_lb = int(vol_lb) if vol_lb is not None else 63
         max_lev = float(max_lev) if max_lev is not None else 2.0
         min_lev = float(min_lev) if min_lev is not None else 0.0
         target_vol_pct = float(target_vol_pct) if target_vol_pct is not None else 10.0
+        alpha = float(alpha) if alpha else 5.0
+        if mc_method == "gbm":
+            from index_lib.vectorization_utilities.mc_gbm_fast import run_monte_carlo_gbm_fast
 
-        results, final_vals = run_monte_carlo_simulation(
-            close=px_hist,   # assuming you fixed earlier slice issue
-            constituents=constituents,
-            method=method,
-            rebalance_freq=rebalance,
-            lookback=lookback,
-            cap=cap,
-            num_simulations=num_sim,
-            horizon_days=horizon,
-            vol_target_on=(vol_on == "on"),
-            target_vol_ann=target_vol_pct / 100.0,
-            vol_lookback=vol_lb,
-            max_leverage=max_lev,
-            min_leverage=min_lev,
-        )
+            results, final_vals = run_monte_carlo_gbm_fast(
+                close=px_hist,
+                constituents=constituents,
+                method=method,
+                rebalance_freq=rebalance,
+                lookback=lookback,
+                cap=cap,
+                num_simulations=num_sim,
+                horizon_days=horizon,
+                vol_target_on=(vol_on == "on"),
+                target_vol_ann=target_vol_pct / 100.0,
+                vol_lookback=vol_lb,
+                max_leverage=max_lev,
+                min_leverage=min_lev,
+                seed=42,
+                dtype=np.float32,
+            )
+        else:
+            from index_lib.vectorization_utilities.mc_block_bootstrap_fast import run_monte_carlo_block_bootstrap_fast
+
+            results, final_vals = run_monte_carlo_block_bootstrap_fast(
+                close=px_hist,
+                constituents=constituents,
+                method=method,
+                rebalance_freq=rebalance,
+                lookback=lookback,
+                cap=cap,
+                num_simulations=num_sim,
+                horizon_days=horizon,
+                block_len=20,
+                vol_target_on=(vol_on == "on"),
+                target_vol_ann=target_vol_pct / 100.0,
+                vol_lookback=vol_lb,
+                max_leverage=max_lev,
+                min_leverage=min_lev,
+                seed=42,
+                dtype=np.float32,
+            )
 
         mean_path = results.mean(axis=0)
 
-        alpha = float(alpha) if alpha else 5.0
         lower_q = alpha
         upper_q = 100 - alpha
 
-        p_low = np.percentile(results, lower_q, axis=0)
-        p_high = np.percentile(results, upper_q, axis=0)
+        # Subsample for bands (keeps plot quality, huge speedup for large num_sim)
+        band_sims = min(num_sim, 1500)
+        if num_sim > band_sims:
+            rng = np.random.default_rng(123)
+            sel = rng.choice(num_sim, size=band_sims, replace=False)
+            results_band = results[sel]
+        else:
+            results_band = results
 
-        best_idx = np.argmax(final_vals)
-        worst_idx = np.argmin(final_vals)
+        p_low = np.percentile(results_band, lower_q, axis=0)
+        p_high = np.percentile(results_band, upper_q, axis=0)
+
+        best_idx = int(np.argmax(final_vals))
+        worst_idx = int(np.argmin(final_vals))
+
+        x = np.arange(len(mean_path))
 
         fig = go.Figure()
-
-        fig.add_trace(go.Scatter(
-            x=np.arange(len(mean_path)),
-            y=p_high,
-            line=dict(width=0),
-            showlegend=False
-        ))
-
-        fig.add_trace(go.Scatter(
-            x=np.arange(len(mean_path)),
-            y=p_low,
-            fill="tonexty",
-            name=f"{lower_q:.1f}–{upper_q:.1f}% band",
-            opacity=0.25,
-        ))
-        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=mean_path, name="Mean", line=dict(width=3)))
-        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=results[best_idx], name="Best", line=dict(color="green", width=2)))
-        fig.add_trace(go.Scatter(x=np.arange(len(mean_path)), y=results[worst_idx], name="Worst", line=dict(color="red", width=2)))
+        fig.add_trace(go.Scatter(x=x, y=p_high, line=dict(width=0), showlegend=False))
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=p_low,
+                fill="tonexty",
+                name=f"{lower_q:.1f}–{upper_q:.1f}% band (n={len(results_band)})",
+                opacity=0.25,
+            )
+        )
+        fig.add_trace(go.Scatter(x=x, y=mean_path, name="Mean", line=dict(width=3)))
+        fig.add_trace(go.Scatter(x=x, y=results[best_idx], name="Best", line=dict(width=2)))
+        fig.add_trace(go.Scatter(x=x, y=results[worst_idx], name="Worst", line=dict(width=2)))
 
         fig.update_layout(
             title="Monte Carlo Simulation",
@@ -1523,9 +1557,9 @@ def build_app(data: UniverseData) -> Dash:
         )
 
         summary = html.Div([
-            html.Div(f"Median: {np.percentile(final_vals,50):.2f}x"),
-            html.Div(f"{lower_q:.1f}th pct: {np.percentile(final_vals,lower_q):.2f}x"),
-            html.Div(f"{upper_q:.1f}th pct: {np.percentile(final_vals,upper_q):.2f}x"),
+            html.Div(f"Median: {np.percentile(final_vals, 50):.2f}x"),
+            html.Div(f"{lower_q:.1f}th pct: {np.percentile(final_vals, lower_q):.2f}x"),
+            html.Div(f"{upper_q:.1f}th pct: {np.percentile(final_vals, upper_q):.2f}x"),
             html.Div(f"Worst: {final_vals[worst_idx]:.2f}x"),
             html.Div(f"Best: {final_vals[best_idx]:.2f}x"),
         ])
