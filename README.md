@@ -146,55 +146,50 @@ All paths are shown in **growth space (1.0 = start)**.
 
 ### Block Bootstrap
 
-Let daily historical returns be $r_t \in \mathbb{R}^N$.
+Let daily historical returns be $r_t$ in $R^N$.
 
-Blocks of length $L$ are sampled and concatenated to construct
-a horizon of length $H$:
+Blocks of length $L$ are sampled and concatenated to build a horizon of length $H$:
 
-$ \{ r_{t_1}, \dots, r_{t_1+L-1} \}, \{ r_{t_2}, \dots \} $
+$r_{t_1}, …, r_{t_1+L-1}, r_{t_2}, …$
 
-Portfolio returns:
+Portfolio return:
 
-$ R_t^{port} = w_t' r_t $
+$R_t^{port} = w_t^T r_t$
 
-where $w_t'$ denotes the transpose of the weight vector.
+Weights follow the same rebalance and daily drift rules as in the historical engine.
 
 ### Correlated GBM
 
 Log-returns:
 
-$ x_t = \log(1 + r_t) $
+$x_t = \log(1 + r_t)$
 
-Parameter estimates:
+Estimate:
 
-$ \mu = E[x_t], \quad \Sigma = Cov(x_t) $
+$\mu = E[x_t]$  
+$\Sigma = Cov(x_t)$
 
 Simulated log-returns:
 
-$ x_t^{sim} = (\mu - \tfrac{1}{2} diag(\Sigma)) + L z_t $
+$x_t^{sim} = (\mu - 0.5 \, diag(\Sigma)) + L z_t$
 
-where:
-
-- $z_t \sim N(0, I)$  
-- $L$ is the Cholesky factor of $\Sigma$
+where $z_t \sim N(0, I)$ and $L$ is the Cholesky factor of $\Sigma$.
 
 Arithmetic returns:
 
-$ r_t^{sim} = e^{x_t^{sim}} - 1 $
+$r_t^{sim} = \exp(x_t^{sim}) - 1$
 
 ### Volatility Target Overlay
 
-Leverage per path:
+Leverage:
 
-$ \lambda_t = \frac{\sigma^{target}}{\hat{\sigma}_{t-1}} $
+$\lambda_t = \sigma_{target} / \hat{\sigma}_{t-1}$
 
-Clipped to:
-
-$ \lambda_t \in [min\ leverage,\ max\ leverage] $
+Clipped to $[min\ leverage, max\ leverage]$
 
 Adjusted return:
 
-$ R_t^{VC} = \lambda_t R_t^{port} $
+$R_t^{VC} = \lambda_t R_t^{port}$
 
 </details>
 ---
