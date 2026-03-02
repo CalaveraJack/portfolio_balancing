@@ -97,8 +97,7 @@ This is the default method.
 #### 2) Correlated GBM
 
 Returns are generated from a multivariate Geometric Brownian Motion
-estimated from historical log-returns. This produces smooth,
-correlated stochastic paths based on estimated drift and covariance.
+estimated from historical log-returns. This produces correlated stochastic paths based on estimated drift and covariance.
 
 This method assumes approximate log-normal dynamics.
 
