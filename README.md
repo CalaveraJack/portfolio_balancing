@@ -6,9 +6,53 @@ This repository is maintained as part of a broader, practical research effort on
 
 ---
 
+## API setup (FRED rates data)
+
+The **Rates Inspector** tab relies on data from the Federal Reserve Economic Data (FRED) API.
+
+To use it, you must provide your own API key.
+
+### 1) Request an API key
+
+- Go to: https://fred.stlouisfed.org/
+- Create a free account
+- Generate an API key
+
+### 2) Create a `.env` file (IMPORTANT)
+
+In the project root, create a file:
+
+```bash
+.env
+```
+And add your key:
+
+```
+FRED_API_KEY=your_api_key_here
+```
+
+<div style="background:#1e73be;color:#ffffff;padding:12px 14px;border-radius:10px;line-height:1.35;">
+  <div style="font-size:16px;font-weight:700;margin-bottom:6px;">
+
+**⚠️ Security note**
+
+- .env is ignored via .gitignore and is not uploaded to GitHub
+
+- You must create your own .env locally
+
+- Never share your API key
+
+- Never commit your API key to version control
+
+- Treat your API key like a password.
+</div>
+</div>
+
+---
+
 ## Quick start (uv)
 
-### 1) Create environment + install deps
+### 1) After connecting FRED API, Create environment + install deps
 
 ```powershell
 uv venv
@@ -28,13 +72,51 @@ Open:
 
 ---
 
-
 ## What the app does
+
+### Rates Inspector (NEW)
+
+The **Rates Inspector tab** provides a clean interface to explore:
+
+- SOFR funding rate history  
+- US Treasury yield curve (full term structure)  
+- Curve snapshots and spread dynamics  
+
+
+📸 Rates Inspector:
+
+![Rates Inspector](docs/screenshots/rates_inspector.png)
+
+#### What you can analyze
+
+- Policy cycle (via SOFR)
+- Curve shape (inversion / steepening)
+- Term structure evolution over time
+- Spread behavior across maturities
+
+#### Important note
+
+⚠️ **Rates currently DO NOT affect index construction.**
+
+The rates module is:
+
+- a standalone analytical layer  
+- built for future integration  
+
+Planned next iteration:
+
+- funding-aware backtests  
+- leverage cost modelling  
+- macro overlay integration  
+
+At this stage, it is an **inspection and research tool**, not yet part of the portfolio engine.
 
 ### Universe Inspector
 - Pick a ticker
 - View price, returns histogram, drawdown
 - See compact stats (CAGR, vol, Sharpe, max drawdown)
+
+📸 Universe Inspector:
 
 ![Universe Inspector](docs/screenshots/universe_inspector.png)
 
@@ -193,6 +275,8 @@ $R_t^{VC} = \lambda_t R_t^{port}$
 
 ## Data + caching
 
+### Stock data
+
 <div style="background:#1e73be;color:#ffffff;padding:12px 14px;border-radius:10px;line-height:1.35;">
   <div style="font-size:16px;font-weight:700;margin-bottom:6px;">🧊 Yahoo Finance, with respect 🙏</div>
   We use <b>local caching</b>, <b>batching</b>, and small <b>delays</b> when downloading data — because we deeply respect the Yahoo Finance folks and don’t want to slow them down. 💙
@@ -200,6 +284,16 @@ $R_t^{VC} = \lambda_t R_t^{port}$
 
 - Loader: `index_lib.loaders.load_universe_close_volume_cached(...)`
 - Cache folder: `data/` (Parquet / metadata)
+
+### Rates data
+
+Rates are fetched from FRED and cached locally:
+
+- `data/rates_funding.parquet`
+- `data/rates_curve.parquet`
+- `data/rates_meta.json`
+
+The loader updates incrementally and avoids redundant API calls.
 
 ---
 
@@ -231,6 +325,31 @@ In `apply_vol_target_overlay()`:
 ---
 
 ## Version Log
+
+### 2026-03-18
+
+**Rates Inspector + FRED integration**
+
+- Added new Rates Inspector tab
+- Integrated FRED API for:
+  - SOFR funding rate
+  - US Treasury yield curve (1M → 30Y)
+- Implemented local caching (Parquet + metadata)
+- Added curve visualization:
+  - Funding history (step-based)
+  - Curve snapshot
+  - Curve history
+
+⚠️ Current limitation:  
+Rates are not yet integrated into index construction logic.
+
+This module is designed as a foundation for:
+
+- funding-aware backtests  
+- leverage cost modelling  
+- macro overlays  
+
+Next iteration will connect rates to portfolio mechanics.
 
 ### 2026-03-01
 **Community suggestion: Monte-Carlo simulation framework (optimized)**

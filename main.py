@@ -1,5 +1,6 @@
 from __future__ import annotations
-
+from dotenv import load_dotenv
+load_dotenv()
 # ============================================================================
 # Index Builder (Dash App)
 # - Universe Inspector: single-ticker stats + charts
@@ -16,7 +17,14 @@ import plotly.graph_objects as go  # type: ignore
 import plotly.io as pio  # type: ignore
 from dash import Dash, Input, Output, State, dash_table, dcc, html
 
-from index_lib.loaders import load_universe_close_volume_cached
+from index_lib.loaders import (
+    inspect_rates_cache,
+    load_rates_cached,
+    load_universe_close_volume_cached,
+    make_curve_history_figure,
+    make_curve_snapshot_figure,
+    make_funding_history_figure,
+)
 
 pio.templates.default = "ggplot2"
 
@@ -130,6 +138,23 @@ class UniverseData:
     close: pd.DataFrame
     volume: pd.DataFrame
 
+@dataclass(frozen=True)
+class RatesInspectorData:
+    """
+    Container for loaded rates data and cache metadata.
+
+    Attributes
+    ----------
+    funding:
+        DataFrame (date x series) of funding-rate history, e.g. USD_SOFR.
+    curve:
+        DataFrame (date x tenor) of Treasury curve history.
+    cache_info:
+        Dict returned by inspect_rates_cache().
+    """
+    funding: pd.DataFrame
+    curve: pd.DataFrame
+    cache_info: Dict[str, object]
 
 # ============================================================================
 # Helpers: formatting, stats, figures
@@ -382,7 +407,123 @@ def stats_table(stats: Dict[str, object], *, include_obs: bool = True) -> html.T
         children=[html.Tbody(rows)],
     )
 
+def tenor_sort_key(col: str) -> Tuple[int, float]:
+    """
+    Sort curve columns naturally: 1M, 3M, 6M, 1Y, 2Y, 5Y, 10Y, ...
+    """
+    tenor = col.split("_", 1)[1] if "_" in col else col
+    if tenor.endswith("M"):
+        return (0, float(tenor[:-1]))
+    if tenor.endswith("Y"):
+        return (1, float(tenor[:-1]))
+    return (99, 999.0)
 
+
+def compute_curve_spreads(curve: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute a few important Treasury curve spreads.
+
+    Returns columns where available:
+    - 2s10s
+    - 3m10y
+    - 5s30s
+    """
+    out = pd.DataFrame(index=curve.index)
+
+    if {"USD_10Y", "USD_2Y"}.issubset(curve.columns):
+        out["2s10s"] = curve["USD_10Y"] - curve["USD_2Y"]
+
+    if {"USD_10Y", "USD_3M"}.issubset(curve.columns):
+        out["3m10y"] = curve["USD_10Y"] - curve["USD_3M"]
+
+    if {"USD_30Y", "USD_5Y"}.issubset(curve.columns):
+        out["5s30s"] = curve["USD_30Y"] - curve["USD_5Y"]
+
+    return out
+
+
+def fmt_bp(x: object) -> str:
+    """
+    Format a number in percentage points as basis points string.
+    Example: 0.25 -> 25.0 bp
+    """
+    try:
+        if x is None or (isinstance(x, float) and np.isnan(x)):
+            return "-"
+        return f"{float(x) * 100:.1f} bp"
+    except Exception:
+        return str(x)
+
+
+def rates_stats_table(
+    funding: pd.DataFrame,
+    curve: pd.DataFrame,
+    cache_info: Dict[str, object],
+    *,
+    curve_date: Optional[str] = None,
+) -> html.Table:
+    """
+    Build a compact metadata/stats table for the Rates Inspector.
+    """
+    meta = cache_info.get("meta", {}) if isinstance(cache_info, dict) else {}
+
+    latest_funding_date = meta.get("latest_funding_fixing_date", "-")
+    latest_curve_date = meta.get("latest_curve_fixing_date", "-")
+    last_refresh_ts = meta.get("last_refresh_ts", "-")
+
+    sofr_latest = np.nan
+    if "USD_SOFR" in funding.columns:
+        s = funding["USD_SOFR"].dropna()
+        if not s.empty:
+            sofr_latest = float(s.iloc[-1])
+
+    spreads = compute_curve_spreads(curve)
+
+    selected_dt = pd.to_datetime(curve_date) if curve_date else None
+    if selected_dt is not None:
+        curve_aligned = curve.reindex(curve.index.union([selected_dt])).sort_index().ffill()
+        spreads_aligned = spreads.reindex(spreads.index.union([selected_dt])).sort_index().ffill()
+        curve_row = curve_aligned.loc[selected_dt] if not curve_aligned.empty else pd.Series(dtype=float)
+        spread_row = spreads_aligned.loc[selected_dt] if not spreads_aligned.empty else pd.Series(dtype=float)
+        selected_curve_date = str(selected_dt.date())
+    else:
+        curve_nonempty = curve.dropna(how="all")
+        spreads_nonempty = spreads.dropna(how="all")
+        curve_row = curve_nonempty.iloc[-1] if not curve_nonempty.empty else pd.Series(dtype=float)
+        spread_row = spreads_nonempty.iloc[-1] if not spreads_nonempty.empty else pd.Series(dtype=float)
+        selected_curve_date = str(curve_nonempty.index[-1].date()) if not curve_nonempty.empty else "-"
+
+    def _chg_20d(df: pd.DataFrame, col: str) -> float:
+        if col not in df.columns:
+            return np.nan
+        s = df[col].dropna()
+        if len(s) < 21:
+            return np.nan
+        return float(s.iloc[-1] - s.iloc[-21])
+
+    rows = [
+        html.Tr([html.Td("Source"), html.Td(str(meta.get("source", "FRED")))]),
+        html.Tr([html.Td("Last refresh"), html.Td(str(last_refresh_ts))]),
+        html.Tr([html.Td("Latest funding fixing"), html.Td(str(latest_funding_date))]),
+        html.Tr([html.Td("Latest curve fixing"), html.Td(str(latest_curve_date))]),
+        html.Tr([html.Td("Selected curve date"), html.Td(selected_curve_date)]),
+        html.Tr([html.Td("USD SOFR"), html.Td(f"{sofr_latest:.3f}%" if pd.notna(sofr_latest) else "-")]),
+        html.Tr([html.Td("2s10s"), html.Td(fmt_bp(spread_row.get("2s10s")))]),
+        html.Tr([html.Td("3m10y"), html.Td(fmt_bp(spread_row.get("3m10y")))]),
+        html.Tr([html.Td("5s30s"), html.Td(fmt_bp(spread_row.get("5s30s")))]),
+        html.Tr([html.Td("2s10s (20d chg)"), html.Td(fmt_bp(_chg_20d(spreads, "2s10s")))]),
+        html.Tr([html.Td("3m10y (20d chg)"), html.Td(fmt_bp(_chg_20d(spreads, "3m10y")))]),
+        html.Tr([html.Td("5s30s (20d chg)"), html.Td(fmt_bp(_chg_20d(spreads, "5s30s")))]),
+        html.Tr([html.Td("3M"), html.Td(f"{float(curve_row.get('USD_3M')):.3f}%" if pd.notna(curve_row.get("USD_3M")) else "-")]),
+        html.Tr([html.Td("2Y"), html.Td(f"{float(curve_row.get('USD_2Y')):.3f}%" if pd.notna(curve_row.get("USD_2Y")) else "-")]),
+        html.Tr([html.Td("10Y"), html.Td(f"{float(curve_row.get('USD_10Y')):.3f}%" if pd.notna(curve_row.get("USD_10Y")) else "-")]),
+        html.Tr([html.Td("30Y"), html.Td(f"{float(curve_row.get('USD_30Y')):.3f}%" if pd.notna(curve_row.get("USD_30Y")) else "-")]),
+    ]
+
+    return html.Table(
+        style={"borderCollapse": "collapse", "marginBottom": "10px"},
+        children=[html.Tbody(rows)],
+    )
 # ============================================================================
 # Index construction: rebalancing + weighting + optional overlays
 # ============================================================================
@@ -864,7 +1005,7 @@ def make_latest_weights_table(weights_history: pd.DataFrame) -> html.Div:
     )
 
 
-def build_app(data: UniverseData) -> Dash:
+def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     """
     Build the Dash app.
 
@@ -892,14 +1033,15 @@ def build_app(data: UniverseData) -> Dash:
         style={"maxWidth": "1250px", "margin": "0 auto", "padding": "12px"},
         children=[
             html.H2("Index Builder: Universe + Composer"),
-            dcc.Tabs(
-                id="tabs",
-                value="tab_inspector",
-                children=[
-                    dcc.Tab(label="Universe Inspector", value="tab_inspector"),
-                    dcc.Tab(label="Index Composer", value="tab_composer"),
-                ],
-            ),
+                dcc.Tabs(
+                    id="tabs",
+                    value="tab_rates",
+                    children=[
+                        dcc.Tab(label="Rates Inspector", value="tab_rates"),
+                        dcc.Tab(label="Universe Inspector", value="tab_inspector"),
+                        dcc.Tab(label="Index Composer", value="tab_composer"),
+                    ],
+                ),
             html.Div(id="tab_content"),
         ],
     )
@@ -909,6 +1051,55 @@ def build_app(data: UniverseData) -> Dash:
     # ------------------------------------------------------------------------
     @app.callback(Output("tab_content", "children"), Input("tabs", "value"))
     def render_tab(tab: str):
+        if tab == "tab_rates":
+            curve_cols = sorted(
+                [c for c in rates_data.curve.columns if c.startswith("USD_")],
+                key=tenor_sort_key,
+            )
+            default_curve_hist = [c for c in ["USD_3M", "USD_2Y", "USD_10Y", "USD_30Y"] if c in curve_cols]
+
+            latest_curve_date = None
+            curve_nonempty = rates_data.curve.dropna(how="all")
+            if not curve_nonempty.empty:
+                latest_curve_date = str(curve_nonempty.index.max().date())
+
+            return html.Div(
+                children=[
+                    html.H4("Rates Inspector"),
+                    html.Div(
+                        style={"display": "flex", "gap": "12px", "alignItems": "center", "flexWrap": "wrap"},
+                        children=[
+                            html.Div(
+                                children=[
+                                    html.Div("Curve snapshot date"),
+                                    dcc.DatePickerSingle(
+                                        id="rates_curve_date",
+                                        date=latest_curve_date,
+                                    ),
+                                ]
+                            ),
+                            html.Div(
+                                children=[
+                                    html.Div("Curve tenors"),
+                                    dcc.Dropdown(
+                                        id="rates_curve_cols",
+                                        options=[{"label": c, "value": c} for c in curve_cols],
+                                        value=default_curve_hist,
+                                        multi=True,
+                                        style={"width": "460px"},
+                                    ),
+                                ]
+                            ),
+                        ],
+                    ),
+                    html.Hr(),
+                    html.Div(id="rates_meta"),
+                    dcc.Graph(id="rates_funding_fig"),
+                    dcc.Graph(id="rates_curve_snapshot_fig"),
+                    dcc.Graph(id="rates_curve_history_fig"),
+                    dcc.Graph(id="rates_spread_fig"),
+                ]
+            )
         if tab == "tab_inspector":
             return html.Div(
                 children=[
@@ -1277,7 +1468,59 @@ def build_app(data: UniverseData) -> Dash:
         if method == "inv_vol":
             return False, base_style
         return True, {**base_style, "backgroundColor": "#f0f0f0", "color": "#777"}
+# ------------------------------------------------------------------------
+# Rates Inspector: update rates and charts
+# ------------------------------------------------------------------------
+    @app.callback(
+        Output("rates_meta", "children"),
+        Output("rates_funding_fig", "figure"),
+        Output("rates_curve_snapshot_fig", "figure"),
+        Output("rates_curve_history_fig", "figure"),
+        Output("rates_spread_fig", "figure"),
+        Input("rates_curve_date", "date"),
+        Input("rates_curve_cols", "value"),
+    )
+    def update_rates_inspector(curve_date: Optional[str], curve_cols: Optional[List[str]]):
+        funding = rates_data.funding.copy()
+        curve = rates_data.curve.copy()
+        cache_info = rates_data.cache_info
 
+        curve_cols = curve_cols or [c for c in ["USD_3M", "USD_2Y", "USD_10Y", "USD_30Y"] if c in curve.columns]
+
+        meta_tbl = rates_stats_table(
+            funding=funding,
+            curve=curve,
+            cache_info=cache_info,
+            curve_date=curve_date,
+        )
+
+        funding_fig = make_funding_history_figure(
+            funding,
+            columns=["USD_SOFR"],
+            title="USD Funding Rate History (SOFR)",
+        )
+
+        snapshot_fig = make_curve_snapshot_figure(
+            curve,
+            date=curve_date,
+            title="USD Treasury Curve Snapshot",
+        )
+
+        history_fig = make_curve_history_figure(
+            curve,
+            columns=curve_cols,
+            title="USD Treasury Curve History",
+        )
+
+        spreads = compute_curve_spreads(curve)
+        spread_cols = [c for c in ["2s10s", "3m10y", "5s30s"] if c in spreads.columns]
+        spread_fig = make_curve_history_figure(
+            spreads,
+            columns=spread_cols,
+            title="Curve Spread History",
+        )
+
+        return meta_tbl, funding_fig, snapshot_fig, history_fig, spread_fig
     # ------------------------------------------------------------------------
     # Inspector: update ticker stats + charts
     # ------------------------------------------------------------------------
@@ -1611,13 +1854,34 @@ def load_data(
     # The loader returns an object with .close and .volume; wrap explicitly for typing clarity.
     return UniverseData(close=data.close, volume=data.volume)
 
+def load_rates_data(
+    *,
+    start: str = "2022-01-01",
+    end: Optional[str] = None,
+    data_dir: str = "data",
+) -> RatesInspectorData:
+    """
+    Load cached USD rates data (funding + Treasury curve) and cache metadata.
+    """
+    rates = load_rates_cached(
+        start=start,
+        end=end,
+        data_dir=data_dir,
+    )
+    cache_info = inspect_rates_cache(data_dir=data_dir)
+    return RatesInspectorData(
+        funding=rates.funding,
+        curve=rates.curve,
+        cache_info=cache_info,
+    )
 
 def main() -> None:
     """
     Script entry point: load universe and run Dash server.
     """
     data = load_data(DEFAULT_UNIVERSE, start="2022-01-01", end=None, data_dir="data")
-    app = build_app(data)
+    rates_data = load_rates_data(start="2022-01-01", end=None, data_dir="data")
+    app = build_app(data, rates_data)
     app.run(debug=True, port=8050)
 
 
