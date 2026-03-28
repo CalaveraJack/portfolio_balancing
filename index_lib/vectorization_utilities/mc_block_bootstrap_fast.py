@@ -101,6 +101,7 @@ def run_monte_carlo_block_bootstrap_fast(
     vol_lookback: int,
     max_leverage: float,
     min_leverage: float,
+    funding_path: Optional[pd.DataFrame] = None,
     seed: int = 42,
     dtype=np.float32,
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -126,7 +127,15 @@ def run_monte_carlo_block_bootstrap_fast(
     R_hist = np.ascontiguousarray(rets_hist.to_numpy(dtype=dtype))  # (T,N)
     T, N = R_hist.shape
     S, H = int(num_simulations), int(horizon_days)
-
+    if funding_path is None or funding_path.empty:
+        cash_path = np.zeros(H, dtype=dtype)
+        borrow_path = np.zeros(H, dtype=dtype)
+    else:
+        fp = funding_path.copy().reset_index(drop=True)
+        if len(fp) != H:
+            raise ValueError(f"funding_path length {len(fp)} does not match horizon_days {H}")
+        cash_path = fp["cash_rate"].to_numpy(dtype=dtype)
+        borrow_path = fp["borrow_rate"].to_numpy(dtype=dtype)
     last_hist_date = rets_hist.index[-1]
     sim_dates = pd.bdate_range(start=last_hist_date + pd.Timedelta(days=1), periods=H)
 
@@ -206,16 +215,25 @@ def run_monte_carlo_block_bootstrap_fast(
             if pr_count < max(10, vlb // 3):
                 lev_vec = np.ones((S,), dtype=dtype)
             else:
-                x = pring[:, :pr_count] if pr_count < vlb else pring
-                m = x.mean(axis=1)
-                v = ((x - m[:, None]) ** 2).sum(axis=1) / max(1, (pr_count - 1))
-                std = np.sqrt(np.maximum(v, dtype(0.0)))
-                vol_ann = std * dtype(np.sqrt(252.0))
-                raw = dtype(target_vol_ann) / (vol_ann + dtype(1e-6))
-                lev_vec = np.clip(raw, dtype(min_leverage), dtype(max_leverage)).astype(dtype, copy=False)
-                lev_vec = np.where(np.isfinite(lev_vec), lev_vec, dtype(1.0)).astype(dtype, copy=False)
+                xw = pring[:, :pr_count] if pr_count < vlb else pring
+                m = xw.mean(axis=1)
+                v = ((xw - m[:, None]) ** 2).sum(axis=1) / max(xw.shape[1] - 1, 1)
+                vol_est = np.sqrt(np.maximum(v, 0.0)) * np.sqrt(dtype(252.0))
+                raw_lev = target_vol_ann / np.maximum(vol_est, eps)
+                lev_vec = np.clip(raw_lev, min_leverage, max_leverage).astype(dtype, copy=False)
 
-            port_used = lev_vec * port_t
+            cash_w = np.maximum(dtype(1.0) - lev_vec, dtype(0.0))
+            borrow_w = np.maximum(lev_vec - dtype(1.0), dtype(0.0))
+
+            port_used = (
+                lev_vec * port_t
+                + cash_w * cash_path[t]
+                - borrow_w * borrow_path[t]
+            ).astype(dtype, copy=False)
+
+            pring[:, pr_pos] = port_t
+            pr_pos = (pr_pos + 1) % vlb
+            pr_count = min(pr_count + 1, vlb)
         else:
             port_used = port_t
 

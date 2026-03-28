@@ -755,6 +755,37 @@ def apply_vol_target_overlay(
 
     return vc_returns, leverage, vol_est_ann, overlay_components
 
+def build_mc_funding_fixed_last(
+    funding_df: pd.DataFrame,
+    horizon_days: int,
+    *,
+    borrow_spread_ann: float,
+    day_count: int = 252,
+) -> pd.DataFrame:
+    """
+    Build a constant daily funding path for Monte Carlo using the last observed SOFR.
+
+    Returns a DataFrame with columns:
+    - cash_rate   : daily decimal cash carry
+    - borrow_rate : daily decimal borrowing cost
+    """
+    last_sofr = 0.0
+
+    if funding_df is not None and not funding_df.empty and "USD_SOFR" in funding_df.columns:
+        s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna()
+        if not s.empty:
+            last_sofr = float(s.iloc[-1])  # annualized percent, e.g. 4.0 for 4%
+
+    cash_daily = (last_sofr / 100.0) / float(day_count)
+    borrow_daily = ((last_sofr + float(borrow_spread_ann)) / 100.0) / float(day_count)
+
+    return pd.DataFrame(
+        {
+            "cash_rate": np.full(horizon_days, cash_daily, dtype=float),
+            "borrow_rate": np.full(horizon_days, borrow_daily, dtype=float),
+        },
+        index=pd.RangeIndex(horizon_days),
+    )
 def run_monte_carlo_simulation(
     close: pd.DataFrame,
     constituents: Sequence[str],
@@ -823,7 +854,7 @@ def run_monte_carlo_simulation(
 
         if vol_target_on:
             r_series = pd.Series(port_rets, index=sim_dates)
-            vc_returns, _, _ = apply_vol_target_overlay(
+            vc_returns, _, _, _ = apply_vol_target_overlay(
                 r_series,
                 target_vol_ann=target_vol_ann,
                 vol_lookback=vol_lookback,
@@ -1450,6 +1481,38 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                         ),
                         html.Div(
                             children=[
+                                html.Div("Funding model"),
+                                dcc.Dropdown(
+                                    id="mc_funding_model",
+                                    options=[
+                                        {"label": "Fixed to last", "value": "fixed_last"},
+                                        {"label": "Monte Carlo", "value": "mc"},
+                                    ],
+                                    value="fixed_last",
+                                    clearable=False,
+                                    style={"width": "180px"},
+                                ),
+                            ]
+                        ),
+                        html.Div(
+                            id="mc_funding_method_wrap",
+                            style={"display": "none"},
+                            children=[
+                                html.Div("Funding MC method"),
+                                dcc.Dropdown(
+                                    id="mc_funding_method",
+                                    options=[
+                                        {"label": "OU (for GBM)", "value": "ou"},
+                                        {"label": "Bootstrap (for block MC)", "value": "bootstrap"},
+                                    ],
+                                    value="ou",
+                                    clearable=False,
+                                    style={"width": "220px"},
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            children=[
                                 html.Div("VaR alpha (%)"),
                                 dcc.Input(
                                     id="mc_alpha",
@@ -1494,7 +1557,23 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         if vol_on == "on":
             return {"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "12px", "marginTop": "10px"}
         return {"display": "none"}
-
+    @app.callback(
+        Output("mc_funding_method_wrap", "style"),
+        Input("mc_funding_model", "value"),
+    )
+    def toggle_mc_funding_method(funding_model: str):
+        if funding_model == "mc":
+            return {"display": "block"}
+        return {"display": "none"}
+    @app.callback(
+        Output("mc_funding_method", "value"),
+        Input("mc_method", "value"),
+        prevent_initial_call=False,
+    )
+    def sync_mc_funding_method(mc_method: str):
+        if mc_method == "gbm":
+            return "ou"
+        return "bootstrap"
     @app.callback(
         Output("comp_lookback", "disabled"),
         Output("comp_lookback", "style"),
@@ -1769,7 +1848,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         State("comp_vol_lb", "value"),
         State("comp_max_lev", "value"),
         State("comp_min_lev", "value"),
+        State("comp_borrow_spread", "value"),
         State("mc_method", "value"),
+        State("mc_funding_model", "value"),
+        State("mc_funding_method", "value"),
         State("mc_num_sim", "value"),
         State("mc_horizon", "value"),
         State("mc_alpha", "value"),
@@ -1788,7 +1870,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         vol_lb,
         max_lev,
         min_lev,
+        borrow_spread_pct,
         mc_method,
+        funding_model,
+        funding_method,
         num_sim,
         horizon,
         alpha,
@@ -1815,6 +1900,18 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         min_lev = float(min_lev) if min_lev is not None else 0.0
         target_vol_pct = float(target_vol_pct) if target_vol_pct is not None else 10.0
         alpha = float(alpha) if alpha else 5.0
+
+        #Build the fixed funding path inside the function
+        borrow_spread_pct = float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
+        mc_funding_df = None
+        if vol_on == "on" and funding_model == "fixed_last":
+            mc_funding_df = build_mc_funding_fixed_last(
+                rates_data.funding,
+                horizon_days=horizon,
+                borrow_spread_ann=borrow_spread_pct,
+                day_count=252,
+            )
+
         if mc_method == "gbm":
             from index_lib.vectorization_utilities.mc_gbm_fast import run_monte_carlo_gbm_fast
 
@@ -1832,6 +1929,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 vol_lookback=vol_lb,
                 max_leverage=max_lev,
                 min_leverage=min_lev,
+                funding_path=mc_funding_df,
                 seed=42,
                 dtype=np.float32,
             )
@@ -1853,6 +1951,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 vol_lookback=vol_lb,
                 max_leverage=max_lev,
                 min_leverage=min_lev,
+                funding_path=mc_funding_df,
                 seed=42,
                 dtype=np.float32,
             )
