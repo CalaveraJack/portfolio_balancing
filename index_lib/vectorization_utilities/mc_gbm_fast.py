@@ -42,7 +42,8 @@ def run_monte_carlo_gbm_fast(
     vol_lookback: int,
     max_leverage: float,
     min_leverage: float,
-    funding_path: Optional[pd.DataFrame] = None,
+    cash_paths: Optional[np.ndarray] = None,
+    borrow_paths: Optional[np.ndarray] = None,
     seed: int = 42,
     dtype=np.float32,
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -85,15 +86,17 @@ def run_monte_carlo_gbm_fast(
 
     rng = np.random.default_rng(seed)
     S, H = int(num_simulations), int(horizon_days)
-    if funding_path is None or funding_path.empty:
-        cash_path = np.zeros(H, dtype=dtype)
-        borrow_path = np.zeros(H, dtype=dtype)
+    if cash_paths is None or borrow_paths is None:
+        cash_paths_arr = np.zeros((S, H), dtype=dtype)
+        borrow_paths_arr = np.zeros((S, H), dtype=dtype)
     else:
-        fp = funding_path.copy().reset_index(drop=True)
-        if len(fp) != H:
-            raise ValueError(f"funding_path length {len(fp)} does not match horizon_days {H}")
-        cash_path = fp["cash_rate"].to_numpy(dtype=dtype)
-        borrow_path = fp["borrow_rate"].to_numpy(dtype=dtype)
+        cash_paths_arr = np.asarray(cash_paths, dtype=dtype)
+        borrow_paths_arr = np.asarray(borrow_paths, dtype=dtype)
+
+        if cash_paths_arr.shape != (S, H):
+            raise ValueError(f"cash_paths shape {cash_paths_arr.shape} does not match {(S, H)}")
+        if borrow_paths_arr.shape != (S, H):
+            raise ValueError(f"borrow_paths shape {borrow_paths_arr.shape} does not match {(S, H)}")
     # Rebalance calendar (business days)
     last_hist_date = rets_hist.index[-1]
     sim_dates = pd.bdate_range(start=last_hist_date + pd.Timedelta(days=1), periods=H)
@@ -188,8 +191,8 @@ def run_monte_carlo_gbm_fast(
 
             port_used = (
                 lev_vec * port_t
-                + cash_w * cash_path[t]
-                - borrow_w * borrow_path[t]
+                + cash_w * cash_paths_arr[:, t]
+                - borrow_w * borrow_paths_arr[:, t]
             ).astype(dtype, copy=False)
 
             pring[:, pr_pos] = port_t

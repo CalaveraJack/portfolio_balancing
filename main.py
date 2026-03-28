@@ -16,6 +16,7 @@ import pandas as pd  # type: ignore
 import plotly.graph_objects as go  # type: ignore
 import plotly.io as pio  # type: ignore
 from dash import Dash, Input, Output, State, dash_table, dcc, html
+from index_lib.vectorization_utilities.mc_block_bootstrap_fast import block_bootstrap_indices
 
 from index_lib.loaders import (
     build_daily_funding_series,
@@ -755,37 +756,200 @@ def apply_vol_target_overlay(
 
     return vc_returns, leverage, vol_est_ann, overlay_components
 
-def build_mc_funding_fixed_last(
+def build_mc_funding_fixed_last_matrix(
     funding_df: pd.DataFrame,
+    num_simulations: int,
     horizon_days: int,
     *,
     borrow_spread_ann: float,
     day_count: int = 252,
-) -> pd.DataFrame:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Build a constant daily funding path for Monte Carlo using the last observed SOFR.
+    Build constant funding paths for Monte Carlo using the last observed SOFR.
 
-    Returns a DataFrame with columns:
-    - cash_rate   : daily decimal cash carry
-    - borrow_rate : daily decimal borrowing cost
+    Returns
+    -------
+    rate_paths   : (S,H) annualized decimal short rates
+    cash_paths   : (S,H) daily decimal cash carry
+    borrow_paths : (S,H) daily decimal borrowing cost
     """
     last_sofr = 0.0
 
     if funding_df is not None and not funding_df.empty and "USD_SOFR" in funding_df.columns:
         s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna()
         if not s.empty:
-            last_sofr = float(s.iloc[-1])  # annualized percent, e.g. 4.0 for 4%
+            last_sofr = float(s.iloc[-1]) / 100.0  # annualized decimal
 
-    cash_daily = (last_sofr / 100.0) / float(day_count)
-    borrow_daily = ((last_sofr + float(borrow_spread_ann)) / 100.0) / float(day_count)
+    rate_paths = np.full((num_simulations, horizon_days), last_sofr, dtype=float)
+    cash_paths = rate_paths / float(day_count)
+    borrow_paths = (rate_paths + float(borrow_spread_ann) / 100.0) / float(day_count)
 
-    return pd.DataFrame(
-        {
-            "cash_rate": np.full(horizon_days, cash_daily, dtype=float),
-            "borrow_rate": np.full(horizon_days, borrow_daily, dtype=float),
-        },
-        index=pd.RangeIndex(horizon_days),
+    return rate_paths, cash_paths, borrow_paths
+
+
+def estimate_ou_params_from_sofr(
+    funding_df: pd.DataFrame,
+) -> Tuple[float, float, float]:
+    """
+    Estimate discrete-time OU/AR(1)-style parameters from USD_SOFR.
+
+    Returns
+    -------
+    kappa : mean reversion speed
+    theta : long-run mean (annualized decimal)
+    sigma : innovation std (annualized-decimal space, daily step)
+    """
+    if funding_df is None or funding_df.empty or "USD_SOFR" not in funding_df.columns:
+        return 0.05, 0.0, 0.0
+
+    s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna() / 100.0
+    if len(s) < 20:
+        theta = float(s.iloc[-1]) if not s.empty else 0.0
+        return 0.05, theta, 0.0
+
+    x = s.iloc[:-1].to_numpy(dtype=float)
+    y = s.iloc[1:].to_numpy(dtype=float)
+
+    A = np.column_stack([np.ones_like(x), x])
+    beta, *_ = np.linalg.lstsq(A, y, rcond=None)
+    a, b = float(beta[0]), float(beta[1])
+
+    b = min(max(b, 1e-6), 0.9999)
+    kappa = 1.0 - b
+    theta = a / (1.0 - b) if abs(1.0 - b) > 1e-10 else float(s.mean())
+
+    resid = y - (a + b * x)
+    sigma = float(np.std(resid, ddof=1)) if len(resid) > 1 else 0.0
+
+    return float(kappa), float(theta), float(sigma)
+
+
+def simulate_ou_funding_paths(
+    funding_df: pd.DataFrame,
+    num_simulations: int,
+    horizon_days: int,
+    *,
+    borrow_spread_ann: float,
+    seed: int = 42,
+    day_count: int = 252,
+    floor_rate_ann: float = -0.02,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Simulate OU funding paths.
+
+    Returns
+    -------
+    rate_paths   : (S,H) annualized decimal short rates
+    cash_paths   : (S,H) daily decimal cash carry
+    borrow_paths : (S,H) daily decimal borrowing cost
+    """
+    if funding_df is None or funding_df.empty or "USD_SOFR" not in funding_df.columns:
+        return build_mc_funding_fixed_last_matrix(
+            funding_df,
+            num_simulations,
+            horizon_days,
+            borrow_spread_ann=borrow_spread_ann,
+            day_count=day_count,
+        )
+
+    s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna() / 100.0
+    if s.empty:
+        return build_mc_funding_fixed_last_matrix(
+            funding_df,
+            num_simulations,
+            horizon_days,
+            borrow_spread_ann=borrow_spread_ann,
+            day_count=day_count,
+        )
+
+    r0 = float(s.iloc[-1])
+    kappa, theta, sigma = estimate_ou_params_from_sofr(funding_df)
+
+    rng = np.random.default_rng(seed)
+    rate_paths = np.empty((num_simulations, horizon_days), dtype=float)
+
+    prev = np.full(num_simulations, r0, dtype=float)
+    for t in range(horizon_days):
+        eps = rng.standard_normal(num_simulations)
+        nxt = prev + kappa * (theta - prev) + sigma * eps
+        nxt = np.maximum(nxt, floor_rate_ann)
+        rate_paths[:, t] = nxt
+        prev = nxt
+
+    cash_paths = rate_paths / float(day_count)
+    borrow_paths = (rate_paths + float(borrow_spread_ann) / 100.0) / float(day_count)
+
+    return rate_paths, cash_paths, borrow_paths
+
+
+def simulate_bootstrap_funding_paths(
+    funding_df: pd.DataFrame,
+    num_simulations: int,
+    horizon_days: int,
+    *,
+    borrow_spread_ann: float,
+    block_len: int = 20,
+    seed: int = 42,
+    day_count: int = 252,
+    floor_rate_ann: float = -0.02,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Simulate funding paths by block-bootstrapping daily SOFR changes.
+
+    Returns
+    -------
+    rate_paths   : (S,H) annualized decimal short rates
+    cash_paths   : (S,H) daily decimal cash carry
+    borrow_paths : (S,H) daily decimal borrowing cost
+    """
+    if funding_df is None or funding_df.empty or "USD_SOFR" not in funding_df.columns:
+        return build_mc_funding_fixed_last_matrix(
+            funding_df,
+            num_simulations,
+            horizon_days,
+            borrow_spread_ann=borrow_spread_ann,
+            day_count=day_count,
+        )
+
+    s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna() / 100.0
+    if len(s) < 5:
+        return build_mc_funding_fixed_last_matrix(
+            funding_df,
+            num_simulations,
+            horizon_days,
+            borrow_spread_ann=borrow_spread_ann,
+            day_count=day_count,
+        )
+
+    dr = s.diff().dropna()
+    if dr.empty:
+        return build_mc_funding_fixed_last_matrix(
+            funding_df,
+            num_simulations,
+            horizon_days,
+            borrow_spread_ann=borrow_spread_ann,
+            day_count=day_count,
+        )
+
+    idx = block_bootstrap_indices(
+        len(dr),
+        num_simulations=num_simulations,
+        horizon_days=horizon_days,
+        block_len=block_len,
+        seed=seed,
     )
+
+    sampled_dr = dr.to_numpy(dtype=float)[idx]   # (S,H)
+    r0 = float(s.iloc[-1])
+
+    rate_paths = r0 + np.cumsum(sampled_dr, axis=1)
+    rate_paths = np.maximum(rate_paths, floor_rate_ann)
+
+    cash_paths = rate_paths / float(day_count)
+    borrow_paths = (rate_paths + float(borrow_spread_ann) / 100.0) / float(day_count)
+
+    return rate_paths, cash_paths, borrow_paths
+
 def run_monte_carlo_simulation(
     close: pd.DataFrame,
     constituents: Sequence[str],
@@ -1434,6 +1598,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     ],
                 ),
                 html.Hr(),
+                dcc.Store(id="mc_funding_store"),
                 html.H4("Monte Carlo Simulation"),
                 html.Div(
                     style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"},
@@ -1502,8 +1667,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                 dcc.Dropdown(
                                     id="mc_funding_method",
                                     options=[
-                                        {"label": "OU (for GBM)", "value": "ou"},
-                                        {"label": "Bootstrap (for block MC)", "value": "bootstrap"},
+                                        {"label": "OU", "value": "ou"},
+                                        {"label": "Bootstrap", "value": "bootstrap"},
                                     ],
                                     value="ou",
                                     clearable=False,
@@ -1542,6 +1707,32 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                         html.Div(id="mc_summary"),
                     ],
                 ),
+                html.Details(
+                    open=False,
+                    style={"marginTop": "8px"},
+                    children=[
+                        html.Summary("Monte Carlo Funding Path Inspector", style={"cursor": "pointer", "fontWeight": "600"}),
+                        html.Div(
+                            style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end", "marginTop": "8px"},
+                            children=[
+                                html.Div(
+                                    children=[
+                                        html.Div("Funding path id"),
+                                        dcc.Input(
+                                            id="mc_funding_path_id",
+                                            type="number",
+                                            value=0,
+                                            min=0,
+                                            step=1,
+                                            style={"width": "140px"},
+                                        ),
+                                    ]
+                                ),
+                            ],
+                        ),
+                        dcc.Graph(id="mc_funding_fig"),
+                    ],
+                )
             ]
         )
 
@@ -1565,15 +1756,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         if funding_model == "mc":
             return {"display": "block"}
         return {"display": "none"}
-    @app.callback(
-        Output("mc_funding_method", "value"),
-        Input("mc_method", "value"),
-        prevent_initial_call=False,
-    )
-    def sync_mc_funding_method(mc_method: str):
-        if mc_method == "gbm":
-            return "ou"
-        return "bootstrap"
+    
     @app.callback(
         Output("comp_lookback", "disabled"),
         Output("comp_lookback", "style"),
@@ -1835,7 +2018,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     @app.callback(
         Output("mc_fig", "figure"),
         Output("mc_summary", "children"),
+        Output("mc_funding_store", "data"),
         Input("mc_button", "n_clicks"),
+        State("mc_funding_path_id", "value"),
         State("comp_constituents", "value"),
         State("comp_method", "value"),
         State("comp_rebalance", "value"),
@@ -1858,6 +2043,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     )
     def run_mc(
         n_clicks,
+        funding_path_id,
         constituents,
         method,
         rebalance,
@@ -1880,7 +2066,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     ):
 
         if n_clicks == 0:
-            return empty_fig(title="Monte Carlo Simulation"), html.Div("-")
+            return (
+                empty_fig(title="Monte Carlo Simulation"),
+                html.Div("-"),
+                None,
+            )
 
         cap = float(cap_pct) / 100 if cap_pct else None
 
@@ -1901,17 +2091,44 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         target_vol_pct = float(target_vol_pct) if target_vol_pct is not None else 10.0
         alpha = float(alpha) if alpha else 5.0
 
-        #Build the fixed funding path inside the function
         borrow_spread_pct = float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
-        mc_funding_df = None
-        if vol_on == "on" and funding_model == "fixed_last":
-            mc_funding_df = build_mc_funding_fixed_last(
-                rates_data.funding,
-                horizon_days=horizon,
-                borrow_spread_ann=borrow_spread_pct,
-                day_count=252,
-            )
 
+        rate_paths = None
+        cash_paths = None
+        borrow_paths = None
+
+        if vol_on == "on":
+            if funding_model == "fixed_last":
+                rate_paths, cash_paths, borrow_paths = build_mc_funding_fixed_last_matrix(
+                    rates_data.funding,
+                    num_simulations=num_sim,
+                    horizon_days=horizon,
+                    borrow_spread_ann=borrow_spread_pct,
+                    day_count=252,
+                )
+            elif funding_model == "mc":
+                if funding_method == "ou":
+                    rate_paths, cash_paths, borrow_paths = simulate_ou_funding_paths(
+                        rates_data.funding,
+                        num_simulations=num_sim,
+                        horizon_days=horizon,
+                        borrow_spread_ann=borrow_spread_pct,
+                        seed=42,
+                        day_count=252,
+                    )
+                elif funding_method == "bootstrap":
+                    rate_paths, cash_paths, borrow_paths = simulate_bootstrap_funding_paths(
+                        rates_data.funding,
+                        num_simulations=num_sim,
+                        horizon_days=horizon,
+                        borrow_spread_ann=borrow_spread_pct,
+                        block_len=20,
+                        seed=42,
+                        day_count=252,
+                    )
+                else:
+                    raise ValueError(f"Unknown funding_method: {funding_method}")
+            
         if mc_method == "gbm":
             from index_lib.vectorization_utilities.mc_gbm_fast import run_monte_carlo_gbm_fast
 
@@ -1929,7 +2146,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 vol_lookback=vol_lb,
                 max_leverage=max_lev,
                 min_leverage=min_lev,
-                funding_path=mc_funding_df,
+                cash_paths=cash_paths,
+                borrow_paths=borrow_paths,
                 seed=42,
                 dtype=np.float32,
             )
@@ -1951,7 +2169,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 vol_lookback=vol_lb,
                 max_leverage=max_lev,
                 min_leverage=min_lev,
-                funding_path=mc_funding_df,
+                cash_paths=cash_paths,
+                borrow_paths=borrow_paths,
                 seed=42,
                 dtype=np.float32,
             )
@@ -2001,6 +2220,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         )
 
         summary = html.Div([
+            html.Div(f"Funding: {funding_model}" + (f" / {funding_method}" if funding_model == "mc" else "")),
             html.Div(f"Median: {np.percentile(final_vals, 50):.2f}x"),
             html.Div(f"{lower_q:.1f}th pct: {np.percentile(final_vals, lower_q):.2f}x"),
             html.Div(f"{upper_q:.1f}th pct: {np.percentile(final_vals, upper_q):.2f}x"),
@@ -2008,7 +2228,75 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             html.Div(f"Best: {final_vals[best_idx]:.2f}x"),
         ])
 
-        return fig, summary
+        funding_store_data = None
+
+        if rate_paths is not None:
+            funding_store_data = {
+                "rate_paths": rate_paths.tolist(),
+            }
+
+        return fig, summary, funding_store_data
+    @app.callback(
+        Output("mc_funding_fig", "figure"),
+        Input("mc_funding_store", "data"),
+        Input("mc_funding_path_id", "value"),
+    )
+    def update_mc_funding_fig(funding_store_data, funding_path_id):
+        if not funding_store_data or "rate_paths" not in funding_store_data:
+            return empty_fig(title="Monte Carlo Funding Paths", height=360)
+
+        rate_paths = np.asarray(funding_store_data["rate_paths"], dtype=float)
+        if rate_paths.ndim != 2 or rate_paths.shape[0] == 0 or rate_paths.shape[1] == 0:
+            return empty_fig(title="Monte Carlo Funding Paths", height=360)
+
+        funding_path_id = int(funding_path_id) if funding_path_id is not None else 0
+        funding_path_id = max(0, funding_path_id)
+        path_idx = min(funding_path_id, rate_paths.shape[0] - 1)
+
+        x_f = np.arange(rate_paths.shape[1])
+        fig = go.Figure()
+
+        display_n = min(rate_paths.shape[0], 100)
+
+        for i in range(display_n):
+            fig.add_trace(
+                go.Scatter(
+                    x=x_f,
+                    y=rate_paths[i] * 100.0,
+                    mode="lines",
+                    name=f"path {i}",
+                    opacity=0.15,
+                    showlegend=False,
+                )
+            )
+
+        fig.add_trace(
+            go.Scatter(
+                x=x_f,
+                y=rate_paths[path_idx] * 100.0,
+                mode="lines",
+                name=f"Selected path {path_idx}",
+                line=dict(width=3),
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=x_f,
+                y=rate_paths.mean(axis=0) * 100.0,
+                mode="lines",
+                name="Mean funding path",
+                line=dict(width=2, dash="dash"),
+            )
+        )
+
+        fig.update_layout(
+            title="Monte Carlo Funding Paths (annualized short rate, %)",
+            xaxis_title="Trading Days",
+            yaxis_title="Rate (%)",
+            height=360,
+        )
+        return fig
     return app
 
 
