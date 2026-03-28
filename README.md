@@ -3,10 +3,7 @@
 A minimal Dash app to **inspect a ticker universe** and **compose research-grade indices**  
 (equal-weight / price-weight / inverse-vol), with an optional **funding-aware volatility targeting overlay**.
 
-This repository is part of a broader, practical research effort on:
-
-> **digitalization capacities in finance** —  
-> how fast we can go from **market data → transparent rules → reproducible index prototypes**
+This repository is part of a broader, practical research effort on **digitalization capacities in finance**
 
 ---
 
@@ -359,7 +356,4 @@ Equal-weight correction
 
 # 🧠 Notes
 
-This is a **research prototype**:
-
-- clarity > abstraction  
-- speed > perfection  
+This is a **research prototype**: iterative process will be conducted to bring practical applicability.
