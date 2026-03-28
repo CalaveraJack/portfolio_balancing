@@ -217,11 +217,6 @@ def run_monte_carlo_gbm_fast(
             ring_pos = (ring_pos + 1) % lb
             ring_count = min(lb, ring_count + 1)
 
-        # update vol-target ring with BASE return (no look-ahead)
-        if vol_target_on:
-            pring[:, pr_pos] = port_t
-            pr_pos = (pr_pos + 1) % vlb
-            pr_count = min(vlb, pr_count + 1)
 
     final_values = levels[:, -1].astype(np.float64, copy=False)
     return levels, final_values
