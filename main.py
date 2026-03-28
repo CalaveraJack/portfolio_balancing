@@ -18,6 +18,7 @@ import plotly.io as pio  # type: ignore
 from dash import Dash, Input, Output, State, dash_table, dcc, html
 
 from index_lib.loaders import (
+    build_daily_funding_series,
     inspect_rates_cache,
     load_rates_cached,
     load_universe_close_volume_cached,
@@ -683,39 +684,29 @@ def apply_vol_target_overlay(
     vol_lookback: int = 63,
     max_leverage: float = 2.0,
     min_leverage: float = 0.0,
-) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    funding_rates: Optional[pd.DataFrame] = None,
+) -> Tuple[pd.Series, pd.Series, pd.Series, pd.DataFrame]:
     """
     Apply a vol-target overlay to a base return stream.
 
-    Mechanic
-    --------
-    - Estimate realized vol from trailing returns up to t-1 (shifted by 1 day).
-    - Set leverage λ_t = target_vol / realized_vol_est_t, clipped to [min_leverage, max_leverage].
-    - Return_t = λ_t * base_return_t.
+    If funding_rates is provided, expected columns are:
+    - cash_rate   : daily decimal cash carry
+    - borrow_rate : daily decimal borrowing cost
 
-    Inputs
-    ------
-    base_returns:
-        Series of daily returns (date index).
-    target_vol_ann:
-        Target annualized volatility (e.g. 0.10 for 10% p.a.).
-    vol_lookback:
-        Lookback window (in trading days) for realized vol estimate.
-    max_leverage / min_leverage:
-        Clamp leverage.
-
-    Returns
-    -------
-    vc_returns:
-        Vol-controlled daily returns.
-    leverage:
-        Daily leverage λ_t.
-    vol_est_ann:
-        Annualized realized vol estimate used for λ_t (shifted, no look-ahead).
+    Funded overlay return:
+        vc_return_t =
+            leverage_t * base_return_t
+            + max(1 - leverage_t, 0) * cash_rate_t
+            - max(leverage_t - 1, 0) * borrow_rate_t
     """
     r = base_returns.dropna().astype(float)
     if r.empty:
-        return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
+        return (
+            pd.Series(dtype=float),
+            pd.Series(dtype=float),
+            pd.Series(dtype=float),
+            pd.DataFrame(),
+        )
 
     minp = max(10, vol_lookback // 3)
     vol_est_ann = r.rolling(vol_lookback, min_periods=minp).std(ddof=1) * math.sqrt(252.0)
@@ -725,11 +716,44 @@ def apply_vol_target_overlay(
     raw = target_vol_ann / (vol_est_ann.replace(0.0, np.nan) + eps)
     leverage = raw.clip(lower=min_leverage, upper=max_leverage).fillna(1.0)
 
-    vc_returns = (leverage * r).rename("vc_return")
+    if funding_rates is None or funding_rates.empty:
+        cash_rate = pd.Series(0.0, index=r.index, name="cash_rate")
+        borrow_rate = pd.Series(0.0, index=r.index, name="borrow_rate")
+    else:
+        fr = funding_rates.reindex(r.index).copy()
+        cash_rate = pd.to_numeric(fr.get("cash_rate"), errors="coerce").fillna(0.0).rename("cash_rate")
+        borrow_rate = pd.to_numeric(fr.get("borrow_rate"), errors="coerce").fillna(0.0).rename("borrow_rate")
+
+    cash_weight = (1.0 - leverage).clip(lower=0.0).rename("cash_weight")
+    borrowed_weight = (leverage - 1.0).clip(lower=0.0).rename("borrowed_weight")
+
+    risky_leg = (leverage * r).rename("risky_leg_return")
+    cash_leg = (cash_weight * cash_rate).rename("cash_leg_return")
+    borrow_cost = (borrowed_weight * borrow_rate).rename("borrow_cost_return")
+
+    vc_returns = (risky_leg + cash_leg - borrow_cost).rename("vc_return")
+
     leverage = leverage.rename("leverage")
     vol_est_ann = vol_est_ann.rename("vol_est_ann")
 
-    return vc_returns, leverage, vol_est_ann
+    overlay_components = pd.concat(
+        [
+            r.rename("base_return"),
+            leverage,
+            vol_est_ann,
+            cash_rate,
+            borrow_rate,
+            cash_weight,
+            borrowed_weight,
+            risky_leg,
+            cash_leg,
+            borrow_cost,
+            vc_returns,
+        ],
+        axis=1,
+    )
+
+    return vc_returns, leverage, vol_est_ann, overlay_components
 
 def run_monte_carlo_simulation(
     close: pd.DataFrame,
@@ -1332,6 +1356,19 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                         ),
                                                     ]
                                                 ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Borrow spread (% p.a.)"),
+                                                        dcc.Input(
+                                                            id="comp_borrow_spread",
+                                                            type="number",
+                                                            value=1.0,
+                                                            min=0.0,
+                                                            step=0.1,
+                                                            style={"width": "140px"},
+                                                        ),
+                                                    ]
+                                                ),
                                             ],
                                         )
                                     ],
@@ -1577,6 +1614,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         Input("comp_vol_lb", "value"),
         Input("comp_max_lev", "value"),
         Input("comp_min_lev", "value"),
+        Input("comp_borrow_spread", "value"),
     )
     def update_composer(
         constituents: List[str],
@@ -1591,6 +1629,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         vol_lb: Optional[int],
         max_lev: Optional[float],
         min_lev: Optional[float],
+        borrow_spread_pct: Optional[float],
     ):
         constituents = constituents or []
 
@@ -1610,8 +1649,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             base_level=100.0,
         )
 
-        lev_fig = empty_fig()
-        vol_fig = empty_fig()
+        lev_fig = empty_fig(title="Vol Overlay Exposure", height=260)
+        vol_fig = empty_fig(title="Vol Estimate + Funding Rates", height=260)
 
         if index_level.empty:
             return (
@@ -1629,28 +1668,91 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             lb = int(vol_lb) if vol_lb else 63
             mx = float(max_lev) if max_lev is not None else 2.0
             mn = float(min_lev) if min_lev is not None else 0.0
+            borrow_spread = float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
 
-            vc_returns, leverage, vol_est_ann = apply_vol_target_overlay(
+            funding_daily = build_daily_funding_series(
+                funding_df=rates_data.funding,
+                index=base_returns.index,
+                borrow_spread_ann=borrow_spread,
+                day_count=252,
+            )
+            vc_returns, leverage, vol_est_ann, overlay_df = apply_vol_target_overlay(
                 base_returns,
                 target_vol_ann=tgt,
                 vol_lookback=lb,
                 max_leverage=mx,
                 min_leverage=mn,
+                funding_rates=funding_daily,
             )
 
             index_level = ((1.0 + vc_returns.fillna(0.0)).cumprod() * 100.0).rename("index_level")
-            lev_fig = make_line_fig("Leverage (λ)", leverage, "x", height=260)
-            vol_fig = make_line_fig("Realized vol est. (ann.)", vol_est_ann, "vol p.a.", height=260)
+            lev_fig = go.Figure()
+            lev_fig.add_trace(go.Scatter(
+                x=overlay_df.index, y=overlay_df["leverage"],
+                mode="lines", name="Leverage (λ)"
+            ))
+            lev_fig.add_trace(go.Scatter(
+                x=overlay_df.index, y=overlay_df["borrowed_weight"],
+                mode="lines", name="Borrowed sleeve (>1x)"
+            ))
+            lev_fig.add_trace(go.Scatter(
+                x=overlay_df.index, y=overlay_df["cash_weight"],
+                mode="lines", name="Cash sleeve (<1x)"
+            ))
+            lev_fig.update_layout(
+                title="Vol Overlay Exposure",
+                xaxis_title="Date",
+                yaxis_title="Weight / x",
+                height=260,
+                margin=dict(l=60, r=40, t=50, b=40),
+            )
+            vol_fig = go.Figure()
+            vol_fig.add_trace(go.Scatter(
+                x=overlay_df.index, y=overlay_df["vol_est_ann"],
+                mode="lines", name="Realized vol est. (ann.)"
+            ))
+            vol_fig.add_trace(go.Scatter(
+                x=overlay_df.index, y=overlay_df["cash_rate"] * 252.0,
+                mode="lines", name="SOFR cash rate (ann. approx)"
+            ))
+            vol_fig.add_trace(go.Scatter(
+                x=overlay_df.index, y=overlay_df["borrow_rate"] * 252.0,
+                mode="lines", name="Borrow rate (ann. approx)"
+            ))
+            vol_fig.update_layout(
+                title="Vol Estimate + Funding Rates",
+                xaxis_title="Date",
+                yaxis_title="Annualized level",
+                height=260,
+                margin=dict(l=60, r=40, t=50, b=40),
+            )
 
         fig_index = make_line_fig("Index Level", index_level, "Index level", height=320)
         fig_weights = make_weight_fig(daily_wh, "Constituent Weights (Top 20)", top_n=20, height=360)
 
         stats = compute_stats_from_price_series(index_level)
         stats_tbl = stats_table(stats, include_obs=False)
+        extra_stats = None
+        if vol_on == "on":
+            total_borrow_drag = float(overlay_df["borrow_cost_return"].sum()) if "borrow_cost_return" in overlay_df.columns else 0.0
+            avg_leverage = float(overlay_df["leverage"].mean()) if "leverage" in overlay_df.columns else float("nan")
+            avg_cash_rate = float((overlay_df["cash_rate"] * 252.0).mean()) if "cash_rate" in overlay_df.columns else float("nan")
+            avg_borrow_rate = float((overlay_df["borrow_rate"] * 252.0).mean()) if "borrow_rate" in overlay_df.columns else float("nan")
 
+            extra_stats = html.Table(
+                style={"borderCollapse": "collapse", "marginTop": "10px"},
+                children=[html.Tbody([
+                    html.Tr([html.Td("Avg leverage"), html.Td(fmt_num(avg_leverage))]),
+                    html.Tr([html.Td("Avg SOFR cash rate"), html.Td(fmt_pct(avg_cash_rate))]),
+                    html.Tr([html.Td("Avg borrow rate"), html.Td(fmt_pct(avg_borrow_rate))]),
+                    html.Tr([html.Td("Cum. borrow drag"), html.Td(f"{total_borrow_drag * 100:.4f}%")]),
+                ])],
+            )
+
+        stats_block = html.Div([stats_tbl] + ([extra_stats] if extra_stats is not None else []))
         weights_tbl = make_latest_weights_table(weights_history)
 
-        return fig_index, fig_weights, lev_fig, vol_fig, stats_tbl, weights_tbl
+        return fig_index, fig_weights, lev_fig, vol_fig, stats_block, weights_tbl
     @app.callback(
         Output("mc_fig", "figure"),
         Output("mc_summary", "children"),
