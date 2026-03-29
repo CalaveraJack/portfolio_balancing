@@ -283,10 +283,9 @@ $$
 
 ## Funding-aware overlay
 
-$$ R_t^{VC} =
-\lambda_t R_t^{port}
-+ \max(1-\lambda_t,0) r_t^{cash}
-- \max(\lambda_t-1,0) r_t^{borrow} $$
+$$
+R_t^{VC} = \lambda_t R_t^{port} + \max(1-\lambda_t,0) r_t^{cash} - \max(\lambda_t-1,0) r_t^{borrow}
+$$
 
 ---
 
