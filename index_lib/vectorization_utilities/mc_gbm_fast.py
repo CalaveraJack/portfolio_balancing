@@ -46,6 +46,7 @@ def run_monte_carlo_gbm_fast(
     min_leverage: float,
     cash_paths: Optional[np.ndarray] = None,
     borrow_paths: Optional[np.ndarray] = None,
+    market_caps: Optional[np.ndarray] = None,
     seed: int = 42,
     dtype=np.float32,
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -153,33 +154,33 @@ def run_monte_carlo_gbm_fast(
         x = drift_d[None, :] + z @ L_d.T  # (S,N)
         rt = np.expm1(x).astype(dtype, copy=False)  # (S,N) arithmetic returns
 
-        # rebalance weights at start of day t
         if rb[t]:
             if method == "equal":
                 w[:] = dtype(1.0 / N)
-
             elif method == "price_weight":
                 ssum = px_rel.sum(axis=1, keepdims=True)
                 w = np.divide(px_rel, ssum, out=np.zeros_like(px_rel), where=ssum > eps)
-
             elif method == "inv_vol":
                 if ring_count < max(10, lb // 3):
                     w[:] = dtype(1.0 / N)
                 else:
                     xw = ring[:, :ring_count, :] if ring_count < lb else ring
                     m = xw.mean(axis=1)
-                    v = ((xw - m[:, None, :]) ** 2).sum(axis=1) / max(
-                        1, (ring_count - 1)
-                    )
+                    v = ((xw - m[:, None, :]) ** 2).sum(axis=1) / max(1, (ring_count - 1))
                     std = np.sqrt(np.maximum(v, dtype(0.0)))
-                    inv = np.divide(
-                        dtype(1.0), std, out=np.zeros_like(std), where=std > eps
-                    )
+                    inv = np.divide(dtype(1.0), std, out=np.zeros_like(std), where=std > eps)
                     inv_sum = inv.sum(axis=1, keepdims=True)
-                    w = np.divide(
-                        inv, inv_sum, out=np.zeros_like(inv), where=inv_sum > eps
-                    )
-
+                    w = np.divide(inv, inv_sum, out=np.zeros_like(inv), where=inv_sum > eps)
+            elif method == "cap_weight":
+                if market_caps is not None:
+                    if market_caps.ndim == 3:
+                        caps_t = market_caps[:, t, :]
+                    else:
+                        caps_t = market_caps
+                    caps_sum = caps_t.sum(axis=1, keepdims=True)
+                    w = np.divide(caps_t, caps_sum, out=np.zeros_like(caps_t), where=caps_sum > eps)
+                else:
+                    w[:] = dtype(1.0 / N)
             else:
                 raise ValueError(f"Unknown method: {method}")
 
