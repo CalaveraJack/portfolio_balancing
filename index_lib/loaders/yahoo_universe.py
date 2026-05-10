@@ -53,8 +53,12 @@ def _write_universe_manifest(
         "outputs": {
             "close_shape": list(result.close.shape),
             "volume_shape": list(result.volume.shape),
-            "min_date": str(result.close.index.min().date()) if not result.close.empty else None,
-            "max_date": str(result.close.index.max().date()) if not result.close.empty else None,
+            "min_date": str(result.close.index.min().date())
+            if not result.close.empty
+            else None,
+            "max_date": str(result.close.index.max().date())
+            if not result.close.empty
+            else None,
         },
         "coverage_close_nonnull_frac": coverage,
         "errors": errors,
@@ -75,20 +79,34 @@ def load_universe_close_volume_cached(
     data_dir: str = "data",
     chunk_size: int = 50,
     sleep_s: float = 0.4,
+    use_cache_only: bool = False,  # NEW parameter
 ) -> YahooOHLCV:
     """
-    Chunked universe loader on top of the wide-cache approach in yahoo_cache.py.
-
-    It calls load_close_volume_cached() repeatedly in chunks (optional delay),
-    then does a final call for the full set to return aligned DataFrames.
-
-    NOTE: Because the underlying cache is wide panels (one parquet for all tickers),
-    each chunk call updates the same cache files incrementally.
+    Chunked universe loader with cache-only fallback.
     """
     tickers_list = [str(t).strip().upper() for t in tickers if str(t).strip()]
     tickers_list = sorted(dict.fromkeys(tickers_list))
 
     errors: dict[str, str] = {}
+
+    # Check if we have cached data first
+    if use_cache_only:
+        print("[universe] Cache-only mode: skipping API calls")
+        try:
+            out = load_close_volume_cached(
+                tickers=tickers_list,
+                start=start,
+                end=end,
+                period=period,
+                interval=interval,
+                auto_adjust=auto_adjust,
+                data_dir=data_dir,
+                use_cache_only=True,
+            )
+            return out
+        except Exception as e:
+            print(f"[universe] Failed to load from cache: {e}")
+            raise
 
     for i, batch in enumerate(_chunks(tickers_list, chunk_size), start=1):
         try:
@@ -100,22 +118,40 @@ def load_universe_close_volume_cached(
                 interval=interval,
                 auto_adjust=auto_adjust,
                 data_dir=data_dir,
+                use_cache_only=False,
             )
         except Exception as e:
             errors[f"chunk_{i}"] = repr(e)
+            print(f"[universe] WARNING: Chunk {i} failed: {e}")
 
         if sleep_s > 0 and i * chunk_size < len(tickers_list):
             time.sleep(sleep_s)
 
-    out = load_close_volume_cached(
-        tickers=tickers_list,
-        start=start,
-        end=end,
-        period=period,
-        interval=interval,
-        auto_adjust=auto_adjust,
-        data_dir=data_dir,
-    )
+    try:
+        out = load_close_volume_cached(
+            tickers=tickers_list,
+            start=start,
+            end=end,
+            period=period,
+            interval=interval,
+            auto_adjust=auto_adjust,
+            data_dir=data_dir,
+            use_cache_only=False,
+        )
+    except Exception as e:
+        print(f"[universe] Final load failed: {e}")
+        # Try cache-only as fallback
+        print("[universe] Attempting cache-only fallback...")
+        out = load_close_volume_cached(
+            tickers=tickers_list,
+            start=start,
+            end=end,
+            period=period,
+            interval=interval,
+            auto_adjust=auto_adjust,
+            data_dir=data_dir,
+            use_cache_only=True,
+        )
 
     manifest_path = _write_universe_manifest(
         data_dir=data_dir,

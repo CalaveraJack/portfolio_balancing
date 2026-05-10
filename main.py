@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dotenv import load_dotenv
+
 load_dotenv()
 # ============================================================================
 # Index Builder (Dash App)
@@ -16,7 +17,9 @@ import pandas as pd  # type: ignore
 import plotly.graph_objects as go  # type: ignore
 import plotly.io as pio  # type: ignore
 from dash import Dash, Input, Output, State, dash_table, dcc, html
-from index_lib.vectorization_utilities.mc_block_bootstrap_fast import block_bootstrap_indices
+from index_lib.vectorization_utilities.mc_block_bootstrap_fast import (
+    block_bootstrap_indices,
+)
 
 from index_lib.loaders import (
     build_daily_funding_series,
@@ -34,7 +37,18 @@ pio.templates.default = "ggplot2"
 # Universe definitions
 # ============================================================================
 
-BASE_10: List[str] = ["AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "AVGO", "BRK-B", "JPM", "TSLA"]
+BASE_10: List[str] = [
+    "AAPL",
+    "MSFT",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "NVDA",
+    "AVGO",
+    "BRK-B",
+    "JPM",
+    "TSLA",
+]
 
 PLUS_20: List[str] = [
     # Benchmarks / diversifiers
@@ -125,6 +139,7 @@ DEFAULT_UNIVERSE: List[str] = PHARMA_48
 # Types
 # ============================================================================
 
+
 @dataclass(frozen=True)
 class UniverseData:
     """
@@ -137,8 +152,10 @@ class UniverseData:
     volume:
         DataFrame (date x ticker) of volume (unused by this app but returned by loader).
     """
+
     close: pd.DataFrame
     volume: pd.DataFrame
+
 
 @dataclass(frozen=True)
 class RatesInspectorData:
@@ -154,13 +171,16 @@ class RatesInspectorData:
     cache_info:
         Dict returned by inspect_rates_cache().
     """
+
     funding: pd.DataFrame
     curve: pd.DataFrame
     cache_info: Dict[str, object]
 
+
 # ============================================================================
 # Helpers: formatting, stats, figures
 # ============================================================================
+
 
 def compute_stats_from_price_series(px: pd.Series) -> Dict[str, object]:
     """
@@ -205,7 +225,11 @@ def compute_stats_from_price_series(px: pd.Series) -> Dict[str, object]:
 
     total_return = float(px.iloc[-1] / px.iloc[0] - 1.0)
     years = n_days / 252.0
-    cagr = float((1.0 + total_return) ** (1.0 / years) - 1.0) if years > 0 else float("nan")
+    cagr = (
+        float((1.0 + total_return) ** (1.0 / years) - 1.0)
+        if years > 0
+        else float("nan")
+    )
 
     vol_ann = float(rets.std(ddof=1) * math.sqrt(252.0))
     mean_ann = float(rets.mean() * 252.0)
@@ -270,7 +294,9 @@ def fmt_num(x: object) -> str:
         return str(x)
 
 
-def make_line_fig(title: str, s: pd.Series, y_title: str, *, height: int = 320) -> go.Figure:
+def make_line_fig(
+    title: str, s: pd.Series, y_title: str, *, height: int = 320
+) -> go.Figure:
     """
     Create a simple Plotly line chart.
 
@@ -301,7 +327,9 @@ def make_line_fig(title: str, s: pd.Series, y_title: str, *, height: int = 320) 
     return fig
 
 
-def make_hist_fig(title: str, x: np.ndarray, x_title: str, *, height: int = 260) -> go.Figure:
+def make_hist_fig(
+    title: str, x: np.ndarray, x_title: str, *, height: int = 260
+) -> go.Figure:
     """
     Create a histogram figure.
 
@@ -332,7 +360,9 @@ def make_hist_fig(title: str, x: np.ndarray, x_title: str, *, height: int = 260)
     return fig
 
 
-def make_weight_fig(daily_weights: pd.DataFrame, title: str, top_n: int = 20, *, height: int = 360) -> go.Figure:
+def make_weight_fig(
+    daily_weights: pd.DataFrame, title: str, top_n: int = 20, *, height: int = 360
+) -> go.Figure:
     """
     Plot drifted daily weights (top N by mean weight).
 
@@ -353,14 +383,18 @@ def make_weight_fig(daily_weights: pd.DataFrame, title: str, top_n: int = 20, *,
     """
     if daily_weights is None or daily_weights.empty:
         fig = go.Figure()
-        fig.update_layout(title=title, height=height, margin=dict(l=30, r=20, t=40, b=30))
+        fig.update_layout(
+            title=title, height=height, margin=dict(l=30, r=20, t=40, b=30)
+        )
         return fig
 
     top = daily_weights.mean().sort_values(ascending=False).head(top_n).index
 
     fig = go.Figure()
     for t in top:
-        fig.add_trace(go.Scatter(x=daily_weights.index, y=daily_weights[t], mode="lines", name=t))
+        fig.add_trace(
+            go.Scatter(x=daily_weights.index, y=daily_weights[t], mode="lines", name=t)
+        )
 
     fig.update_layout(
         title=title,
@@ -392,15 +426,28 @@ def stats_table(stats: Dict[str, object], *, include_obs: bool = True) -> html.T
         html.Tr([html.Td("Max date"), html.Td(stats.get("max_date", "-"))]),
     ]
     if include_obs:
-        rows.append(html.Tr([html.Td("Obs (returns)"), html.Td(str(stats.get("n_obs_returns", "-")))]))
+        rows.append(
+            html.Tr(
+                [
+                    html.Td("Obs (returns)"),
+                    html.Td(str(stats.get("n_obs_returns", "-"))),
+                ]
+            )
+        )
 
     rows.extend(
         [
-            html.Tr([html.Td("Total return"), html.Td(fmt_pct(stats.get("total_return")))]),
+            html.Tr(
+                [html.Td("Total return"), html.Td(fmt_pct(stats.get("total_return")))]
+            ),
             html.Tr([html.Td("CAGR"), html.Td(fmt_pct(stats.get("cagr")))]),
             html.Tr([html.Td("Ann. vol"), html.Td(fmt_pct(stats.get("vol_ann")))]),
-            html.Tr([html.Td("Sharpe (rf=0)"), html.Td(fmt_num(stats.get("sharpe_0rf")))]),
-            html.Tr([html.Td("Max drawdown"), html.Td(fmt_pct(stats.get("max_drawdown")))]),
+            html.Tr(
+                [html.Td("Sharpe (rf=0)"), html.Td(fmt_num(stats.get("sharpe_0rf")))]
+            ),
+            html.Tr(
+                [html.Td("Max drawdown"), html.Td(fmt_pct(stats.get("max_drawdown")))]
+            ),
         ]
     )
 
@@ -408,6 +455,7 @@ def stats_table(stats: Dict[str, object], *, include_obs: bool = True) -> html.T
         style={"borderCollapse": "collapse", "marginBottom": "10px"},
         children=[html.Tbody(rows)],
     )
+
 
 def tenor_sort_key(col: str) -> Tuple[int, float]:
     """
@@ -483,17 +531,39 @@ def rates_stats_table(
 
     selected_dt = pd.to_datetime(curve_date) if curve_date else None
     if selected_dt is not None:
-        curve_aligned = curve.reindex(curve.index.union([selected_dt])).sort_index().ffill()
-        spreads_aligned = spreads.reindex(spreads.index.union([selected_dt])).sort_index().ffill()
-        curve_row = curve_aligned.loc[selected_dt] if not curve_aligned.empty else pd.Series(dtype=float)
-        spread_row = spreads_aligned.loc[selected_dt] if not spreads_aligned.empty else pd.Series(dtype=float)
+        curve_aligned = (
+            curve.reindex(curve.index.union([selected_dt])).sort_index().ffill()
+        )
+        spreads_aligned = (
+            spreads.reindex(spreads.index.union([selected_dt])).sort_index().ffill()
+        )
+        curve_row = (
+            curve_aligned.loc[selected_dt]
+            if not curve_aligned.empty
+            else pd.Series(dtype=float)
+        )
+        spread_row = (
+            spreads_aligned.loc[selected_dt]
+            if not spreads_aligned.empty
+            else pd.Series(dtype=float)
+        )
         selected_curve_date = str(selected_dt.date())
     else:
         curve_nonempty = curve.dropna(how="all")
         spreads_nonempty = spreads.dropna(how="all")
-        curve_row = curve_nonempty.iloc[-1] if not curve_nonempty.empty else pd.Series(dtype=float)
-        spread_row = spreads_nonempty.iloc[-1] if not spreads_nonempty.empty else pd.Series(dtype=float)
-        selected_curve_date = str(curve_nonempty.index[-1].date()) if not curve_nonempty.empty else "-"
+        curve_row = (
+            curve_nonempty.iloc[-1]
+            if not curve_nonempty.empty
+            else pd.Series(dtype=float)
+        )
+        spread_row = (
+            spreads_nonempty.iloc[-1]
+            if not spreads_nonempty.empty
+            else pd.Series(dtype=float)
+        )
+        selected_curve_date = (
+            str(curve_nonempty.index[-1].date()) if not curve_nonempty.empty else "-"
+        )
 
     def _chg_20d(df: pd.DataFrame, col: str) -> float:
         if col not in df.columns:
@@ -509,26 +579,76 @@ def rates_stats_table(
         html.Tr([html.Td("Latest funding fixing"), html.Td(str(latest_funding_date))]),
         html.Tr([html.Td("Latest curve fixing"), html.Td(str(latest_curve_date))]),
         html.Tr([html.Td("Selected curve date"), html.Td(selected_curve_date)]),
-        html.Tr([html.Td("USD SOFR"), html.Td(f"{sofr_latest:.3f}%" if pd.notna(sofr_latest) else "-")]),
+        html.Tr(
+            [
+                html.Td("USD SOFR"),
+                html.Td(f"{sofr_latest:.3f}%" if pd.notna(sofr_latest) else "-"),
+            ]
+        ),
         html.Tr([html.Td("2s10s"), html.Td(fmt_bp(spread_row.get("2s10s")))]),
         html.Tr([html.Td("3m10y"), html.Td(fmt_bp(spread_row.get("3m10y")))]),
         html.Tr([html.Td("5s30s"), html.Td(fmt_bp(spread_row.get("5s30s")))]),
-        html.Tr([html.Td("2s10s (20d chg)"), html.Td(fmt_bp(_chg_20d(spreads, "2s10s")))]),
-        html.Tr([html.Td("3m10y (20d chg)"), html.Td(fmt_bp(_chg_20d(spreads, "3m10y")))]),
-        html.Tr([html.Td("5s30s (20d chg)"), html.Td(fmt_bp(_chg_20d(spreads, "5s30s")))]),
-        html.Tr([html.Td("3M"), html.Td(f"{float(curve_row.get('USD_3M')):.3f}%" if pd.notna(curve_row.get("USD_3M")) else "-")]),
-        html.Tr([html.Td("2Y"), html.Td(f"{float(curve_row.get('USD_2Y')):.3f}%" if pd.notna(curve_row.get("USD_2Y")) else "-")]),
-        html.Tr([html.Td("10Y"), html.Td(f"{float(curve_row.get('USD_10Y')):.3f}%" if pd.notna(curve_row.get("USD_10Y")) else "-")]),
-        html.Tr([html.Td("30Y"), html.Td(f"{float(curve_row.get('USD_30Y')):.3f}%" if pd.notna(curve_row.get("USD_30Y")) else "-")]),
+        html.Tr(
+            [html.Td("2s10s (20d chg)"), html.Td(fmt_bp(_chg_20d(spreads, "2s10s")))]
+        ),
+        html.Tr(
+            [html.Td("3m10y (20d chg)"), html.Td(fmt_bp(_chg_20d(spreads, "3m10y")))]
+        ),
+        html.Tr(
+            [html.Td("5s30s (20d chg)"), html.Td(fmt_bp(_chg_20d(spreads, "5s30s")))]
+        ),
+        html.Tr(
+            [
+                html.Td("3M"),
+                html.Td(
+                    f"{float(curve_row.get('USD_3M')):.3f}%"
+                    if pd.notna(curve_row.get("USD_3M"))
+                    else "-"
+                ),
+            ]
+        ),
+        html.Tr(
+            [
+                html.Td("2Y"),
+                html.Td(
+                    f"{float(curve_row.get('USD_2Y')):.3f}%"
+                    if pd.notna(curve_row.get("USD_2Y"))
+                    else "-"
+                ),
+            ]
+        ),
+        html.Tr(
+            [
+                html.Td("10Y"),
+                html.Td(
+                    f"{float(curve_row.get('USD_10Y')):.3f}%"
+                    if pd.notna(curve_row.get("USD_10Y"))
+                    else "-"
+                ),
+            ]
+        ),
+        html.Tr(
+            [
+                html.Td("30Y"),
+                html.Td(
+                    f"{float(curve_row.get('USD_30Y')):.3f}%"
+                    if pd.notna(curve_row.get("USD_30Y"))
+                    else "-"
+                ),
+            ]
+        ),
     ]
 
     return html.Table(
         style={"borderCollapse": "collapse", "marginBottom": "10px"},
         children=[html.Tbody(rows)],
     )
+
+
 # ============================================================================
 # Index construction: rebalancing + weighting + optional overlays
 # ============================================================================
+
 
 def rebalance_dates(idx: pd.DatetimeIndex, freq: str) -> pd.DatetimeIndex:
     """
@@ -563,7 +683,9 @@ def rebalance_dates(idx: pd.DatetimeIndex, freq: str) -> pd.DatetimeIndex:
     return idx  # daily
 
 
-def apply_weight_cap(weights: pd.Series, cap: float, *, max_iter: int = 20) -> pd.Series:
+def apply_weight_cap(
+    weights: pd.Series, cap: float, *, max_iter: int = 20
+) -> pd.Series:
     """
     Cap weights at `cap` and redistribute the excess to uncapped names proportionally.
 
@@ -673,7 +795,11 @@ def compute_weights(
     if cap is not None:
         w = apply_weight_cap(w, float(cap))
     else:
-        w = (w.clip(lower=0) / float(w.sum())) if float(w.sum()) > 0 else pd.Series(dtype=float)
+        w = (
+            (w.clip(lower=0) / float(w.sum()))
+            if float(w.sum()) > 0
+            else pd.Series(dtype=float)
+        )
 
     return w
 
@@ -710,7 +836,9 @@ def apply_vol_target_overlay(
         )
 
     minp = max(10, vol_lookback // 3)
-    vol_est_ann = r.rolling(vol_lookback, min_periods=minp).std(ddof=1) * math.sqrt(252.0)
+    vol_est_ann = r.rolling(vol_lookback, min_periods=minp).std(ddof=1) * math.sqrt(
+        252.0
+    )
     vol_est_ann = vol_est_ann.shift(1)  # no look-ahead
 
     eps = 1e-12
@@ -722,8 +850,16 @@ def apply_vol_target_overlay(
         borrow_rate = pd.Series(0.0, index=r.index, name="borrow_rate")
     else:
         fr = funding_rates.reindex(r.index).copy()
-        cash_rate = pd.to_numeric(fr.get("cash_rate"), errors="coerce").fillna(0.0).rename("cash_rate")
-        borrow_rate = pd.to_numeric(fr.get("borrow_rate"), errors="coerce").fillna(0.0).rename("borrow_rate")
+        cash_rate = (
+            pd.to_numeric(fr.get("cash_rate"), errors="coerce")
+            .fillna(0.0)
+            .rename("cash_rate")
+        )
+        borrow_rate = (
+            pd.to_numeric(fr.get("borrow_rate"), errors="coerce")
+            .fillna(0.0)
+            .rename("borrow_rate")
+        )
 
     cash_weight = (1.0 - leverage).clip(lower=0.0).rename("cash_weight")
     borrowed_weight = (leverage - 1.0).clip(lower=0.0).rename("borrowed_weight")
@@ -756,6 +892,7 @@ def apply_vol_target_overlay(
 
     return vc_returns, leverage, vol_est_ann, overlay_components
 
+
 def build_mc_funding_fixed_last_matrix(
     funding_df: pd.DataFrame,
     num_simulations: int,
@@ -775,7 +912,11 @@ def build_mc_funding_fixed_last_matrix(
     """
     last_sofr = 0.0
 
-    if funding_df is not None and not funding_df.empty and "USD_SOFR" in funding_df.columns:
+    if (
+        funding_df is not None
+        and not funding_df.empty
+        and "USD_SOFR" in funding_df.columns
+    ):
         s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna()
         if not s.empty:
             last_sofr = float(s.iloc[-1]) / 100.0  # annualized decimal
@@ -939,7 +1080,7 @@ def simulate_bootstrap_funding_paths(
         seed=seed,
     )
 
-    sampled_dr = dr.to_numpy(dtype=float)[idx]   # (S,H)
+    sampled_dr = dr.to_numpy(dtype=float)[idx]  # (S,H)
     r0 = float(s.iloc[-1])
 
     rate_paths = r0 + np.cumsum(sampled_dr, axis=1)
@@ -949,6 +1090,7 @@ def simulate_bootstrap_funding_paths(
     borrow_paths = (rate_paths + float(borrow_spread_ann) / 100.0) / float(day_count)
 
     return rate_paths, cash_paths, borrow_paths
+
 
 def run_monte_carlo_simulation(
     close: pd.DataFrame,
@@ -966,7 +1108,6 @@ def run_monte_carlo_simulation(
     max_leverage: float,
     min_leverage: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
-
     px_hist = close[constituents].dropna(how="all")
     returns_hist = px_hist.pct_change().dropna()
 
@@ -980,27 +1121,18 @@ def run_monte_carlo_simulation(
     # Create synthetic future trading dates starting after last historical date
     last_hist_date = px_hist.index[-1]
     sim_dates = pd.bdate_range(
-        start=last_hist_date + pd.Timedelta(days=1),
-        periods=horizon_days
+        start=last_hist_date + pd.Timedelta(days=1), periods=horizon_days
     )
     np.random.seed(42)
     results = np.zeros((num_simulations, horizon_days))
 
     for i in range(num_simulations):
-
-        simulated_rets = np.random.multivariate_normal(
-            mean_vec,
-            cov_mat,
-            horizon_days
-        )
+        simulated_rets = np.random.multivariate_normal(mean_vec, cov_mat, horizon_days)
 
         price_paths = np.cumprod(1 + simulated_rets, axis=0)
         price_paths = price_paths * last_prices  # scale by real last prices
 
-        sim_prices = pd.DataFrame(
-            price_paths,
-            columns=tickers
-        )
+        sim_prices = pd.DataFrame(price_paths, columns=tickers)
         sim_prices.index = sim_dates
         sim_index, _, base_returns, _ = build_index_series(
             close=sim_prices,
@@ -1032,6 +1164,7 @@ def run_monte_carlo_simulation(
     final_values = results[:, -1]
 
     return results, final_values
+
 
 def build_index_series(
     close: pd.DataFrame,
@@ -1094,7 +1227,12 @@ def build_index_series(
 
     px = px.dropna(how="all")
     if px.empty or px.shape[1] == 0:
-        return pd.Series(dtype=float), pd.DataFrame(), pd.Series(dtype=float), pd.DataFrame()
+        return (
+            pd.Series(dtype=float),
+            pd.DataFrame(),
+            pd.Series(dtype=float),
+            pd.DataFrame(),
+        )
 
     rets = px.pct_change()
     rb_dates = rebalance_dates(px.index, rebalance_freq).intersection(px.index)
@@ -1149,7 +1287,7 @@ def build_index_series(
 
         # record
         base_ret_list.append((dt, base_r))
-        level *= (1.0 + base_r)
+        level *= 1.0 + base_r
         levels.append((dt, level))
         daily_weights_records.append((dt, w_drift))
 
@@ -1159,12 +1297,18 @@ def build_index_series(
     daily_wh = pd.DataFrame({dt: s for dt, s in daily_weights_records}).T.fillna(0.0)
     daily_wh.index.name = "date"
 
-    index_level = pd.Series([v for _, v in levels], index=[d for d, _ in levels], name="index_level")
+    index_level = pd.Series(
+        [v for _, v in levels], index=[d for d, _ in levels], name="index_level"
+    )
 
     weights_history = pd.DataFrame(weights_hist).T.sort_index().fillna(0.0)
     weights_history.index.name = "rebalance_date"
 
-    base_returns = pd.Series([v for _, v in base_ret_list], index=[d for d, _ in base_ret_list], name="base_return")
+    base_returns = pd.Series(
+        [v for _, v in base_ret_list],
+        index=[d for d, _ in base_ret_list],
+        name="base_return",
+    )
 
     return index_level, weights_history, base_returns, daily_wh
 
@@ -1172,6 +1316,7 @@ def build_index_series(
 # ============================================================================
 # Dash app: layout + callbacks
 # ============================================================================
+
 
 def empty_fig(*, title: str = "—", height: int = 260) -> go.Figure:
     """
@@ -1217,7 +1362,10 @@ def make_latest_weights_table(weights_history: pd.DataFrame) -> html.Div:
 
     return dash_table.DataTable(
         data=w_df.to_dict("records"),
-        columns=[{"name": "Ticker", "id": "Ticker"}, {"name": "Weight (%)", "id": "Weight"}],
+        columns=[
+            {"name": "Ticker", "id": "Ticker"},
+            {"name": "Weight (%)", "id": "Weight"},
+        ],
         page_size=12,
         style_table={"overflowX": "auto"},
         style_cell={"padding": "6px", "fontFamily": "sans-serif", "fontSize": "12px"},
@@ -1241,7 +1389,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     if not available:
         raise RuntimeError("No tickers loaded. Check Yahoo download / cache.")
 
-    default_pick = [t for t in ["LLY", "NVO", "JNJ", "PFE", "MRK", "ABBV"] if t in available]
+    default_pick = [
+        t for t in ["LLY", "NVO", "JNJ", "PFE", "MRK", "ABBV"] if t in available
+    ]
     if not default_pick:
         default_pick = available[:6]
 
@@ -1252,15 +1402,15 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         style={"maxWidth": "1250px", "margin": "0 auto", "padding": "12px"},
         children=[
             html.H2("Index Builder: Universe + Composer"),
-                dcc.Tabs(
-                    id="tabs",
-                    value="tab_rates",
-                    children=[
-                        dcc.Tab(label="Rates Inspector", value="tab_rates"),
-                        dcc.Tab(label="Universe Inspector", value="tab_inspector"),
-                        dcc.Tab(label="Index Composer", value="tab_composer"),
-                    ],
-                ),
+            dcc.Tabs(
+                id="tabs",
+                value="tab_rates",
+                children=[
+                    dcc.Tab(label="Rates Inspector", value="tab_rates"),
+                    dcc.Tab(label="Universe Inspector", value="tab_inspector"),
+                    dcc.Tab(label="Index Composer", value="tab_composer"),
+                ],
+            ),
             html.Div(id="tab_content"),
         ],
     )
@@ -1275,7 +1425,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 [c for c in rates_data.curve.columns if c.startswith("USD_")],
                 key=tenor_sort_key,
             )
-            default_curve_hist = [c for c in ["USD_3M", "USD_2Y", "USD_10Y", "USD_30Y"] if c in curve_cols]
+            default_curve_hist = [
+                c for c in ["USD_3M", "USD_2Y", "USD_10Y", "USD_30Y"] if c in curve_cols
+            ]
 
             latest_curve_date = None
             curve_nonempty = rates_data.curve.dropna(how="all")
@@ -1286,7 +1438,12 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 children=[
                     html.H4("Rates Inspector"),
                     html.Div(
-                        style={"display": "flex", "gap": "12px", "alignItems": "center", "flexWrap": "wrap"},
+                        style={
+                            "display": "flex",
+                            "gap": "12px",
+                            "alignItems": "center",
+                            "flexWrap": "wrap",
+                        },
                         children=[
                             html.Div(
                                 children=[
@@ -1302,7 +1459,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                     html.Div("Curve tenors"),
                                     dcc.Dropdown(
                                         id="rates_curve_cols",
-                                        options=[{"label": c, "value": c} for c in curve_cols],
+                                        options=[
+                                            {"label": c, "value": c} for c in curve_cols
+                                        ],
                                         value=default_curve_hist,
                                         multi=True,
                                         style={"width": "460px"},
@@ -1324,14 +1483,21 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 children=[
                     html.H4("Universe Inspector"),
                     html.Div(
-                        style={"display": "flex", "gap": "12px", "alignItems": "center", "flexWrap": "wrap"},
+                        style={
+                            "display": "flex",
+                            "gap": "12px",
+                            "alignItems": "center",
+                            "flexWrap": "wrap",
+                        },
                         children=[
                             html.Div(
                                 children=[
                                     html.Div("Ticker"),
                                     dcc.Dropdown(
                                         id="insp_ticker",
-                                        options=[{"label": t, "value": t} for t in available],
+                                        options=[
+                                            {"label": t, "value": t} for t in available
+                                        ],
                                         value=available[0],
                                         clearable=False,
                                         style={"width": "220px"},
@@ -1343,7 +1509,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                     html.Div("Start date"),
                                     dcc.DatePickerSingle(
                                         id="insp_start",
-                                        date=str(data.close.index.min().date()) if not data.close.empty else None,
+                                        date=str(data.close.index.min().date())
+                                        if not data.close.empty
+                                        else None,
                                     ),
                                 ]
                             ),
@@ -1352,7 +1520,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                     html.Div("End date"),
                                     dcc.DatePickerSingle(
                                         id="insp_end",
-                                        date=str(data.close.index.max().date()) if not data.close.empty else None,
+                                        date=str(data.close.index.max().date())
+                                        if not data.close.empty
+                                        else None,
                                     ),
                                 ]
                             ),
@@ -1362,7 +1532,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     html.Div(id="insp_stats"),
                     dcc.Graph(id="insp_price"),
                     html.Div(
-                        style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "12px"},
+                        style={
+                            "display": "grid",
+                            "gridTemplateColumns": "1fr 1fr",
+                            "gap": "12px",
+                        },
                         children=[
                             dcc.Graph(id="insp_ret_hist"),
                             dcc.Graph(id="insp_dd"),
@@ -1376,20 +1550,30 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             children=[
                 html.H4("Index Composer"),
                 html.Div(
-                    style={"display": "grid", "gridTemplateColumns": "2fr 1fr", "gap": "12px"},
+                    style={
+                        "display": "grid",
+                        "gridTemplateColumns": "2fr 1fr",
+                        "gap": "12px",
+                    },
                     children=[
                         html.Div(
                             children=[
                                 html.Div("Constituents"),
                                 dcc.Dropdown(
                                     id="comp_constituents",
-                                    options=[{"label": t, "value": t} for t in available],
+                                    options=[
+                                        {"label": t, "value": t} for t in available
+                                    ],
                                     value=default_pick,
                                     multi=True,
                                 ),
                                 html.Div(style={"height": "8px"}),
                                 html.Div(
-                                    style={"display": "flex", "gap": "12px", "flexWrap": "wrap"},
+                                    style={
+                                        "display": "flex",
+                                        "gap": "12px",
+                                        "flexWrap": "wrap",
+                                    },
                                     children=[
                                         html.Div(
                                             children=[
@@ -1397,9 +1581,18 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 dcc.Dropdown(
                                                     id="comp_method",
                                                     options=[
-                                                        {"label": "Equal Weight", "value": "equal"},
-                                                        {"label": "Price Weight", "value": "price_weight"},
-                                                        {"label": "Inverse Volatility", "value": "inv_vol"},
+                                                        {
+                                                            "label": "Equal Weight",
+                                                            "value": "equal",
+                                                        },
+                                                        {
+                                                            "label": "Price Weight",
+                                                            "value": "price_weight",
+                                                        },
+                                                        {
+                                                            "label": "Inverse Volatility",
+                                                            "value": "inv_vol",
+                                                        },
                                                     ],
                                                     value="equal",
                                                     clearable=False,
@@ -1413,10 +1606,22 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 dcc.Dropdown(
                                                     id="comp_rebalance",
                                                     options=[
-                                                        {"label": "Monthly", "value": "monthly"},
-                                                        {"label": "Quarterly", "value": "quarterly"},
-                                                        {"label": "Weekly", "value": "weekly"},
-                                                        {"label": "Daily", "value": "daily"},
+                                                        {
+                                                            "label": "Monthly",
+                                                            "value": "monthly",
+                                                        },
+                                                        {
+                                                            "label": "Quarterly",
+                                                            "value": "quarterly",
+                                                        },
+                                                        {
+                                                            "label": "Weekly",
+                                                            "value": "weekly",
+                                                        },
+                                                        {
+                                                            "label": "Daily",
+                                                            "value": "daily",
+                                                        },
                                                     ],
                                                     value="monthly",
                                                     clearable=False,
@@ -1456,7 +1661,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 dcc.Dropdown(
                                                     id="comp_vol_on",
                                                     options=[
-                                                        {"label": "Off", "value": "off"},
+                                                        {
+                                                            "label": "Off",
+                                                            "value": "off",
+                                                        },
                                                         {"label": "On", "value": "on"},
                                                     ],
                                                     value="off",
@@ -1469,14 +1677,22 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                 ),
                                 html.Div(style={"height": "8px"}),
                                 html.Div(
-                                    style={"display": "flex", "gap": "12px", "flexWrap": "wrap"},
+                                    style={
+                                        "display": "flex",
+                                        "gap": "12px",
+                                        "flexWrap": "wrap",
+                                    },
                                     children=[
                                         html.Div(
                                             children=[
                                                 html.Div("Start date"),
                                                 dcc.DatePickerSingle(
                                                     id="comp_start",
-                                                    date=str(data.close.index.min().date()) if not data.close.empty else None,
+                                                    date=str(
+                                                        data.close.index.min().date()
+                                                    )
+                                                    if not data.close.empty
+                                                    else None,
                                                 ),
                                             ]
                                         ),
@@ -1485,7 +1701,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 html.Div("End date"),
                                                 dcc.DatePickerSingle(
                                                     id="comp_end",
-                                                    date=str(data.close.index.max().date()) if not data.close.empty else None,
+                                                    date=str(
+                                                        data.close.index.max().date()
+                                                    )
+                                                    if not data.close.empty
+                                                    else None,
                                                 ),
                                             ]
                                         ),
@@ -1497,7 +1717,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                     style={"marginTop": "10px", "display": "none"},
                                     children=[
                                         html.Div(
-                                            style={"display": "flex", "gap": "12px", "flexWrap": "wrap"},
+                                            style={
+                                                "display": "flex",
+                                                "gap": "12px",
+                                                "flexWrap": "wrap",
+                                            },
                                             children=[
                                                 html.Div(
                                                     children=[
@@ -1553,7 +1777,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 ),
                                                 html.Div(
                                                     children=[
-                                                        html.Div("Borrow spread (% p.a.)"),
+                                                        html.Div(
+                                                            "Borrow spread (% p.a.)"
+                                                        ),
                                                         dcc.Input(
                                                             id="comp_borrow_spread",
                                                             type="number",
@@ -1585,13 +1811,21 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     open=False,
                     style={"marginTop": "6px"},
                     children=[
-                        html.Summary("Constituent Weights (Top 20)", style={"cursor": "pointer", "fontWeight": "600"}),
+                        html.Summary(
+                            "Constituent Weights (Top 20)",
+                            style={"cursor": "pointer", "fontWeight": "600"},
+                        ),
                         dcc.Graph(id="comp_weights_fig"),
                     ],
                 ),
                 html.Div(
                     id="comp_vol_panel",
-                    style={"display": "none", "gridTemplateColumns": "1fr 1fr", "gap": "12px", "marginTop": "10px"},
+                    style={
+                        "display": "none",
+                        "gridTemplateColumns": "1fr 1fr",
+                        "gap": "12px",
+                        "marginTop": "10px",
+                    },
                     children=[
                         dcc.Graph(id="comp_leverage_fig"),
                         dcc.Graph(id="comp_realized_vol_fig"),
@@ -1601,7 +1835,12 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 dcc.Store(id="mc_funding_store"),
                 html.H4("Monte Carlo Simulation"),
                 html.Div(
-                    style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end"},
+                    style={
+                        "display": "flex",
+                        "gap": "12px",
+                        "flexWrap": "wrap",
+                        "alignItems": "flex-end",
+                    },
                     children=[
                         html.Div(
                             children=[
@@ -1635,7 +1874,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                 dcc.Dropdown(
                                     id="mc_method",
                                     options=[
-                                        {"label": "Bootstrap (blocks)", "value": "bootstrap"},
+                                        {
+                                            "label": "Bootstrap (blocks)",
+                                            "value": "bootstrap",
+                                        },
                                         {"label": "GBM (correlated)", "value": "gbm"},
                                     ],
                                     value="bootstrap",
@@ -1650,7 +1892,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                 dcc.Dropdown(
                                     id="mc_funding_model",
                                     options=[
-                                        {"label": "Fixed to last", "value": "fixed_last"},
+                                        {
+                                            "label": "Fixed to last",
+                                            "value": "fixed_last",
+                                        },
                                         {"label": "Monte Carlo", "value": "mc"},
                                     ],
                                     value="fixed_last",
@@ -1711,9 +1956,18 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     open=False,
                     style={"marginTop": "8px"},
                     children=[
-                        html.Summary("Monte Carlo Funding Path Inspector", style={"cursor": "pointer", "fontWeight": "600"}),
+                        html.Summary(
+                            "Monte Carlo Funding Path Inspector",
+                            style={"cursor": "pointer", "fontWeight": "600"},
+                        ),
                         html.Div(
-                            style={"display": "flex", "gap": "12px", "flexWrap": "wrap", "alignItems": "flex-end", "marginTop": "8px"},
+                            style={
+                                "display": "flex",
+                                "gap": "12px",
+                                "flexWrap": "wrap",
+                                "alignItems": "flex-end",
+                                "marginTop": "8px",
+                            },
                             children=[
                                 html.Div(
                                     children=[
@@ -1732,7 +1986,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                         ),
                         dcc.Graph(id="mc_funding_fig"),
                     ],
-                )
+                ),
             ]
         )
 
@@ -1741,13 +1995,23 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     # ------------------------------------------------------------------------
     @app.callback(Output("comp_vol_controls", "style"), Input("comp_vol_on", "value"))
     def toggle_vol_controls(vol_on: str):
-        return {"marginTop": "10px", "display": "block"} if vol_on == "on" else {"marginTop": "10px", "display": "none"}
+        return (
+            {"marginTop": "10px", "display": "block"}
+            if vol_on == "on"
+            else {"marginTop": "10px", "display": "none"}
+        )
 
     @app.callback(Output("comp_vol_panel", "style"), Input("comp_vol_on", "value"))
     def toggle_vol_panel(vol_on: str):
         if vol_on == "on":
-            return {"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "12px", "marginTop": "10px"}
+            return {
+                "display": "grid",
+                "gridTemplateColumns": "1fr 1fr",
+                "gap": "12px",
+                "marginTop": "10px",
+            }
         return {"display": "none"}
+
     @app.callback(
         Output("mc_funding_method_wrap", "style"),
         Input("mc_funding_model", "value"),
@@ -1756,7 +2020,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         if funding_model == "mc":
             return {"display": "block"}
         return {"display": "none"}
-    
+
     @app.callback(
         Output("comp_lookback", "disabled"),
         Output("comp_lookback", "style"),
@@ -1767,9 +2031,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         if method == "inv_vol":
             return False, base_style
         return True, {**base_style, "backgroundColor": "#f0f0f0", "color": "#777"}
-# ------------------------------------------------------------------------
-# Rates Inspector: update rates and charts
-# ------------------------------------------------------------------------
+
+    # ------------------------------------------------------------------------
+    # Rates Inspector: update rates and charts
+    # ------------------------------------------------------------------------
     @app.callback(
         Output("rates_meta", "children"),
         Output("rates_funding_fig", "figure"),
@@ -1779,12 +2044,16 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         Input("rates_curve_date", "date"),
         Input("rates_curve_cols", "value"),
     )
-    def update_rates_inspector(curve_date: Optional[str], curve_cols: Optional[List[str]]):
+    def update_rates_inspector(
+        curve_date: Optional[str], curve_cols: Optional[List[str]]
+    ):
         funding = rates_data.funding.copy()
         curve = rates_data.curve.copy()
         cache_info = rates_data.cache_info
 
-        curve_cols = curve_cols or [c for c in ["USD_3M", "USD_2Y", "USD_10Y", "USD_30Y"] if c in curve.columns]
+        curve_cols = curve_cols or [
+            c for c in ["USD_3M", "USD_2Y", "USD_10Y", "USD_30Y"] if c in curve.columns
+        ]
 
         meta_tbl = rates_stats_table(
             funding=funding,
@@ -1820,6 +2089,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         )
 
         return meta_tbl, funding_fig, snapshot_fig, history_fig, spread_fig
+
     # ------------------------------------------------------------------------
     # Inspector: update ticker stats + charts
     # ------------------------------------------------------------------------
@@ -1832,8 +2102,14 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         Input("insp_start", "date"),
         Input("insp_end", "date"),
     )
-    def update_inspector(ticker: str, start_date: Optional[str], end_date: Optional[str]):
-        px = data.close[ticker].copy() if ticker in data.close.columns else pd.Series(dtype=float)
+    def update_inspector(
+        ticker: str, start_date: Optional[str], end_date: Optional[str]
+    ):
+        px = (
+            data.close[ticker].copy()
+            if ticker in data.close.columns
+            else pd.Series(dtype=float)
+        )
 
         if start_date:
             px = px.loc[pd.to_datetime(start_date) :]
@@ -1846,7 +2122,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         fig_price = make_line_fig(f"{ticker} Price", px.dropna(), "Price", height=320)
 
         rets = px.pct_change().dropna()
-        fig_hist = make_hist_fig("Daily Returns", rets.values, "Daily return", height=260)
+        fig_hist = make_hist_fig(
+            "Daily Returns", rets.values, "Daily return", height=260
+        )
 
         px2 = px.dropna()
         dd = (px2 / px2.cummax() - 1.0) if not px2.empty else pd.Series(dtype=float)
@@ -1930,7 +2208,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             lb = int(vol_lb) if vol_lb else 63
             mx = float(max_lev) if max_lev is not None else 2.0
             mn = float(min_lev) if min_lev is not None else 0.0
-            borrow_spread = float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
+            borrow_spread = (
+                float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
+            )
 
             funding_daily = build_daily_funding_series(
                 funding_df=rates_data.funding,
@@ -1947,20 +2227,34 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 funding_rates=funding_daily,
             )
 
-            index_level = ((1.0 + vc_returns.fillna(0.0)).cumprod() * 100.0).rename("index_level")
+            index_level = ((1.0 + vc_returns.fillna(0.0)).cumprod() * 100.0).rename(
+                "index_level"
+            )
             lev_fig = go.Figure()
-            lev_fig.add_trace(go.Scatter(
-                x=overlay_df.index, y=overlay_df["leverage"],
-                mode="lines", name="Leverage (λ)"
-            ))
-            lev_fig.add_trace(go.Scatter(
-                x=overlay_df.index, y=overlay_df["borrowed_weight"],
-                mode="lines", name="Borrowed sleeve (>1x)"
-            ))
-            lev_fig.add_trace(go.Scatter(
-                x=overlay_df.index, y=overlay_df["cash_weight"],
-                mode="lines", name="Cash sleeve (<1x)"
-            ))
+            lev_fig.add_trace(
+                go.Scatter(
+                    x=overlay_df.index,
+                    y=overlay_df["leverage"],
+                    mode="lines",
+                    name="Leverage (λ)",
+                )
+            )
+            lev_fig.add_trace(
+                go.Scatter(
+                    x=overlay_df.index,
+                    y=overlay_df["borrowed_weight"],
+                    mode="lines",
+                    name="Borrowed sleeve (>1x)",
+                )
+            )
+            lev_fig.add_trace(
+                go.Scatter(
+                    x=overlay_df.index,
+                    y=overlay_df["cash_weight"],
+                    mode="lines",
+                    name="Cash sleeve (<1x)",
+                )
+            )
             lev_fig.update_layout(
                 title="Vol Overlay Exposure",
                 xaxis_title="Date",
@@ -1969,18 +2263,30 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 margin=dict(l=60, r=40, t=50, b=40),
             )
             vol_fig = go.Figure()
-            vol_fig.add_trace(go.Scatter(
-                x=overlay_df.index, y=overlay_df["vol_est_ann"],
-                mode="lines", name="Realized vol est. (ann.)"
-            ))
-            vol_fig.add_trace(go.Scatter(
-                x=overlay_df.index, y=overlay_df["cash_rate"] * 252.0,
-                mode="lines", name="SOFR cash rate (ann. approx)"
-            ))
-            vol_fig.add_trace(go.Scatter(
-                x=overlay_df.index, y=overlay_df["borrow_rate"] * 252.0,
-                mode="lines", name="Borrow rate (ann. approx)"
-            ))
+            vol_fig.add_trace(
+                go.Scatter(
+                    x=overlay_df.index,
+                    y=overlay_df["vol_est_ann"],
+                    mode="lines",
+                    name="Realized vol est. (ann.)",
+                )
+            )
+            vol_fig.add_trace(
+                go.Scatter(
+                    x=overlay_df.index,
+                    y=overlay_df["cash_rate"] * 252.0,
+                    mode="lines",
+                    name="SOFR cash rate (ann. approx)",
+                )
+            )
+            vol_fig.add_trace(
+                go.Scatter(
+                    x=overlay_df.index,
+                    y=overlay_df["borrow_rate"] * 252.0,
+                    mode="lines",
+                    name="Borrow rate (ann. approx)",
+                )
+            )
             vol_fig.update_layout(
                 title="Vol Estimate + Funding Rates",
                 xaxis_title="Date",
@@ -1990,31 +2296,76 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             )
 
         fig_index = make_line_fig("Index Level", index_level, "Index level", height=320)
-        fig_weights = make_weight_fig(daily_wh, "Constituent Weights (Top 20)", top_n=20, height=360)
+        fig_weights = make_weight_fig(
+            daily_wh, "Constituent Weights (Top 20)", top_n=20, height=360
+        )
 
         stats = compute_stats_from_price_series(index_level)
         stats_tbl = stats_table(stats, include_obs=False)
         extra_stats = None
         if vol_on == "on":
-            total_borrow_drag = float(overlay_df["borrow_cost_return"].sum()) if "borrow_cost_return" in overlay_df.columns else 0.0
-            avg_leverage = float(overlay_df["leverage"].mean()) if "leverage" in overlay_df.columns else float("nan")
-            avg_cash_rate = float((overlay_df["cash_rate"] * 252.0).mean()) if "cash_rate" in overlay_df.columns else float("nan")
-            avg_borrow_rate = float((overlay_df["borrow_rate"] * 252.0).mean()) if "borrow_rate" in overlay_df.columns else float("nan")
+            total_borrow_drag = (
+                float(overlay_df["borrow_cost_return"].sum())
+                if "borrow_cost_return" in overlay_df.columns
+                else 0.0
+            )
+            avg_leverage = (
+                float(overlay_df["leverage"].mean())
+                if "leverage" in overlay_df.columns
+                else float("nan")
+            )
+            avg_cash_rate = (
+                float((overlay_df["cash_rate"] * 252.0).mean())
+                if "cash_rate" in overlay_df.columns
+                else float("nan")
+            )
+            avg_borrow_rate = (
+                float((overlay_df["borrow_rate"] * 252.0).mean())
+                if "borrow_rate" in overlay_df.columns
+                else float("nan")
+            )
 
             extra_stats = html.Table(
                 style={"borderCollapse": "collapse", "marginTop": "10px"},
-                children=[html.Tbody([
-                    html.Tr([html.Td("Avg leverage"), html.Td(fmt_num(avg_leverage))]),
-                    html.Tr([html.Td("Avg SOFR cash rate"), html.Td(fmt_pct(avg_cash_rate))]),
-                    html.Tr([html.Td("Avg borrow rate"), html.Td(fmt_pct(avg_borrow_rate))]),
-                    html.Tr([html.Td("Cum. borrow drag"), html.Td(f"{total_borrow_drag * 100:.4f}%")]),
-                ])],
+                children=[
+                    html.Tbody(
+                        [
+                            html.Tr(
+                                [
+                                    html.Td("Avg leverage"),
+                                    html.Td(fmt_num(avg_leverage)),
+                                ]
+                            ),
+                            html.Tr(
+                                [
+                                    html.Td("Avg SOFR cash rate"),
+                                    html.Td(fmt_pct(avg_cash_rate)),
+                                ]
+                            ),
+                            html.Tr(
+                                [
+                                    html.Td("Avg borrow rate"),
+                                    html.Td(fmt_pct(avg_borrow_rate)),
+                                ]
+                            ),
+                            html.Tr(
+                                [
+                                    html.Td("Cum. borrow drag"),
+                                    html.Td(f"{total_borrow_drag * 100:.4f}%"),
+                                ]
+                            ),
+                        ]
+                    )
+                ],
             )
 
-        stats_block = html.Div([stats_tbl] + ([extra_stats] if extra_stats is not None else []))
+        stats_block = html.Div(
+            [stats_tbl] + ([extra_stats] if extra_stats is not None else [])
+        )
         weights_tbl = make_latest_weights_table(weights_history)
 
         return fig_index, fig_weights, lev_fig, vol_fig, stats_block, weights_tbl
+
     @app.callback(
         Output("mc_fig", "figure"),
         Output("mc_summary", "children"),
@@ -2064,7 +2415,6 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         horizon,
         alpha,
     ):
-
         if n_clicks == 0:
             return (
                 empty_fig(title="Monte Carlo Simulation"),
@@ -2077,9 +2427,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         # Slice historical panel consistently with backtest window
         px_hist = data.close.copy()
         if start_date:
-            px_hist = px_hist.loc[pd.to_datetime(start_date):]
+            px_hist = px_hist.loc[pd.to_datetime(start_date) :]
         if end_date:
-            px_hist = px_hist.loc[:pd.to_datetime(end_date)]
+            px_hist = px_hist.loc[: pd.to_datetime(end_date)]
 
         # Safe defaults
         num_sim = int(num_sim) if num_sim is not None else 1000
@@ -2091,7 +2441,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         target_vol_pct = float(target_vol_pct) if target_vol_pct is not None else 10.0
         alpha = float(alpha) if alpha else 5.0
 
-        borrow_spread_pct = float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
+        borrow_spread_pct = (
+            float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
+        )
 
         rate_paths = None
         cash_paths = None
@@ -2099,12 +2451,14 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
 
         if vol_on == "on":
             if funding_model == "fixed_last":
-                rate_paths, cash_paths, borrow_paths = build_mc_funding_fixed_last_matrix(
-                    rates_data.funding,
-                    num_simulations=num_sim,
-                    horizon_days=horizon,
-                    borrow_spread_ann=borrow_spread_pct,
-                    day_count=252,
+                rate_paths, cash_paths, borrow_paths = (
+                    build_mc_funding_fixed_last_matrix(
+                        rates_data.funding,
+                        num_simulations=num_sim,
+                        horizon_days=horizon,
+                        borrow_spread_ann=borrow_spread_pct,
+                        day_count=252,
+                    )
                 )
             elif funding_model == "mc":
                 if funding_method == "ou":
@@ -2117,20 +2471,24 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                         day_count=252,
                     )
                 elif funding_method == "bootstrap":
-                    rate_paths, cash_paths, borrow_paths = simulate_bootstrap_funding_paths(
-                        rates_data.funding,
-                        num_simulations=num_sim,
-                        horizon_days=horizon,
-                        borrow_spread_ann=borrow_spread_pct,
-                        block_len=20,
-                        seed=42,
-                        day_count=252,
+                    rate_paths, cash_paths, borrow_paths = (
+                        simulate_bootstrap_funding_paths(
+                            rates_data.funding,
+                            num_simulations=num_sim,
+                            horizon_days=horizon,
+                            borrow_spread_ann=borrow_spread_pct,
+                            block_len=20,
+                            seed=42,
+                            day_count=252,
+                        )
                     )
                 else:
                     raise ValueError(f"Unknown funding_method: {funding_method}")
-            
+
         if mc_method == "gbm":
-            from index_lib.vectorization_utilities.mc_gbm_fast import run_monte_carlo_gbm_fast
+            from index_lib.vectorization_utilities.mc_gbm_fast import (
+                run_monte_carlo_gbm_fast,
+            )
 
             results, final_vals = run_monte_carlo_gbm_fast(
                 close=px_hist,
@@ -2152,7 +2510,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 dtype=np.float32,
             )
         else:
-            from index_lib.vectorization_utilities.mc_block_bootstrap_fast import run_monte_carlo_block_bootstrap_fast
+            from index_lib.vectorization_utilities.mc_block_bootstrap_fast import (
+                run_monte_carlo_block_bootstrap_fast,
+            )
 
             results, final_vals = run_monte_carlo_block_bootstrap_fast(
                 close=px_hist,
@@ -2209,8 +2569,12 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             )
         )
         fig.add_trace(go.Scatter(x=x, y=mean_path, name="Mean", line=dict(width=3)))
-        fig.add_trace(go.Scatter(x=x, y=results[best_idx], name="Best", line=dict(width=2)))
-        fig.add_trace(go.Scatter(x=x, y=results[worst_idx], name="Worst", line=dict(width=2)))
+        fig.add_trace(
+            go.Scatter(x=x, y=results[best_idx], name="Best", line=dict(width=2))
+        )
+        fig.add_trace(
+            go.Scatter(x=x, y=results[worst_idx], name="Worst", line=dict(width=2))
+        )
 
         fig.update_layout(
             title="Monte Carlo Simulation",
@@ -2219,14 +2583,23 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             height=500,
         )
 
-        summary = html.Div([
-            html.Div(f"Funding: {funding_model}" + (f" / {funding_method}" if funding_model == "mc" else "")),
-            html.Div(f"Median: {np.percentile(final_vals, 50):.2f}x"),
-            html.Div(f"{lower_q:.1f}th pct: {np.percentile(final_vals, lower_q):.2f}x"),
-            html.Div(f"{upper_q:.1f}th pct: {np.percentile(final_vals, upper_q):.2f}x"),
-            html.Div(f"Worst: {final_vals[worst_idx]:.2f}x"),
-            html.Div(f"Best: {final_vals[best_idx]:.2f}x"),
-        ])
+        summary = html.Div(
+            [
+                html.Div(
+                    f"Funding: {funding_model}"
+                    + (f" / {funding_method}" if funding_model == "mc" else "")
+                ),
+                html.Div(f"Median: {np.percentile(final_vals, 50):.2f}x"),
+                html.Div(
+                    f"{lower_q:.1f}th pct: {np.percentile(final_vals, lower_q):.2f}x"
+                ),
+                html.Div(
+                    f"{upper_q:.1f}th pct: {np.percentile(final_vals, upper_q):.2f}x"
+                ),
+                html.Div(f"Worst: {final_vals[worst_idx]:.2f}x"),
+                html.Div(f"Best: {final_vals[best_idx]:.2f}x"),
+            ]
+        )
 
         funding_store_data = None
 
@@ -2236,6 +2609,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             }
 
         return fig, summary, funding_store_data
+
     @app.callback(
         Output("mc_funding_fig", "figure"),
         Input("mc_funding_store", "data"),
@@ -2297,6 +2671,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             height=360,
         )
         return fig
+
     return app
 
 
@@ -2304,50 +2679,63 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
 # Entry point
 # ============================================================================
 
+
 def load_data(
     tickers: Sequence[str],
     *,
     start: str = "2022-01-01",
     end: Optional[str] = None,
     data_dir: str = "data",
+    use_cache_only: bool = False,  # NEW parameter
 ) -> UniverseData:
     """
-    Load cached Yahoo universe data (close + volume) via index_lib loader.
-
-    Inputs
-    ------
-    tickers:
-        List/sequence of tickers to load.
-    start:
-        Start date string for loading.
-    end:
-        End date string (None for up to latest).
-    data_dir:
-        Cache/data folder.
-
-    Returns
-    -------
-    UniverseData with close and volume.
+    Load cached Yahoo universe data with fallback to cache-only mode.
     """
-    data = load_universe_close_volume_cached(
-        tickers=list(tickers),
-        start=start,
-        end=end,
-        period=None,
-        interval="1d",
-        auto_adjust=True,
-        data_dir=data_dir,
-        chunk_size=25,
-        sleep_s=0.5,
-    )
-    # The loader returns an object with .close and .volume; wrap explicitly for typing clarity.
+    try:
+        data = load_universe_close_volume_cached(
+            tickers=list(tickers),
+            start=start,
+            end=end,
+            period=None,
+            interval="1d",
+            auto_adjust=True,
+            data_dir=data_dir,
+            chunk_size=25,
+            sleep_s=0.5,
+            use_cache_only=use_cache_only,  # Pass through
+        )
+    except Exception as e:
+        print(f"[universe] WARNING: Failed to load fresh data: {e}")
+        if not use_cache_only:
+            # Try again with cache-only as fallback
+            print("[universe] Attempting cache-only fallback...")
+            data = load_universe_close_volume_cached(
+                tickers=list(tickers),
+                start=start,
+                end=end,
+                period=None,
+                interval="1d",
+                auto_adjust=True,
+                data_dir=data_dir,
+                chunk_size=25,
+                sleep_s=0.5,
+                use_cache_only=True,
+            )
+        else:
+            raise
+
     return UniverseData(close=data.close, volume=data.volume)
+
+
+# Find this function in main.py (around line 2740-2750) and update it:
+
 
 def load_rates_data(
     *,
     start: str = "2022-01-01",
     end: Optional[str] = None,
     data_dir: str = "data",
+    use_cache_only: bool = False,  # ADD THIS PARAMETER
 ) -> RatesInspectorData:
     """
     Load cached USD rates data (funding + Treasury curve) and cache metadata.
@@ -2356,6 +2744,7 @@ def load_rates_data(
         start=start,
         end=end,
         data_dir=data_dir,
+        use_cache_only=use_cache_only,  # PASS IT THROUGH
     )
     cache_info = inspect_rates_cache(data_dir=data_dir)
     return RatesInspectorData(
@@ -2364,12 +2753,32 @@ def load_rates_data(
         cache_info=cache_info,
     )
 
+
 def main() -> None:
     """
-    Script entry point: load universe and run Dash server.
+    Script entry point: load universe and run Dash server with fallback support.
     """
-    data = load_data(DEFAULT_UNIVERSE, start="2022-01-01", end=None, data_dir="data")
-    rates_data = load_rates_data(start="2022-01-01", end=None, data_dir="data")
+    import sys
+
+    # Check for cache-only flag
+    use_cache_only = "--cache-only" in sys.argv
+
+    if use_cache_only:
+        print("[main] Running in CACHE-ONLY mode (no API calls)")
+
+    data = load_data(
+        DEFAULT_UNIVERSE,
+        start="2022-01-01",
+        end=None,
+        data_dir="data",
+        use_cache_only=use_cache_only,
+    )
+    rates_data = load_rates_data(
+        start="2022-01-01",
+        end=None,
+        data_dir="data",
+        use_cache_only=use_cache_only,  # Make sure this is passed
+    )
     app = build_app(data, rates_data)
     app.run(debug=True, port=8050)
 

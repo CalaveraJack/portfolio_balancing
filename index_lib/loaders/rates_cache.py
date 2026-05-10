@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import os
 from dataclasses import dataclass
@@ -112,7 +110,9 @@ def _merge_update(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
         return existing.copy()
 
     combined = existing.reindex(existing.index.union(new.index))
-    combined = combined.reindex(columns=sorted(set(combined.columns).union(new.columns)))
+    combined = combined.reindex(
+        columns=sorted(set(combined.columns).union(new.columns))
+    )
     combined.update(new)
     return combined.sort_index()
 
@@ -123,7 +123,9 @@ def _to_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
     return out.sort_index()
 
 
-def _annual_percent_to_daily_decimal(rate_pct: pd.Series, basis: int = 252) -> pd.Series:
+def _annual_percent_to_daily_decimal(
+    rate_pct: pd.Series, basis: int = 252
+) -> pd.Series:
     return (pd.to_numeric(rate_pct, errors="coerce") / 100.0) / float(basis)
 
 
@@ -219,7 +221,13 @@ def load_rates_cached(
     data_dir: str = "data",
     fred_api_key: Optional[str] = None,
     force_refresh: bool = False,
+    use_cache_only: bool = False,  # NEW: bypass API calls
 ) -> RatesData:
+    """
+    Load rates data with fallback to cached data when API unavailable.
+
+    NEW: use_cache_only=True will only use local cache, never call FRED API.
+    """
     data_path = Path(data_dir)
     _ensure_dir(data_path)
 
@@ -231,45 +239,94 @@ def load_rates_cached(
     curve_cached = _read_parquet_or_empty(curve_path)
     _ = _read_meta(meta_path)
 
-    if force_refresh or funding_cached.empty or curve_cached.empty:
-        funding_new = _fetch_funding_panel(start=start, end=end, fred_api_key=fred_api_key)
-        curve_new = _fetch_curve_panel(start=start, end=end, fred_api_key=fred_api_key)
+    # Check if we have usable cached data
+    has_valid_cache = not funding_cached.empty and not curve_cached.empty
 
-        funding_cached = _merge_update(funding_cached, funding_new)
-        curve_cached = _merge_update(curve_cached, curve_new)
-    else:
-        cache_min = funding_cached.index.union(curve_cached.index).min()
-        cache_max = funding_cached.index.union(curve_cached.index).max()
+    if use_cache_only or (not force_refresh and has_valid_cache):
+        # Use cached data, possibly with date filtering
+        print("[rates] Using cached data (API access disabled/limited)")
 
-        need_download_ranges: List[Tuple[Optional[str], Optional[str]]] = []
+        funding_out = funding_cached.copy()
+        curve_out = curve_cached.copy()
 
-        req_start = pd.to_datetime(start) if start else None
-        req_end = pd.to_datetime(end) if end else None
+        if start:
+            dt0 = pd.to_datetime(start)
+            funding_out = funding_out.loc[dt0:]
+            curve_out = curve_out.loc[dt0:]
+        if end:
+            dt1 = pd.to_datetime(end)
+            funding_out = funding_out.loc[:dt1]
+            curve_out = curve_out.loc[:dt1]
 
-        if req_start is not None and cache_min is not None and req_start < cache_min:
-            left_end = str((cache_min + pd.Timedelta(days=1)).date())
-            need_download_ranges.append((start, left_end))
+        return RatesData(funding=funding_out, curve=curve_out)
 
-        if req_end is not None and cache_max is not None and req_end > cache_max:
-            right_start = str((cache_max + pd.Timedelta(days=1)).date())
-            need_download_ranges.append((right_start, end))
+    # Try to fetch fresh data (original logic with error handling)
+    try:
+        if force_refresh or funding_cached.empty or curve_cached.empty:
+            funding_new = _fetch_funding_panel(
+                start=start, end=end, fred_api_key=fred_api_key
+            )
+            curve_new = _fetch_curve_panel(
+                start=start, end=end, fred_api_key=fred_api_key
+            )
 
-        if not start and not end:
-            right_start = None if cache_max is None else str((cache_max + pd.Timedelta(days=1)).date())
-            need_download_ranges.append((right_start, None))
-
-        for dl_start, dl_end in need_download_ranges:
-            funding_new = _fetch_funding_panel(start=dl_start, end=dl_end, fred_api_key=fred_api_key)
-            curve_new = _fetch_curve_panel(start=dl_start, end=dl_end, fred_api_key=fred_api_key)
             funding_cached = _merge_update(funding_cached, funding_new)
             curve_cached = _merge_update(curve_cached, curve_new)
+        else:
+            cache_min = funding_cached.index.union(curve_cached.index).min()
+            cache_max = funding_cached.index.union(curve_cached.index).max()
 
-    funding_cached = funding_cached.sort_index()
-    curve_cached = curve_cached.sort_index()
+            need_download_ranges: List[Tuple[Optional[str], Optional[str]]] = []
 
-    _write_parquet(funding_cached, funding_path)
-    _write_parquet(curve_cached, curve_path)
-    _write_meta(path=meta_path, funding=funding_cached, curve=curve_cached)
+            req_start = pd.to_datetime(start) if start else None
+            req_end = pd.to_datetime(end) if end else None
+
+            if (
+                req_start is not None
+                and cache_min is not None
+                and req_start < cache_min
+            ):
+                left_end = str((cache_min + pd.Timedelta(days=1)).date())
+                need_download_ranges.append((start, left_end))
+
+            if req_end is not None and cache_max is not None and req_end > cache_max:
+                right_start = str((cache_max + pd.Timedelta(days=1)).date())
+                need_download_ranges.append((right_start, end))
+
+            if not start and not end:
+                right_start = (
+                    None
+                    if cache_max is None
+                    else str((cache_max + pd.Timedelta(days=1)).date())
+                )
+                need_download_ranges.append((right_start, None))
+
+            for dl_start, dl_end in need_download_ranges:
+                funding_new = _fetch_funding_panel(
+                    start=dl_start, end=dl_end, fred_api_key=fred_api_key
+                )
+                curve_new = _fetch_curve_panel(
+                    start=dl_start, end=dl_end, fred_api_key=fred_api_key
+                )
+                funding_cached = _merge_update(funding_cached, funding_new)
+                curve_cached = _merge_update(curve_cached, curve_new)
+
+        funding_cached = funding_cached.sort_index()
+        curve_cached = curve_cached.sort_index()
+
+        _write_parquet(funding_cached, funding_path)
+        _write_parquet(curve_cached, curve_path)
+        _write_meta(path=meta_path, funding=funding_cached, curve=curve_cached)
+
+    except (requests.RequestException, ValueError, KeyError) as e:
+        print(f"[rates] WARNING: Failed to fetch fresh rates data: {e}")
+        if has_valid_cache:
+            print("[rates] Falling back to existing cached data")
+            funding_cached = _read_parquet_or_empty(funding_path)
+            curve_cached = _read_parquet_or_empty(curve_path)
+        else:
+            print("[rates] WARNING: No cached data available, returning empty")
+            return RatesData(funding=pd.DataFrame(), curve=pd.DataFrame())
 
     funding_out = funding_cached.copy()
     curve_out = curve_cached.copy()
@@ -330,7 +387,9 @@ def build_daily_funding_series(
 
     base = funding_df[base_col].reindex(pd.to_datetime(index)).ffill().bfill()
 
-    cash_rate = _annual_percent_to_daily_decimal(base, basis=day_count).rename("cash_rate")
+    cash_rate = _annual_percent_to_daily_decimal(base, basis=day_count).rename(
+        "cash_rate"
+    )
     borrow_rate = _annual_percent_to_daily_decimal(
         base + float(borrow_spread_ann),
         basis=day_count,
@@ -378,7 +437,9 @@ def make_curve_history_figure(
     fig = go.Figure()
     for c in columns:
         if c in curve_df.columns:
-            fig.add_trace(go.Scatter(x=curve_df.index, y=curve_df[c], mode="lines", name=c))
+            fig.add_trace(
+                go.Scatter(x=curve_df.index, y=curve_df[c], mode="lines", name=c)
+            )
 
     fig.update_layout(
         title=title,
@@ -416,13 +477,21 @@ def make_curve_snapshot_figure(
         dt = curve_df[cols].dropna(how="all").index[-1]
     else:
         dt = pd.to_datetime(date)
-        row = curve_df[cols].reindex(curve_df.index.union([dt])).sort_index().ffill().loc[dt]
+        row = (
+            curve_df[cols]
+            .reindex(curve_df.index.union([dt]))
+            .sort_index()
+            .ffill()
+            .loc[dt]
+        )
 
     tenors = [c.split("_", 1)[1] for c in cols]
     values = [row[c] for c in cols]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=tenors, y=values, mode="lines+markers", name="USD curve"))
+    fig.add_trace(
+        go.Scatter(x=tenors, y=values, mode="lines+markers", name="USD curve")
+    )
     fig.update_layout(
         title=title or f"USD Curve Snapshot ({pd.to_datetime(dt).date()})",
         xaxis_title="Maturity",

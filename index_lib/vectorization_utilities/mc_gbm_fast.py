@@ -8,7 +8,9 @@ import pandas as pd
 from .mc_block_bootstrap_fast import rebalance_mask, cap_weights_rows
 
 
-def _safe_cholesky(cov: np.ndarray, *, jitter0: float = 1e-10, max_tries: int = 8) -> np.ndarray:
+def _safe_cholesky(
+    cov: np.ndarray, *, jitter0: float = 1e-10, max_tries: int = 8
+) -> np.ndarray:
     """
     Try Cholesky; if cov isn't PSD numerically, add jitter to diagonal.
     """
@@ -62,7 +64,11 @@ def run_monte_carlo_gbm_fast(
       levels: (S,H) growth path, 1.0=start
       final_values: (S,)
     """
-    px = close.reindex(columns=list(constituents)).dropna(axis=1, how="all").dropna(how="all")
+    px = (
+        close.reindex(columns=list(constituents))
+        .dropna(axis=1, how="all")
+        .dropna(how="all")
+    )
     if px.shape[0] < 3 or px.shape[1] < 1:
         raise ValueError("Not enough historical data after filtering constituents.")
 
@@ -94,9 +100,13 @@ def run_monte_carlo_gbm_fast(
         borrow_paths_arr = np.asarray(borrow_paths, dtype=dtype)
 
         if cash_paths_arr.shape != (S, H):
-            raise ValueError(f"cash_paths shape {cash_paths_arr.shape} does not match {(S, H)}")
+            raise ValueError(
+                f"cash_paths shape {cash_paths_arr.shape} does not match {(S, H)}"
+            )
         if borrow_paths_arr.shape != (S, H):
-            raise ValueError(f"borrow_paths shape {borrow_paths_arr.shape} does not match {(S, H)}")
+            raise ValueError(
+                f"borrow_paths shape {borrow_paths_arr.shape} does not match {(S, H)}"
+            )
     # Rebalance calendar (business days)
     last_hist_date = rets_hist.index[-1]
     sim_dates = pd.bdate_range(start=last_hist_date + pd.Timedelta(days=1), periods=H)
@@ -140,7 +150,7 @@ def run_monte_carlo_gbm_fast(
         # z: (S,N) iid
         z = rng.standard_normal(size=(S, N))  # float64
         # correlated log-return innovations: z @ L.T
-        x = drift_d[None, :] + z @ L_d.T      # (S,N)
+        x = drift_d[None, :] + z @ L_d.T  # (S,N)
         rt = np.expm1(x).astype(dtype, copy=False)  # (S,N) arithmetic returns
 
         # rebalance weights at start of day t
@@ -158,11 +168,17 @@ def run_monte_carlo_gbm_fast(
                 else:
                     xw = ring[:, :ring_count, :] if ring_count < lb else ring
                     m = xw.mean(axis=1)
-                    v = ((xw - m[:, None, :]) ** 2).sum(axis=1) / max(1, (ring_count - 1))
+                    v = ((xw - m[:, None, :]) ** 2).sum(axis=1) / max(
+                        1, (ring_count - 1)
+                    )
                     std = np.sqrt(np.maximum(v, dtype(0.0)))
-                    inv = np.divide(dtype(1.0), std, out=np.zeros_like(std), where=std > eps)
+                    inv = np.divide(
+                        dtype(1.0), std, out=np.zeros_like(std), where=std > eps
+                    )
                     inv_sum = inv.sum(axis=1, keepdims=True)
-                    w = np.divide(inv, inv_sum, out=np.zeros_like(inv), where=inv_sum > eps)
+                    w = np.divide(
+                        inv, inv_sum, out=np.zeros_like(inv), where=inv_sum > eps
+                    )
 
             else:
                 raise ValueError(f"Unknown method: {method}")
@@ -184,7 +200,9 @@ def run_monte_carlo_gbm_fast(
                 v = ((xw - m[:, None]) ** 2).sum(axis=1) / max(xw.shape[1] - 1, 1)
                 vol_est = np.sqrt(np.maximum(v, 0.0)) * np.sqrt(dtype(252.0))
                 raw_lev = target_vol_ann / np.maximum(vol_est, eps)
-                lev_vec = np.clip(raw_lev, min_leverage, max_leverage).astype(dtype, copy=False)
+                lev_vec = np.clip(raw_lev, min_leverage, max_leverage).astype(
+                    dtype, copy=False
+                )
 
             cash_w = np.maximum(dtype(1.0) - lev_vec, dtype(0.0))
             borrow_w = np.maximum(lev_vec - dtype(1.0), dtype(0.0))
@@ -212,14 +230,13 @@ def run_monte_carlo_gbm_fast(
         w = np.divide(w, ws, out=np.zeros_like(w), where=ws > eps)
 
         # update price relatives for price_weight
-        px_rel *= (dtype(1.0) + rt)
+        px_rel *= dtype(1.0) + rt
 
         # update inv_vol ring
         if method == "inv_vol":
             ring[:, ring_pos, :] = rt
             ring_pos = (ring_pos + 1) % lb
             ring_count = min(lb, ring_count + 1)
-
 
     final_values = levels[:, -1].astype(np.float64, copy=False)
     return levels, final_values

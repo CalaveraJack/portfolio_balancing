@@ -24,7 +24,9 @@ def rebalance_mask(idx: pd.DatetimeIndex, freq: str) -> np.ndarray:
     return np.isin(idx.values, rb.values)
 
 
-def cap_weights_rows(w: np.ndarray, cap: float, *, max_iter: int = 20, eps: float = 1e-12) -> np.ndarray:
+def cap_weights_rows(
+    w: np.ndarray, cap: float, *, max_iter: int = 20, eps: float = 1e-12
+) -> np.ndarray:
     # w: (S,N) float32/64
     w = np.maximum(w, 0.0)
     s = w.sum(axis=1, keepdims=True)
@@ -42,7 +44,10 @@ def cap_weights_rows(w: np.ndarray, cap: float, *, max_iter: int = 20, eps: floa
 
         under = ~over
         under_sum = (w * under).sum(axis=1, keepdims=True)
-        add = np.divide(w, under_sum, out=np.zeros_like(w), where=under_sum > eps) * excess_sum
+        add = (
+            np.divide(w, under_sum, out=np.zeros_like(w), where=under_sum > eps)
+            * excess_sum
+        )
         w = np.where(under, w + add, w)
 
         s = w.sum(axis=1, keepdims=True)
@@ -116,7 +121,11 @@ def run_monte_carlo_block_bootstrap_fast(
       levels: (S,H) (growth path, 1.0=start)
       final_values: (S,)
     """
-    px = close.reindex(columns=list(constituents)).dropna(axis=1, how="all").dropna(how="all")
+    px = (
+        close.reindex(columns=list(constituents))
+        .dropna(axis=1, how="all")
+        .dropna(how="all")
+    )
     if px.shape[0] < 3 or px.shape[1] < 1:
         raise ValueError("Not enough historical data after filtering constituents.")
 
@@ -136,9 +145,13 @@ def run_monte_carlo_block_bootstrap_fast(
         borrow_paths_arr = np.asarray(borrow_paths, dtype=dtype)
 
         if cash_paths_arr.shape != (S, H):
-            raise ValueError(f"cash_paths shape {cash_paths_arr.shape} does not match {(S, H)}")
+            raise ValueError(
+                f"cash_paths shape {cash_paths_arr.shape} does not match {(S, H)}"
+            )
         if borrow_paths_arr.shape != (S, H):
-            raise ValueError(f"borrow_paths shape {borrow_paths_arr.shape} does not match {(S, H)}")
+            raise ValueError(
+                f"borrow_paths shape {borrow_paths_arr.shape} does not match {(S, H)}"
+            )
     last_hist_date = rets_hist.index[-1]
     sim_dates = pd.bdate_range(start=last_hist_date + pd.Timedelta(days=1), periods=H)
 
@@ -146,7 +159,9 @@ def run_monte_carlo_block_bootstrap_fast(
     if len(rb):
         rb[0] = True
 
-    idx = block_bootstrap_indices(T, num_simulations=S, horizon_days=H, block_len=block_len, seed=seed)
+    idx = block_bootstrap_indices(
+        T, num_simulations=S, horizon_days=H, block_len=block_len, seed=seed
+    )
 
     eps = dtype(1e-7)
     capv = float(cap) if cap is not None else None
@@ -197,11 +212,17 @@ def run_monte_carlo_block_bootstrap_fast(
                 else:
                     x = ring[:, :ring_count, :] if ring_count < lb else ring
                     m = x.mean(axis=1)
-                    v = ((x - m[:, None, :]) ** 2).sum(axis=1) / max(1, (ring_count - 1))
+                    v = ((x - m[:, None, :]) ** 2).sum(axis=1) / max(
+                        1, (ring_count - 1)
+                    )
                     std = np.sqrt(np.maximum(v, dtype(0.0)))
-                    inv = np.divide(dtype(1.0), std, out=np.zeros_like(std), where=std > eps)
+                    inv = np.divide(
+                        dtype(1.0), std, out=np.zeros_like(std), where=std > eps
+                    )
                     inv_sum = inv.sum(axis=1, keepdims=True)
-                    w = np.divide(inv, inv_sum, out=np.zeros_like(inv), where=inv_sum > eps)
+                    w = np.divide(
+                        inv, inv_sum, out=np.zeros_like(inv), where=inv_sum > eps
+                    )
 
             else:
                 raise ValueError(f"Unknown method: {method}")
@@ -223,7 +244,9 @@ def run_monte_carlo_block_bootstrap_fast(
                 v = ((xw - m[:, None]) ** 2).sum(axis=1) / max(xw.shape[1] - 1, 1)
                 vol_est = np.sqrt(np.maximum(v, 0.0)) * np.sqrt(dtype(252.0))
                 raw_lev = target_vol_ann / np.maximum(vol_est, eps)
-                lev_vec = np.clip(raw_lev, min_leverage, max_leverage).astype(dtype, copy=False)
+                lev_vec = np.clip(raw_lev, min_leverage, max_leverage).astype(
+                    dtype, copy=False
+                )
 
             cash_w = np.maximum(dtype(1.0) - lev_vec, dtype(0.0))
             borrow_w = np.maximum(lev_vec - dtype(1.0), dtype(0.0))
@@ -251,7 +274,7 @@ def run_monte_carlo_block_bootstrap_fast(
         w = np.divide(w, ws, out=np.zeros_like(w), where=ws > eps)
 
         # update price relatives for next-day price_weight
-        px_rel *= (dtype(1.0) + rt)
+        px_rel *= dtype(1.0) + rt
 
         # update inv_vol ring with today's return
         if method == "inv_vol":
