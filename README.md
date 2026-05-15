@@ -4,7 +4,7 @@ A minimal Dash app to **inspect a ticker universe** and **compose research-grade
 (equal-weight / price-weight / inverse-vol), with an optional **funding-aware volatility targeting overlay**.
 
 This repository is part of a broader, practical research effort on **digitalization capacities in finance**
-
+Link to the repository: https://github.com/CalaveraJack/portfolio_balancing
 ---
 
 # 🚀 Quick Start
