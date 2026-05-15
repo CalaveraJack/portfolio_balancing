@@ -6,6 +6,7 @@ A minimal Dash app to **inspect a ticker universe** and **compose research-grade
 This repository is part of a broader, practical research effort on **digitalization capacities in finance**
 
 Link to the repository: https://github.com/CalaveraJack/portfolio_balancing
+
 ---
 
 # 🚀 Quick Start
