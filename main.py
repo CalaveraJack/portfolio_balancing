@@ -795,17 +795,12 @@ def compute_weights(
             w = inv / float(inv.sum())
 
     elif method == "cap_weight":
-        print(f"[compute_weights] method='cap_weight', market_caps is None: {market_caps is None}")
-        print(f"[compute_weights] market_caps empty: {market_caps is not None and market_caps.empty}")
         
         if market_caps is None or market_caps.empty:
             # Fallback to equal weight if no cap data
-            print("Warning: No market cap data available, falling back to equal weight")
             w = pd.Series(1.0 / len(tickers), index=tickers)
         else:
             caps = market_caps.reindex(tickers).fillna(0)
-            print(f"[compute_weights] Caps sum: {caps.sum()}")
-            print(f"[compute_weights] Top caps:\n{caps.sort_values(ascending=False).head()}")
             if caps.sum() <= 0:
                 w = pd.Series(1.0 / len(tickers), index=tickers)
             else:
@@ -1275,7 +1270,6 @@ def build_index_series(
             available_dates = market_caps.index[market_caps.index <= first_date]
             if len(available_dates) > 0:
                 caps_series_init = market_caps.loc[available_dates[-1]]
-                print(f"[build] Initial caps from {available_dates[-1]} for {first_date}")
 
     w = compute_weights(px.iloc[:1], method, lookback=lookback, cap=cap, market_caps=caps_series_init)
 
@@ -1300,15 +1294,13 @@ def build_index_series(
             if method == "cap_weight" and market_caps is not None:
                 if dt in market_caps.index:
                     caps_series = market_caps.loc[dt]
-                    print(f"[build] Using caps at {dt}: {caps_series.head()}")
                 else:
                     # Find the closest previous date with cap data
                     available_dates = market_caps.index[market_caps.index <= dt]
                     if len(available_dates) > 0:
                         caps_series = market_caps.loc[available_dates[-1]]
-                        print(f"[build] Using forward-filled caps from {available_dates[-1]} for {dt}")
                     else:
-                        print(f"[build] No caps available for {dt}")
+                        caps_series = None
 
             w = compute_weights(
                 hist, method, lookback=lookback, cap=cap, market_caps=caps_series
@@ -2236,40 +2228,20 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         if method == "cap_weight" and constituents:
             try:
                 market_caps_df = load_market_caps(
-                    constituents, 
-                    data_dir="data", 
-                    use_cache_only=False
+                    constituents,
+                    data_dir="data",
+                    use_cache_only=False,
                 )
                 if not market_caps_df.empty:
-                    # Ensure index has no timezone and is daily frequency
                     market_caps_df.index = pd.to_datetime(market_caps_df.index).tz_localize(None)
-                    
-                    # Align to same date range as close data (which has no timezone)
-                    close_index = data.close.index.tz_localize(None) if hasattr(data.close.index, 'tz') else data.close.index
-                    
-                    # Reindex and forward fill
-                    market_caps_df = market_caps_df.reindex(close_index)
-                    market_caps_df = market_caps_df.ffill().fillna(0)
-                    
-                    print(f"[caps] Successfully loaded and aligned caps for {len(market_caps_df.columns)} tickers")
-                    print(f"[caps] Caps date range: {market_caps_df.index.min()} to {market_caps_df.index.max()}")
-                    
-                    # Verify we have non-zero values
-                    non_zero = (market_caps_df > 0).any().any()
-                    if non_zero:
-                        print(f"[caps] Caps contain non-zero values")
-                        # Show sample of non-zero caps at the end
-                        last_non_zero = market_caps_df[market_caps_df > 0].dropna(how='all').iloc[-1] if not market_caps_df.empty else None
-                        if last_non_zero is not None:
-                            print(f"[caps] Latest caps:\n{last_non_zero}")
-                    else:
-                        print(f"[caps] WARNING: All caps are zero after alignment!")
-                else:
-                    print("[caps] Market caps DataFrame is empty - falling back to equal weight")
-            except Exception as e:
-                print(f"[caps] Warning: Could not load market caps: {e}")
-                import traceback
-                traceback.print_exc()
+                    close_index = (
+                        data.close.index.tz_localize(None)
+                        if hasattr(data.close.index, "tz") and data.close.index.tz is not None
+                        else data.close.index
+                    )
+                    market_caps_df = market_caps_df.reindex(close_index).ffill().fillna(0)
+            except Exception:
+                market_caps_df = None
 
         index_level, weights_history, base_returns, daily_wh = build_index_series(
             close=data.close,
@@ -2549,9 +2521,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     caps_df.index = pd.to_datetime(caps_df.index).tz_localize(None)
                     last_caps = caps_df.iloc[-1]
                     mc_market_caps = np.full((num_sim, len(constituents)), last_caps.values, dtype=np.float32)
-                    print(f"[mc] Using constant market caps for simulation")
-            except Exception as e:
-                print(f"[mc] Could not load caps for MC: {e}")
+            except Exception:
+                mc_market_caps = None
 
         rate_paths = None
         cash_paths = None
@@ -2787,6 +2758,13 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
 # ============================================================================
 # Entry point
 # ============================================================================
+def _normalize_index_timezone(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    if hasattr(out.index, "tz") and out.index.tz is not None:
+        out.index = out.index.tz_localize(None)
+    return out
+
+
 def load_data(
     tickers: Sequence[str],
     *,
@@ -2794,10 +2772,14 @@ def load_data(
     end: Optional[str] = None,
     data_dir: str = "data",
     use_cache_only: bool = False,
+    cache_mode: str = "refresh",
 ) -> UniverseData:
     """
-    Load cached Yahoo universe data with fallback to cache-only mode.
+    Load Yahoo universe data under an explicit cache policy.
     """
+    if use_cache_only:
+        cache_mode = "cache"
+
     try:
         data = load_universe_close_volume_cached(
             tickers=list(tickers),
@@ -2809,23 +2791,13 @@ def load_data(
             data_dir=data_dir,
             chunk_size=25,
             sleep_s=0.5,
-            use_cache_only=use_cache_only,
+            cache_mode=cache_mode,
         )
-        
-        # Normalize timezone for close prices
-        if hasattr(data.close.index, 'tz') and data.close.index.tz is not None:
-            data.close.index = data.close.index.tz_localize(None)
-        if hasattr(data.volume.index, 'tz') and data.volume.index.tz is not None:
-            data.volume.index = data.volume.index.tz_localize(None)
-            
-        if data is None or not hasattr(data, 'close') or data.close is None or data.close.empty:
-            raise ValueError("Loaded data is empty or invalid")
     except Exception as e:
-        print(f"[universe] WARNING: Failed to load fresh data: {e}")
-        if not use_cache_only:
-            print("[universe] Attempting cache-only fallback...")
+        if cache_mode == "refresh":
+            recommendation = ""
             try:
-                data = load_universe_close_volume_cached(
+                cached = load_universe_close_volume_cached(
                     tickers=list(tickers),
                     start=start,
                     end=end,
@@ -2835,23 +2807,22 @@ def load_data(
                     data_dir=data_dir,
                     chunk_size=25,
                     sleep_s=0.5,
-                    use_cache_only=True,
+                    cache_mode="cache",
                 )
-                # Normalize timezone for close prices
-                if hasattr(data.close.index, 'tz') and data.close.index.tz is not None:
-                    data.close.index = data.close.index.tz_localize(None)
-                if hasattr(data.volume.index, 'tz') and data.volume.index.tz is not None:
-                    data.volume.index = data.volume.index.tz_localize(None)
-                    
-                if data is None or not hasattr(data, 'close') or data.close is None or data.close.empty:
-                    raise RuntimeError("Cache-only mode failed to load valid data")
-            except Exception as e2:
-                print(f"[universe] Cache-only fallback also failed: {e2}")
-                raise
-        else:
-            raise
+                if not cached.close.empty:
+                    recommendation = " Local Yahoo cache exists; rerun with --data-mode cache or --data-mode auto."
+            except Exception:
+                pass
+            raise RuntimeError(f"Failed to refresh Yahoo universe data: {e}.{recommendation}") from e
+        raise
 
-    return UniverseData(close=data.close, volume=data.volume)
+    if data is None or not hasattr(data, "close") or data.close is None or data.close.empty:
+        raise ValueError("Loaded Yahoo data is empty or invalid.")
+
+    return UniverseData(
+        close=_normalize_index_timezone(data.close),
+        volume=_normalize_index_timezone(data.volume),
+    )
 
 # ============================================================================
 # Market Cap Loading
@@ -2864,110 +2835,59 @@ def load_market_caps(
 ) -> pd.DataFrame:
     """
     Load market capitalization data for tickers.
-    
-    Returns DataFrame with dates as index and tickers as columns (market cap in billions).
+
+    Returns a DataFrame with dates as index and tickers as columns, with market cap in billions.
     """
     import time
-    
+
     caps_path = Path(data_dir) / "market_caps.parquet"
-    
-    # Try to read cached caps
+
     if caps_path.exists():
         try:
             caps = pd.read_parquet(caps_path)
-            # Remove timezone info to match price data
             caps.index = pd.to_datetime(caps.index).tz_localize(None)
-            print(f"[caps] Loaded caps shape: {caps.shape}")
-            print(f"[caps] Caps date range: {caps.index.min()} to {caps.index.max()}")
-            
-            # Only keep requested tickers that exist in cache
             available_tickers = [t for t in tickers if t in caps.columns]
             if available_tickers:
-                caps = caps[available_tickers]
-                print(f"[caps] Filtered to {len(available_tickers)} tickers")
-                
-                # Check if we have non-zero values
-                if not caps.empty:
-                    last_non_zero = caps[caps > 0].dropna(how='all').iloc[-1] if not caps.empty else None
-                    if last_non_zero is not None:
-                        print(f"[caps] Latest non-zero caps:\n{last_non_zero}")
-                
-                if use_cache_only:
-                    return caps
-            else:
-                print(f"[caps] No requested tickers found in cache.")
-        except Exception as e:
-            print(f"[caps] Error reading cache: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    # If cache-only and we got here, return empty or what we have
+                return caps[available_tickers]
+        except Exception:
+            if use_cache_only:
+                raise
+
     if use_cache_only:
-        if caps_path.exists():
-            try:
-                caps = pd.read_parquet(caps_path)
-                caps.index = pd.to_datetime(caps.index).tz_localize(None)
-                available_tickers = [t for t in tickers if t in caps.columns]
-                if available_tickers:
-                    return caps[available_tickers]
-            except:
-                pass
-        print("[caps] Cache-only mode but no caps data available")
         return pd.DataFrame(index=pd.DatetimeIndex([]), columns=tickers)
-    
-    # If we have caps and not in cache-only, return what we have
-    if caps_path.exists() and 'caps' in locals() and not caps.empty:
-        print("[caps] Returning existing caps data")
-        return caps
-    
-    # Rest of the fetching code (only if no cache exists)...
-    print(f"[caps] Fetching market caps for {len(tickers)} tickers...")
+
     caps_dict = {}
-    
     for ticker in tickers:
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
-            
-            shares = None
-            if 'sharesOutstanding' in info:
-                shares = info['sharesOutstanding']
-            elif 'totalShares' in info:
-                shares = info['totalShares']
-            elif 'floatShares' in info:
-                shares = info['floatShares']
-            
+
+            shares = (
+                info.get("sharesOutstanding")
+                or info.get("totalShares")
+                or info.get("floatShares")
+            )
+
             if shares:
                 hist = stock.history(period="max")
                 if not hist.empty:
-                    # Remove timezone from index
                     hist.index = hist.index.tz_localize(None)
-                    caps_series = hist['Close'] * shares / 1e9
-                    caps_dict[ticker] = caps_series
-                    print(f"[caps] Loaded {ticker}: ${caps_series.iloc[-1]:.2f}B")
+                    caps_dict[ticker] = hist["Close"] * shares / 1e9
                 else:
-                    print(f"[caps] No price history for {ticker}")
                     caps_dict[ticker] = pd.Series(dtype=float)
             else:
-                print(f"[caps] No shares data for {ticker}")
                 caps_dict[ticker] = pd.Series(dtype=float)
-                
-        except Exception as e:
-            print(f"[caps] Failed to get cap for {ticker}: {e}")
+        except Exception:
             caps_dict[ticker] = pd.Series(dtype=float)
-        
+
         time.sleep(0.2)
-    
-    if caps_dict:
-        caps_df = pd.DataFrame(caps_dict)
-        caps_df = caps_df.dropna(axis=1, how='all').sort_index()
-        
-        if not caps_df.empty:
-            caps_df.to_parquet(caps_path)
-            print(f"[caps] Saved caps data to {caps_path}")
-            return caps_df
-    
-    print("[caps] Warning: No market cap data available")
+
+    caps_df = pd.DataFrame(caps_dict).dropna(axis=1, how="all").sort_index()
+    if not caps_df.empty:
+        caps_path.parent.mkdir(parents=True, exist_ok=True)
+        caps_df.to_parquet(caps_path)
+        return caps_df
+
     return pd.DataFrame(index=pd.DatetimeIndex([]), columns=tickers)
 
 
@@ -2976,16 +2896,20 @@ def load_rates_data(
     start: str = "2022-01-01",
     end: Optional[str] = None,
     data_dir: str = "data",
-    use_cache_only: bool = False,  # ADD THIS PARAMETER
+    use_cache_only: bool = False,
+    cache_mode: str = "refresh",
 ) -> RatesInspectorData:
     """
-    Load cached USD rates data (funding + Treasury curve) and cache metadata.
+    Load USD rates data under an explicit cache policy.
     """
+    if use_cache_only:
+        cache_mode = "cache"
+
     rates = load_rates_cached(
         start=start,
         end=end,
         data_dir=data_dir,
-        use_cache_only=use_cache_only,  # PASS IT THROUGH
+        cache_mode=cache_mode,
     )
     cache_info = inspect_rates_cache(data_dir=data_dir)
     return RatesInspectorData(
@@ -2994,34 +2918,50 @@ def load_rates_data(
         cache_info=cache_info,
     )
 
-
 def main() -> None:
     """
-    Script entry point: load universe and run Dash server with fallback support.
+    Script entry point.
+
+    Data modes:
+        refresh -> default. Fetch fresh data, update cache, fail loudly on API/data errors.
+        cache   -> use local cache only.
+        auto    -> fetch fresh data, fall back to cache on API/data errors.
     """
-    import sys
+    import argparse
 
-    # Check for cache-only flag
-    use_cache_only = "--cache-only" in sys.argv
+    parser = argparse.ArgumentParser(description="Run the Index Builder Dash app.")
+    parser.add_argument(
+        "--data-mode",
+        choices=["refresh", "cache", "auto"],
+        default="refresh",
+        help="Data loading policy. Default: refresh.",
+    )
+    parser.add_argument(
+        "--cache-only",
+        action="store_true",
+        help="Backward-compatible alias for --data-mode cache.",
+    )
+    parser.add_argument("--port", type=int, default=8050)
+    parser.add_argument("--debug", action="store_true", help="Run Dash in debug mode.")
+    args = parser.parse_args()
 
-    if use_cache_only:
-        print("[main] Running in CACHE-ONLY mode (no API calls)")
+    data_mode = "cache" if args.cache_only else args.data_mode
 
     data = load_data(
         DEFAULT_UNIVERSE,
         start="2022-01-01",
         end=None,
         data_dir="data",
-        use_cache_only=use_cache_only,
+        cache_mode=data_mode,
     )
     rates_data = load_rates_data(
         start="2022-01-01",
         end=None,
         data_dir="data",
-        use_cache_only=use_cache_only,  # Make sure this is passed
+        cache_mode=data_mode,
     )
     app = build_app(data, rates_data)
-    app.run(debug=True, port=8050)
+    app.run(debug=args.debug, port=args.port)
 
 
 if __name__ == "__main__":

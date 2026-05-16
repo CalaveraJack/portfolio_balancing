@@ -173,6 +173,31 @@ def _fetch_ticker_meta_yahoo(
     return pd.DataFrame(rows).set_index("Ticker")
 
 
+def _filter_yahoo_ohlcv(
+    *,
+    close: pd.DataFrame,
+    volume: pd.DataFrame,
+    meta: pd.DataFrame,
+    tickers: List[str],
+    start: Optional[str],
+    end: Optional[str],
+) -> YahooOHLCV:
+    close_out = close.reindex(columns=tickers)
+    vol_out = volume.reindex(columns=tickers)
+
+    if start:
+        dt0 = pd.to_datetime(start)
+        close_out = close_out.loc[dt0:]
+        vol_out = vol_out.loc[dt0:]
+    if end:
+        dt1 = pd.to_datetime(end)
+        close_out = close_out.loc[:dt1]
+        vol_out = vol_out.loc[:dt1]
+
+    meta_out = meta.loc[[t for t in tickers if t in meta.index]].copy() if not meta.empty else pd.DataFrame()
+    return YahooOHLCV(close=close_out, volume=vol_out, meta=meta_out)
+
+
 def load_close_volume_cached(
     *,
     tickers: Optional[Iterable[str]] = None,
@@ -182,11 +207,24 @@ def load_close_volume_cached(
     interval: str = "1d",
     auto_adjust: bool = True,
     data_dir: str = "data",
-    use_cache_only: bool = False,  # NEW parameter
+    use_cache_only: bool = False,
+    cache_mode: str = "refresh",
 ) -> YahooOHLCV:
     """
-    Load with optional cache-only mode.
+    Load Yahoo close/volume data under an explicit cache policy.
+
+    cache_mode:
+        refresh -> call Yahoo, update local cache, raise on failure.
+        cache   -> read local cache only, never call Yahoo.
+        auto    -> call Yahoo, but caller may fall back to cache on failure.
+
+    use_cache_only is kept for backward compatibility and maps to cache_mode='cache'.
     """
+    if use_cache_only:
+        cache_mode = "cache"
+    if cache_mode not in {"refresh", "cache", "auto"}:
+        raise ValueError("cache_mode must be one of: refresh, cache, auto")
+
     tickers_list = list(tickers) if tickers is not None else list(DEFAULT_TICKERS_10)
 
     data_path = Path(data_dir)
@@ -199,29 +237,53 @@ def load_close_volume_cached(
 
     close_cached = _read_parquet_or_empty(close_path)
     vol_cached = _read_parquet_or_empty(vol_path)
+    ticker_meta = _read_ticker_meta_or_empty(meta_tickers_path)
 
-    # If cache-only, just return what we have or raise
-    if use_cache_only:
+    if cache_mode == "cache":
         if close_cached.empty or vol_cached.empty:
-            raise RuntimeError("Cache-only mode but no cached data available")
+            raise RuntimeError("Cache mode requested, but Yahoo close/volume cache is missing.")
+        return _filter_yahoo_ohlcv(
+            close=close_cached,
+            volume=vol_cached,
+            meta=ticker_meta,
+            tickers=tickers_list,
+            start=start,
+            end=end,
+        )
 
-        close_out = close_cached.reindex(columns=tickers_list)
-        vol_out = vol_cached.reindex(columns=tickers_list)
+    close_new, vol_new = _yf_download_close_volume(
+        tickers=tickers_list,
+        start=start,
+        end=end,
+        period=period,
+        interval=interval,
+        auto_adjust=auto_adjust,
+    )
+    if close_new.empty or vol_new.empty:
+        raise RuntimeError("Yahoo returned no close/volume data for the requested universe.")
 
-        if start:
-            close_out = close_out.loc[pd.to_datetime(start) :]
-            vol_out = vol_out.loc[pd.to_datetime(start) :]
-        if end:
-            close_out = close_out.loc[: pd.to_datetime(end)]
-            vol_out = vol_out.loc[: pd.to_datetime(end)]
+    close_all = _merge_update(close_cached, close_new)
+    vol_all = _merge_update(vol_cached, vol_new)
 
-        ticker_meta = _read_ticker_meta_or_empty(meta_tickers_path)
-        meta_out = ticker_meta.loc[
-            [t for t in tickers_list if t in ticker_meta.index]
-        ].copy()
+    _write_parquet(close_all, close_path)
+    _write_parquet(vol_all, vol_path)
+    _write_meta(meta_path, sorted(set(close_all.columns)), pd.DatetimeIndex(close_all.index))
 
-        return YahooOHLCV(close=close_out, volume=vol_out, meta=meta_out)
+    missing_meta = [t for t in tickers_list if t not in ticker_meta.index]
+    if missing_meta:
+        meta_new = _fetch_ticker_meta_yahoo(missing_meta)
+        ticker_meta = pd.concat([ticker_meta, meta_new]).sort_index()
+        ticker_meta = ticker_meta[~ticker_meta.index.duplicated(keep="last")]
+        _write_ticker_meta(ticker_meta, meta_tickers_path)
 
+    return _filter_yahoo_ohlcv(
+        close=close_all,
+        volume=vol_all,
+        meta=ticker_meta,
+        tickers=tickers_list,
+        start=start,
+        end=end,
+    )
 
 def inspect_cache(*, tickers: List[str], data_dir: str = "data") -> dict:
     data_path = Path(data_dir)

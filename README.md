@@ -41,8 +41,34 @@ uv sync
 
 ## 3) Run
 
+Default mode refreshes Yahoo/FRED data and updates the local cache. If an API is unavailable, the app fails and tells you to rerun from cache if cache is present.
+
 ```bash
 uv run index_builder
+```
+
+Cache-only mode never calls external APIs:
+
+```bash
+uv run index_builder --data-mode cache
+```
+
+Auto mode refreshes data first and falls back to cache only if the fresh load fails:
+
+```bash
+uv run index_builder --data-mode auto
+```
+
+Backward-compatible alias:
+
+```bash
+uv run index_builder --cache-only
+```
+
+Dash debug mode is disabled by default. Enable it explicitly:
+
+```bash
+uv run index_builder --debug
 ```
 
 Open:

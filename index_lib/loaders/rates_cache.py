@@ -214,122 +214,15 @@ def _fetch_curve_panel(
     return curve
 
 
-def load_rates_cached(
+def _filter_rates_data(
+    funding: pd.DataFrame,
+    curve: pd.DataFrame,
     *,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    data_dir: str = "data",
-    fred_api_key: Optional[str] = None,
-    force_refresh: bool = False,
-    use_cache_only: bool = False,  # NEW: bypass API calls
+    start: Optional[str],
+    end: Optional[str],
 ) -> RatesData:
-    """
-    Load rates data with fallback to cached data when API unavailable.
-
-    NEW: use_cache_only=True will only use local cache, never call FRED API.
-    """
-    data_path = Path(data_dir)
-    _ensure_dir(data_path)
-
-    funding_path = data_path / CACHE_FUNDING
-    curve_path = data_path / CACHE_CURVE
-    meta_path = data_path / CACHE_META
-
-    funding_cached = _read_parquet_or_empty(funding_path)
-    curve_cached = _read_parquet_or_empty(curve_path)
-    _ = _read_meta(meta_path)
-
-    # Check if we have usable cached data
-    has_valid_cache = not funding_cached.empty and not curve_cached.empty
-
-    if use_cache_only or (not force_refresh and has_valid_cache):
-        # Use cached data, possibly with date filtering
-        print("[rates] Using cached data (API access disabled/limited)")
-
-        funding_out = funding_cached.copy()
-        curve_out = curve_cached.copy()
-
-        if start:
-            dt0 = pd.to_datetime(start)
-            funding_out = funding_out.loc[dt0:]
-            curve_out = curve_out.loc[dt0:]
-        if end:
-            dt1 = pd.to_datetime(end)
-            funding_out = funding_out.loc[:dt1]
-            curve_out = curve_out.loc[:dt1]
-
-        return RatesData(funding=funding_out, curve=curve_out)
-
-    # Try to fetch fresh data (original logic with error handling)
-    try:
-        if force_refresh or funding_cached.empty or curve_cached.empty:
-            funding_new = _fetch_funding_panel(
-                start=start, end=end, fred_api_key=fred_api_key
-            )
-            curve_new = _fetch_curve_panel(
-                start=start, end=end, fred_api_key=fred_api_key
-            )
-
-            funding_cached = _merge_update(funding_cached, funding_new)
-            curve_cached = _merge_update(curve_cached, curve_new)
-        else:
-            cache_min = funding_cached.index.union(curve_cached.index).min()
-            cache_max = funding_cached.index.union(curve_cached.index).max()
-
-            need_download_ranges: List[Tuple[Optional[str], Optional[str]]] = []
-
-            req_start = pd.to_datetime(start) if start else None
-            req_end = pd.to_datetime(end) if end else None
-
-            if (
-                req_start is not None
-                and cache_min is not None
-                and req_start < cache_min
-            ):
-                left_end = str((cache_min + pd.Timedelta(days=1)).date())
-                need_download_ranges.append((start, left_end))
-
-            if req_end is not None and cache_max is not None and req_end > cache_max:
-                right_start = str((cache_max + pd.Timedelta(days=1)).date())
-                need_download_ranges.append((right_start, end))
-
-            if not start and not end:
-                right_start = (
-                    None
-                    if cache_max is None
-                    else str((cache_max + pd.Timedelta(days=1)).date())
-                )
-                need_download_ranges.append((right_start, None))
-
-            for dl_start, dl_end in need_download_ranges:
-                funding_new = _fetch_funding_panel(
-                    start=dl_start, end=dl_end, fred_api_key=fred_api_key
-                )
-                curve_new = _fetch_curve_panel(
-                    start=dl_start, end=dl_end, fred_api_key=fred_api_key
-                )
-                funding_cached = _merge_update(funding_cached, funding_new)
-                curve_cached = _merge_update(curve_cached, curve_new)
-
-        funding_cached = funding_cached.sort_index()
-        curve_cached = curve_cached.sort_index()
-
-        _write_parquet(funding_cached, funding_path)
-        _write_parquet(curve_cached, curve_path)
-        _write_meta(path=meta_path, funding=funding_cached, curve=curve_cached)
-
-    except (requests.RequestException, ValueError, KeyError) as e:
-        print(f"[rates] WARNING: Failed to fetch fresh rates data: {e}")
-        if has_valid_cache:
-            print("[rates] Falling back to existing cached data")
-            funding_cached = _read_parquet_or_empty(funding_path)
-            curve_cached = _read_parquet_or_empty(curve_path)
-        else:
-            print("[rates] WARNING: No cached data available, returning empty")
-            return RatesData(funding=pd.DataFrame(), curve=pd.DataFrame())
-
-    funding_out = funding_cached.copy()
-    curve_out = curve_cached.copy()
+    funding_out = funding.copy()
+    curve_out = curve.copy()
 
     if start:
         dt0 = pd.to_datetime(start)
@@ -342,6 +235,83 @@ def load_rates_cached(
 
     return RatesData(funding=funding_out, curve=curve_out)
 
+
+def load_rates_cached(
+    *,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    data_dir: str = "data",
+    fred_api_key: Optional[str] = None,
+    force_refresh: bool = False,
+    use_cache_only: bool = False,
+    cache_mode: str = "refresh",
+) -> RatesData:
+    """
+    Load FRED rates data under an explicit cache policy.
+
+    cache_mode:
+        refresh -> call FRED, update local cache, raise on failure.
+        cache   -> read local cache only, never call FRED.
+        auto    -> call FRED, fall back to cache only if FRED fails.
+
+    use_cache_only is kept for backward compatibility and maps to cache_mode='cache'.
+    force_refresh=True maps to cache_mode='refresh'.
+    """
+    if use_cache_only:
+        cache_mode = "cache"
+    if force_refresh:
+        cache_mode = "refresh"
+    if cache_mode not in {"refresh", "cache", "auto"}:
+        raise ValueError("cache_mode must be one of: refresh, cache, auto")
+
+    data_path = Path(data_dir)
+    _ensure_dir(data_path)
+
+    funding_path = data_path / CACHE_FUNDING
+    curve_path = data_path / CACHE_CURVE
+    meta_path = data_path / CACHE_META
+
+    funding_cached = _read_parquet_or_empty(funding_path)
+    curve_cached = _read_parquet_or_empty(curve_path)
+    has_valid_cache = not funding_cached.empty and not curve_cached.empty
+
+    if cache_mode == "cache":
+        if not has_valid_cache:
+            raise RuntimeError("Cache mode requested, but rates cache is missing or incomplete.")
+        return _filter_rates_data(funding_cached, curve_cached, start=start, end=end)
+
+    try:
+        funding_new = _fetch_funding_panel(
+            start=start,
+            end=end,
+            fred_api_key=fred_api_key,
+        )
+        curve_new = _fetch_curve_panel(
+            start=start,
+            end=end,
+            fred_api_key=fred_api_key,
+        )
+
+        if funding_new.empty or curve_new.empty:
+            raise RuntimeError("FRED returned empty funding or curve data.")
+
+        funding_all = _merge_update(funding_cached, funding_new).sort_index()
+        curve_all = _merge_update(curve_cached, curve_new).sort_index()
+
+        _write_parquet(funding_all, funding_path)
+        _write_parquet(curve_all, curve_path)
+        _write_meta(path=meta_path, funding=funding_all, curve=curve_all)
+
+        return _filter_rates_data(funding_all, curve_all, start=start, end=end)
+
+    except (requests.RequestException, ValueError, KeyError, RuntimeError) as e:
+        if cache_mode == "auto" and has_valid_cache:
+            return _filter_rates_data(funding_cached, curve_cached, start=start, end=end)
+
+        recommendation = ""
+        if has_valid_cache:
+            recommendation = " Local rates cache exists; rerun with --data-mode cache or --data-mode auto."
+        raise RuntimeError(f"Failed to refresh FRED rates data: {e}.{recommendation}") from e
 
 def inspect_rates_cache(*, data_dir: str = "data") -> dict:
     data_path = Path(data_dir)
