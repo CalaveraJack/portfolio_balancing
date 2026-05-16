@@ -158,7 +158,8 @@ They are directly integrated into:
 ### Weighting methods
 - Equal Weight  
 - Price Weight  
-- Inverse Volatility  
+- Inverse Volatility
+- Cap-Weighted
 
 ### Rebalancing
 - Daily  
