@@ -366,6 +366,9 @@ $$
 
 # 📜 Version Log
 
+## 2026-05-16
+Caching modes + cap-weighted index balancing
+
 ## 2026-03-28
 Funding-aware overlay + MC funding
 
