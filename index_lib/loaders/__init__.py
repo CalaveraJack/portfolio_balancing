@@ -11,6 +11,7 @@ from .rates_cache import (
     make_curve_snapshot_figure,
     make_funding_history_figure,
 )
+from .market_caps import align_market_caps_to_prices, load_market_caps
 
 __all__ = [
     "YahooOHLCV",

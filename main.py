@@ -59,6 +59,8 @@ from index_lib.app.tables import (
 
 from index_lib.core.rates import compute_curve_spreads, tenor_sort_key
 
+from index_lib.loaders.market_caps import align_market_caps_to_prices, load_market_caps
+
 pio.templates.default = "ggplot2"
 
 # ============================================================================
@@ -1296,23 +1298,18 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         
         # Load market caps for cap-weighting
         market_caps_df = None
+
         if method == "cap_weight" and constituents:
-            try:
-                market_caps_df = load_market_caps(
-                    constituents,
-                    data_dir="data",
-                    use_cache_only=False,
-                )
-                if not market_caps_df.empty:
-                    market_caps_df.index = pd.to_datetime(market_caps_df.index).tz_localize(None)
-                    close_index = (
-                        data.close.index.tz_localize(None)
-                        if hasattr(data.close.index, "tz") and data.close.index.tz is not None
-                        else data.close.index
-                    )
-                    market_caps_df = market_caps_df.reindex(close_index).ffill().fillna(0)
-            except Exception:
-                market_caps_df = None
+            market_caps_df = load_market_caps(
+                constituents,
+                data_dir="data",
+                use_cache_only=False,
+            )
+
+            market_caps_df = align_market_caps_to_prices(
+                market_caps_df,
+                data.close.index,
+            )
 
         index_level, weights_history, base_returns, daily_wh = build_index_series(
             close=data.close,
@@ -1585,15 +1582,21 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         # Load market caps for Monte Carlo if using cap_weight
 
         mc_market_caps = None
+
         if method == "cap_weight" and constituents:
-            try:
-                caps_df = load_market_caps(constituents, data_dir="data", use_cache_only=True)
-                if not caps_df.empty:
-                    caps_df.index = pd.to_datetime(caps_df.index).tz_localize(None)
-                    last_caps = caps_df.iloc[-1]
-                    mc_market_caps = np.full((num_sim, len(constituents)), last_caps.values, dtype=np.float32)
-            except Exception:
-                mc_market_caps = None
+            caps_df = load_market_caps(
+                constituents,
+                data_dir="data",
+                use_cache_only=True,
+            )
+
+            if not caps_df.empty:
+                last_caps = caps_df.reindex(columns=constituents).ffill().iloc[-1]
+                mc_market_caps = np.full(
+                    (num_sim, len(constituents)),
+                    last_caps.fillna(0.0).to_numpy(dtype=np.float32),
+                    dtype=np.float32,
+                )
 
         rate_paths = None
         cash_paths = None
@@ -1898,69 +1901,6 @@ def load_data(
 # ============================================================================
 # Market Cap Loading
 # ============================================================================
-def load_market_caps(
-    tickers: Sequence[str],
-    *,
-    data_dir: str = "data",
-    use_cache_only: bool = False,
-) -> pd.DataFrame:
-    """
-    Load market capitalization data for tickers.
-
-    Returns a DataFrame with dates as index and tickers as columns, with market cap in billions.
-    """
-    import time
-
-    caps_path = Path(data_dir) / "market_caps.parquet"
-
-    if caps_path.exists():
-        try:
-            caps = pd.read_parquet(caps_path)
-            caps.index = pd.to_datetime(caps.index).tz_localize(None)
-            available_tickers = [t for t in tickers if t in caps.columns]
-            if available_tickers:
-                return caps[available_tickers]
-        except Exception:
-            if use_cache_only:
-                raise
-
-    if use_cache_only:
-        return pd.DataFrame(index=pd.DatetimeIndex([]), columns=tickers)
-
-    caps_dict = {}
-    for ticker in tickers:
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-
-            shares = (
-                info.get("sharesOutstanding")
-                or info.get("totalShares")
-                or info.get("floatShares")
-            )
-
-            if shares:
-                hist = stock.history(period="max")
-                if not hist.empty:
-                    hist.index = hist.index.tz_localize(None)
-                    caps_dict[ticker] = hist["Close"] * shares / 1e9
-                else:
-                    caps_dict[ticker] = pd.Series(dtype=float)
-            else:
-                caps_dict[ticker] = pd.Series(dtype=float)
-        except Exception:
-            caps_dict[ticker] = pd.Series(dtype=float)
-
-        time.sleep(0.2)
-
-    caps_df = pd.DataFrame(caps_dict).dropna(axis=1, how="all").sort_index()
-    if not caps_df.empty:
-        caps_path.parent.mkdir(parents=True, exist_ok=True)
-        caps_df.to_parquet(caps_path)
-        return caps_df
-
-    return pd.DataFrame(index=pd.DatetimeIndex([]), columns=tickers)
-
 
 def load_rates_data(
     *,
