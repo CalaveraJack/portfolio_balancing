@@ -132,7 +132,9 @@ def load_universe_close_volume_cached(
                 time.sleep(sleep_s)
 
         if errors:
-            raise RuntimeError(f"Yahoo refresh failed for {len(errors)} chunk(s): {errors}")
+            raise RuntimeError(
+                f"Yahoo refresh failed for {len(errors)} chunk(s): {errors}"
+            )
 
         out = load_close_volume_cached(
             tickers=tickers_list,

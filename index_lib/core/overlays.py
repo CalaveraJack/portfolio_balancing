@@ -37,10 +37,9 @@ def apply_vol_target_overlay(
 
     min_periods = max(10, vol_lookback // 3)
 
-    vol_est_ann = (
-        r.rolling(vol_lookback, min_periods=min_periods).std(ddof=1)
-        * math.sqrt(252.0)
-    )
+    vol_est_ann = r.rolling(vol_lookback, min_periods=min_periods).std(
+        ddof=1
+    ) * math.sqrt(252.0)
     vol_est_ann = vol_est_ann.shift(1)
 
     eps = 1e-12

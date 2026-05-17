@@ -277,7 +277,9 @@ def load_rates_cached(
 
     if cache_mode == "cache":
         if not has_valid_cache:
-            raise RuntimeError("Cache mode requested, but rates cache is missing or incomplete.")
+            raise RuntimeError(
+                "Cache mode requested, but rates cache is missing or incomplete."
+            )
         return _filter_rates_data(funding_cached, curve_cached, start=start, end=end)
 
     try:
@@ -306,12 +308,17 @@ def load_rates_cached(
 
     except (requests.RequestException, ValueError, KeyError, RuntimeError) as e:
         if cache_mode == "auto" and has_valid_cache:
-            return _filter_rates_data(funding_cached, curve_cached, start=start, end=end)
+            return _filter_rates_data(
+                funding_cached, curve_cached, start=start, end=end
+            )
 
         recommendation = ""
         if has_valid_cache:
             recommendation = " Local rates cache exists; rerun with --data-mode cache or --data-mode auto."
-        raise RuntimeError(f"Failed to refresh FRED rates data: {e}.{recommendation}") from e
+        raise RuntimeError(
+            f"Failed to refresh FRED rates data: {e}.{recommendation}"
+        ) from e
+
 
 def inspect_rates_cache(*, data_dir: str = "data") -> dict:
     data_path = Path(data_dir)

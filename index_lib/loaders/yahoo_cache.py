@@ -194,7 +194,11 @@ def _filter_yahoo_ohlcv(
         close_out = close_out.loc[:dt1]
         vol_out = vol_out.loc[:dt1]
 
-    meta_out = meta.loc[[t for t in tickers if t in meta.index]].copy() if not meta.empty else pd.DataFrame()
+    meta_out = (
+        meta.loc[[t for t in tickers if t in meta.index]].copy()
+        if not meta.empty
+        else pd.DataFrame()
+    )
     return YahooOHLCV(close=close_out, volume=vol_out, meta=meta_out)
 
 
@@ -241,7 +245,9 @@ def load_close_volume_cached(
 
     if cache_mode == "cache":
         if close_cached.empty or vol_cached.empty:
-            raise RuntimeError("Cache mode requested, but Yahoo close/volume cache is missing.")
+            raise RuntimeError(
+                "Cache mode requested, but Yahoo close/volume cache is missing."
+            )
         return _filter_yahoo_ohlcv(
             close=close_cached,
             volume=vol_cached,
@@ -260,14 +266,18 @@ def load_close_volume_cached(
         auto_adjust=auto_adjust,
     )
     if close_new.empty or vol_new.empty:
-        raise RuntimeError("Yahoo returned no close/volume data for the requested universe.")
+        raise RuntimeError(
+            "Yahoo returned no close/volume data for the requested universe."
+        )
 
     close_all = _merge_update(close_cached, close_new)
     vol_all = _merge_update(vol_cached, vol_new)
 
     _write_parquet(close_all, close_path)
     _write_parquet(vol_all, vol_path)
-    _write_meta(meta_path, sorted(set(close_all.columns)), pd.DatetimeIndex(close_all.index))
+    _write_meta(
+        meta_path, sorted(set(close_all.columns)), pd.DatetimeIndex(close_all.index)
+    )
 
     missing_meta = [t for t in tickers_list if t not in ticker_meta.index]
     if missing_meta:
@@ -284,6 +294,7 @@ def load_close_volume_cached(
         start=start,
         end=end,
     )
+
 
 def inspect_cache(*, tickers: List[str], data_dir: str = "data") -> dict:
     data_path = Path(data_dir)
