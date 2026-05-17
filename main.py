@@ -9,6 +9,8 @@ from index_lib.app import build_app
 from index_lib.app.data import load_data, load_rates_data
 from index_lib.config import DEFAULT_UNIVERSE
 
+from index_lib.app.logging_config import configure_logging
+
 load_dotenv()
 
 pio.templates.default = "ggplot2"
@@ -52,6 +54,7 @@ def main() -> None:
         auto    -> fetch fresh data, fall back to cache on API/data errors.
     """
     args = parse_args()
+    configure_logging(debug=args.debug)
     data_mode = "cache" if args.cache_only else args.data_mode
 
     data = load_data(

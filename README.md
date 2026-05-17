@@ -1,11 +1,10 @@
-# index-creator
+# Strategy Forge
 
-A minimal Dash app to **inspect a ticker universe** and **compose research-grade indices**  
-(equal-weight / price-weight / inverse-vol), with an optional **funding-aware volatility targeting overlay**.
+A Dash-based research prototype for **strategy construction, index logic, funding-aware overlays, and forward simulation**.
 
-This repository is part of a broader, practical research effort on **digitalization capacities in finance**
+The current version supports universe inspection, portfolio/index construction, local data caching, cap-weighted balancing, funding-aware volatility targeting, and Monte Carlo simulation.
 
-Link to the repository: https://github.com/CalaveraJack/portfolio_balancing
+Repository: https://github.com/CalaveraJack/portfolio_balancing
 
 ---
 
@@ -111,13 +110,11 @@ The application consists of four tightly connected layers:
 
 ## ⚠️ Integration into Portfolio Mechanics
 
-Rates are not just visual anymore.
-
-They are directly integrated into:
+Rates are directly integrated into strategy mechanics.
 
 ### Historical backtests
 - Cash sleeve earns SOFR  
-- Leveraged sleeve pays SOFR + spread  
+- Leveraged sleeve pays SOFR + spread (as per current version is an abstraction of user-defined constant)
 
 ### Monte Carlo simulation
 - Same funding logic applied per simulated path  
@@ -156,12 +153,15 @@ They are directly integrated into:
 ### Portfolio construction
 - Multi-asset selection  
 - Flexible weighting schemes  
+- Periodic rebalancing  
+- Weight drift  
+- Weight caps  
 
 ### Weighting methods
 - Equal Weight  
 - Price Weight  
-- Inverse Volatility
-- Cap-Weighted
+- Inverse Volatility  
+- Cap-Weighted  
 
 ### Rebalancing
 - Daily  
@@ -185,7 +185,7 @@ When enabled, the overlay becomes economically realistic.
 - λ > 1 → leveraged capital pays funding cost  
 
 ### User input
-- Borrow spread  
+- Borrow spread (fixed number - an abstraction for now)
 
 ---
 
@@ -253,12 +253,12 @@ Two independent stochastic layers:
 
 ## Funding process
 - Fixed  
-- OU  
+- OU-inspired mean reverting process (not OU per se for now)
 - Bootstrap  
 
 ---
 
-## OU Model
+## OU-Inspired Model
 
 Mean-reverting short-rate process estimated from SOFR.
 
@@ -268,15 +268,6 @@ Mean-reverting short-rate process estimated from SOFR.
 
 Empirical rate shocks preserved.
 
----
-
-## Decoupling
-
-Return process and funding process are independent:
-
-- GBM + OU  
-- Bootstrap + Bootstrap  
-- etc.  
 
 ---
 
@@ -287,7 +278,7 @@ Return process and funding process are independent:
 ## Capabilities
 
 - Inspect simulated paths  
-- Compare to mean  
+- Compare the path to mean  
 - Validate process behaviour  
 
 ---
@@ -348,23 +339,94 @@ $$
 
 ## Stocks
 - Yahoo Finance  
-- Local caching  
+- Local parquet cache  
 
 ## Rates
 - FRED  
-- Cached  
+- Local parquet cache  
+
+
+# Tests
+
+Basic smoke tests are used to protect the refactor.
+
+Run:
+
+```bash
+uv run pytest
+```
+
+Recommended local release checks:
+
+```bash
+uv run python -m compileall index_lib main.py
+uv run pytest
+uv run index_builder -- --data-mode cache
+```
+
+Optional data-mode checks:
+
+```bash
+uv run index_builder -- --data-mode auto
+uv run index_builder -- --data-mode refresh
+```
+
+Expected behavior:
+
+- `cache`: should launch from local cache
+- `auto`: should launch from fresh data or fall back to cache
+- `refresh`: should refresh and fail loudly if API/data access fails
 
 ---
 
-# ⚙️ Configuration
+# Configuration
 
-- Universe → main.py  
-- Overlay → apply_vol_target_overlay  
-- Funding → MC functions  
+## Universe
+
+Universe definitions are in:
+
+```text
+index_lib/config/universes.py
+```
+
+Default universe:
+
+```text
+DEFAULT_UNIVERSE = PHARMA_48
+```
+
+## Overlay
+
+Volatility targeting logic is in:
+
+```text
+index_lib/core/overlays.py
+```
+
+## Backtest engine
+
+Index and portfolio mechanics are in:
+
+```text
+index_lib/core/backtest.py
+index_lib/core/weighting.py
+index_lib/core/rebalancing.py
+```
+
+## Funding simulation
+
+Funding path logic is in:
+
+```text
+index_lib/simulation/funding.py
+```
 
 ---
 
-# 📜 Version Log
+# Version Log
+
+## 2026-05-17
+Release cleanup: core/app/data separation
 
 ## 2026-05-16
 Caching modes + cap-weighted index balancing
@@ -383,6 +445,6 @@ Equal-weight correction
 
 ---
 
-# 🧠 Notes
+# Notes
 
-This is a **research prototype**: iterative process will be conducted to bring practical applicability.
+This is a research prototype. The current release prepares the application for the next stage: visual redesign, strategy persistence, strategy comparison, regime diagnostics, and broader systematic portfolio management functionality.

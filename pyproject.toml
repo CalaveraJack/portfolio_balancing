@@ -33,6 +33,11 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["index_lib*"]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
+
 # Standalone top-level module for the CLI driver
 [tool.setuptools]
 py-modules = ["main"]
