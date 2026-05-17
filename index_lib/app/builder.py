@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from typing import List, Optional
 
 import numpy as np  # type: ignore
@@ -66,31 +68,19 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     if not default_pick:
         default_pick = available[:6]
 
-    app = Dash(__name__, suppress_callback_exceptions=True)
-    app.title = "Index Builder"
+    project_root = Path(__file__).resolve().parents[2]
 
-    app.layout = html.Div(
-        style={"maxWidth": "1250px", "margin": "0 auto", "padding": "12px"},
-        children=[
-            html.H2("Index Builder: Universe + Composer"),
-            dcc.Tabs(
-                id="tabs",
-                value="tab_rates",
-                children=[
-                    dcc.Tab(label="Rates Inspector", value="tab_rates"),
-                    dcc.Tab(label="Universe Inspector", value="tab_inspector"),
-                    dcc.Tab(label="Index Composer", value="tab_composer"),
-                ],
-            ),
-            html.Div(id="tab_content"),
-        ],
+    app = Dash(
+        __name__,
+        suppress_callback_exceptions=True,
+        assets_folder=str(project_root / "assets"),
+        assets_url_path="/assets",
     )
-
+    app.title = "Strategy Forge"
     # ------------------------------------------------------------------------
     # Tab content renderer
     # ------------------------------------------------------------------------
-    @app.callback(Output("tab_content", "children"), Input("tabs", "value"))
-    def render_tab(tab: str):
+    def make_tab_content(tab: str):
         if tab == "tab_rates":
             curve_cols = sorted(
                 [c for c in rates_data.curve.columns if c.startswith("USD_")],
@@ -106,6 +96,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 latest_curve_date = str(curve_nonempty.index.max().date())
 
             return html.Div(
+                style={
+                    "backgroundColor": "#0f1115",
+                    "color": "#f2f2f2",
+                },
                 children=[
                     html.H4("Rates Inspector"),
                     html.Div(
@@ -151,6 +145,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             )
         if tab == "tab_inspector":
             return html.Div(
+                style={
+                    "backgroundColor": "#0f1115",
+                    "color": "#f2f2f2",
+                },
                 children=[
                     html.H4("Universe Inspector"),
                     html.Div(
@@ -218,6 +216,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
 
         # tab_composer
         return html.Div(
+                style={
+                    "backgroundColor": "#0f1115",
+                    "color": "#f2f2f2",
+                },
             children=[
                 html.H4("Index Composer"),
                 html.Div(
@@ -664,6 +666,101 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 ),
             ]
         )
+    # ------------------------------------------------------------------------
+    # Tab visibility toggle
+    # ------------------------------------------------------------------------
+    @app.callback(
+        Output("rates_panel", "style"),
+        Output("universe_panel", "style"),
+        Output("composer_panel", "style"),
+        Input("tabs", "value"),
+    )
+    def toggle_tab_panels(tab: str):
+        hidden = {
+            "display": "none",
+            "backgroundColor": "#0f1115",
+            "color": "#f2f2f2",
+        }
+
+        shown = {
+            "display": "block",
+            "backgroundColor": "#0f1115",
+            "color": "#f2f2f2",
+        }
+
+        return (
+            shown if tab == "tab_rates" else hidden,
+            shown if tab == "tab_inspector" else hidden,
+            shown if tab == "tab_composer" else hidden,
+        )
+
+    app.layout = html.Div(
+        className="app-shell",
+        children=[
+            html.Div(
+                className="app-header",
+                children=[
+                    html.Div(
+                        children=[
+                            html.H2("Strategy Forge", className="app-title"),
+                            html.Div(
+                                "Research terminal for strategy construction, funding-aware overlays, and forward simulation.",
+                                className="app-subtitle",
+                            ),
+                        ]
+                    ),
+                    html.Div("v0.1", className="app-badge"),
+                ],
+            ),
+            dcc.Tabs(
+                id="tabs",
+                value="tab_rates",
+                children=[
+                    dcc.Tab(label="Macro & Funding", value="tab_rates"),
+                    dcc.Tab(label="Universe Diagnostics", value="tab_inspector"),
+                    dcc.Tab(label="Strategy Forge", value="tab_composer"),
+                ],
+            ),
+            html.Div(
+                id="tab_content",
+                style={
+                    "backgroundColor": "#0f1115",
+                    "color": "#f2f2f2",
+                    "minHeight": "100vh",
+                },
+                children=[
+                    html.Div(
+                        id="rates_panel",
+                        style={
+                            "display": "block",
+                            "backgroundColor": "#0f1115",
+                            "color": "#f2f2f2",
+                        },
+                        children=make_tab_content("tab_rates").children,
+                    ),
+                    html.Div(
+                        id="universe_panel",
+                        style={
+                            "display": "none",
+                            "backgroundColor": "#0f1115",
+                            "color": "#f2f2f2",
+                        },
+                        children=make_tab_content("tab_inspector").children,
+                    ),
+                    html.Div(
+                        id="composer_panel",
+                        style={
+                            "display": "none",
+                            "backgroundColor": "#0f1115",
+                            "color": "#f2f2f2",
+                        },
+                        children=make_tab_content("tab_composer").children,
+                    ),
+                ],
+            ),
+        ],
+    )
+
 
     # ------------------------------------------------------------------------
     # UI toggles (hide/show; inputs stay mounted)
@@ -702,11 +799,21 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         Input("comp_method", "value"),
     )
     def toggle_lookback(method: str):
-        base_style = {"width": "120px"}
+        base_style = {
+            "width": "120px",
+            "backgroundColor": "#171a21",
+            "color": "#f2f2f2",
+            "border": "1px solid #2b313d",
+        }
+
         if method == "inv_vol":
             return False, base_style
-        return True, {**base_style, "backgroundColor": "#f0f0f0", "color": "#777"}
 
+        return True, {
+            **base_style,
+            "backgroundColor": "#1f2430",
+            "color": "#a0a6b3",
+        }
     # ------------------------------------------------------------------------
     # Rates Inspector: update rates and charts
     # ------------------------------------------------------------------------

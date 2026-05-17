@@ -1,0 +1,1097 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1f2430;
+  --panel-3: #252b38;
+  --text: #f2f2f2;
+  --muted: #a0a6b3;
+  --border: #2b313d;
+
+  /* softer orange */
+  --accent: #d9822b;
+  --accent-hover: #e89a45;
+  --accent-dark: #a95f1e;
+  --accent-soft: rgba(217, 130, 43, 0.16);
+
+  --danger: #ff5c5c;
+
+  /* Dash token overrides */
+  --Dash-Fill-Interactive-Weak: var(--panel);
+  --Dash-Fill-Interactive-Weak-Hover: var(--panel-2);
+  --Dash-Fill-Interactive-Strong: var(--accent);
+  --Dash-Fill-Interactive-Strong-Hover: var(--accent-hover);
+  --Dash-Stroke-Strong: var(--border);
+  --Dash-Stroke-Weak: var(--border);
+  --Dash-Text-Primary: var(--text);
+  --Dash-Text-Secondary: var(--muted);
+  --Dash-Text-Interactive: var(--accent);
+  --Dash-Text-Interactive-Hover: var(--accent-hover);
+}
+
+/* =========================================================
+   BASE
+   ========================================================= */
+
+html,
+body,
+#react-entry-point,
+#_dash-app-content,
+._dash-app-content {
+  min-height: 100%;
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--text) !important;
+  letter-spacing: -0.02em;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+a {
+  color: var(--accent);
+}
+
+label,
+p,
+span,
+div {
+  color: inherit;
+}
+
+/* =========================================================
+   APP SHELL
+   ========================================================= */
+
+.app-shell {
+  max-width: 1280px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 18px;
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.app-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text) !important;
+}
+
+.app-subtitle {
+  color: var(--muted) !important;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.app-badge {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent) !important;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* =========================================================
+   TABS
+   ========================================================= */
+
+.dash-tabs,
+.tab-container,
+.tab-parent {
+  background: var(--bg) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.dash-tab,
+.tab {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-bottom: 1px solid var(--border) !important;
+  padding: 14px 18px !important;
+  font-weight: 600 !important;
+}
+
+.dash-tab:hover,
+.tab:hover {
+  background: var(--panel-2) !important;
+  color: var(--accent) !important;
+}
+
+.dash-tab--selected,
+.tab--selected,
+.dash-tab[aria-selected="true"],
+.tab[aria-selected="true"] {
+  background: var(--panel-2) !important;
+  color: var(--accent) !important;
+  border-top: 2px solid var(--accent) !important;
+  border-left: 1px solid var(--border) !important;
+  border-right: 1px solid var(--border) !important;
+  border-bottom: 1px solid var(--panel-2) !important;
+}
+
+/* =========================================================
+   GENERAL INPUTS / BUTTONS
+   ========================================================= */
+
+input,
+input[type="text"],
+input[type="number"],
+textarea,
+select {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 7px !important;
+  box-shadow: none !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent) !important;
+  outline: none !important;
+}
+
+button {
+  background: var(--accent) !important;
+  color: #111 !important;
+  border: 1px solid var(--accent) !important;
+  border-radius: 8px !important;
+  font-weight: 700 !important;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+  filter: none;
+}
+
+button:disabled,
+input:disabled {
+  background: var(--panel-2) !important;
+  color: var(--muted) !important;
+  border-color: var(--border) !important;
+  opacity: 1 !important;
+}
+
+/* New Dash input component wrappers */
+.dash-input-container,
+.dash-input,
+.dash-input-container *,
+.dash-input * {
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+.dash-input-container button,
+.dash-input button {
+  background: var(--accent) !important;
+  color: #111 !important;
+  border-color: var(--accent) !important;
+}
+
+.dash-input-container button:hover,
+.dash-input button:hover {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+}
+
+.dash-input-container input,
+.dash-input input {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+/* =========================================================
+   OLD REACT SELECT / DROPDOWN SUPPORT
+   ========================================================= */
+
+.Select,
+.Select-control,
+.Select-multi-value-wrapper,
+.Select-placeholder,
+.Select-value,
+.Select-input,
+.Select-input > input,
+.Select--single > .Select-control .Select-value,
+.Select--multi .Select-value {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+.Select-control {
+  border: 1px solid var(--border) !important;
+  border-radius: 7px !important;
+  box-shadow: none !important;
+}
+
+.Select-control:hover {
+  border-color: var(--accent) !important;
+}
+
+.Select-placeholder {
+  color: var(--muted) !important;
+}
+
+.Select-value-label {
+  color: var(--text) !important;
+}
+
+.Select--multi .Select-value {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+}
+
+.Select--multi .Select-value-label {
+  color: var(--text) !important;
+}
+
+.Select--multi .Select-value-icon {
+  color: var(--muted) !important;
+  border-right: 1px solid var(--border) !important;
+}
+
+.Select-arrow {
+  border-color: var(--muted) transparent transparent !important;
+}
+
+.Select-menu-outer,
+.Select-menu {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35) !important;
+}
+
+.Select-option {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.Select-option.is-focused {
+  background: var(--panel-2) !important;
+  color: var(--accent) !important;
+}
+
+.Select-option.is-selected {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+}
+
+.Select-clear-zone {
+  color: var(--muted) !important;
+}
+
+.Select-clear-zone:hover {
+  color: var(--accent) !important;
+}
+
+/* =========================================================
+   NEW DASH DROPDOWN / RADIX DROPDOWN SUPPORT
+   ========================================================= */
+
+.dash-dropdown,
+.dash-dropdown *,
+.dash-dropdown-container,
+.dash-dropdown-container *,
+.dash-dropdown-grid-container,
+.dash-dropdown-grid-container *,
+.dash-dropdown-search-container,
+.dash-dropdown-search-container *,
+.dash-dropdown-menu,
+.dash-dropdown-menu *,
+.dash-dropdown-option,
+.dash-dropdown-option *,
+.dash-dropdown-value,
+.dash-dropdown-value *,
+.dash-dropdown-placeholder,
+.dash-dropdown-placeholder * {
+  box-sizing: border-box;
+}
+
+.dash-dropdown,
+.dash-dropdown-container,
+.dash-dropdown-grid-container,
+.dash-dropdown-search-container {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+
+  --Dash-Fill-Interactive-Weak: var(--panel) !important;
+  --Dash-Fill-Interactive-Weak-Hover: var(--panel-2) !important;
+  --Dash-Fill-Interactive-Strong: var(--accent) !important;
+  --Dash-Fill-Interactive-Strong-Hover: var(--accent-hover) !important;
+  --Dash-Text-Interactive: var(--accent) !important;
+}
+
+.dash-dropdown-grid-container {
+  border: 1px solid var(--border) !important;
+  border-radius: 7px !important;
+  overflow: hidden !important;
+}
+
+.dash-dropdown-grid-container:hover,
+.dash-dropdown-grid-container:focus-within,
+.dash-dropdown-search-container:focus-within {
+  border-color: var(--accent) !important;
+}
+
+.dash-dropdown-search-container {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.dash-dropdown input,
+.dash-dropdown-container input,
+.dash-dropdown-search-container input {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: none !important;
+}
+
+.dash-dropdown-value,
+.dash-dropdown-placeholder {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.dash-dropdown-placeholder {
+  color: var(--muted) !important;
+}
+
+.dash-dropdown-menu {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5) !important;
+}
+
+.dash-dropdown-option {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.dash-dropdown-option:hover,
+.dash-dropdown-option[aria-selected="true"],
+.dash-dropdown-option[data-highlighted],
+.dash-dropdown-option[data-state="checked"] {
+  background: var(--panel-2) !important;
+  color: var(--accent) !important;
+}
+
+/* Selected count badge: "4 selected", "6 selected" */
+.dash-dropdown-grid-container [class*="selected"],
+.dash-dropdown-grid-container [class*="Selected"],
+.dash-dropdown-grid-container [class*="badge"],
+.dash-dropdown-grid-container [class*="Badge"],
+.dash-dropdown-grid-container [class*="count"],
+.dash-dropdown-grid-container [class*="Count"],
+.dash-dropdown-grid-container [data-selected],
+.dash-dropdown-grid-container [aria-selected] {
+  background: var(--accent-soft) !important;
+  color: var(--text) !important;
+  border-color: var(--accent-dark) !important;
+}
+
+/* Specific fallback: any small pill inside dropdown controls */
+.dash-dropdown-grid-container > div,
+.dash-dropdown-grid-container span,
+.dash-dropdown-search-container > div,
+.dash-dropdown-search-container span {
+  color: var(--text) !important;
+}
+
+/* Remove blue SVG/icon accent */
+.dash-dropdown-grid-container svg,
+.dash-dropdown-search-container svg,
+.dash-dropdown svg {
+  color: var(--text) !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+/* Generic Radix popovers used by newer Dash components */
+[data-radix-popper-content-wrapper] {
+  background: transparent !important;
+  color: var(--text) !important;
+  z-index: 9999 !important;
+}
+
+[data-radix-popper-content-wrapper],
+[data-radix-popper-content-wrapper] * {
+  --Dash-Fill-Interactive-Weak: var(--panel) !important;
+  --Dash-Fill-Interactive-Weak-Hover: var(--panel-2) !important;
+  --Dash-Fill-Interactive-Strong: var(--accent) !important;
+  --Dash-Fill-Interactive-Strong-Hover: var(--accent-hover) !important;
+  --Dash-Text-Interactive: var(--accent) !important;
+  --Dash-Text-Interactive-Hover: var(--accent-hover) !important;
+  --Dash-Stroke-Strong: var(--border) !important;
+  --Dash-Stroke-Weak: var(--border) !important;
+}
+
+[data-radix-popper-content-wrapper] > *,
+[data-radix-popper-content-wrapper] [role="dialog"],
+[data-radix-popper-content-wrapper] [role="listbox"],
+[data-radix-popper-content-wrapper] [role="menu"],
+[data-radix-popper-content-wrapper] [data-radix-popper-content],
+[data-radix-popper-content-wrapper] [data-side],
+[data-radix-popper-content-wrapper] [data-align] {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+[data-radix-popper-content-wrapper] [role="option"],
+[data-radix-popper-content-wrapper] [role="menuitem"],
+[data-radix-popper-content-wrapper] [cmdk-item],
+[data-radix-popper-content-wrapper] [data-highlighted] {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+[data-radix-popper-content-wrapper] [role="option"]:hover,
+[data-radix-popper-content-wrapper] [role="menuitem"]:hover,
+[data-radix-popper-content-wrapper] [data-highlighted="true"],
+[data-radix-popper-content-wrapper] [data-highlighted] {
+  background: var(--panel-2) !important;
+  color: var(--accent) !important;
+}
+
+/* Fallback for generated react-select classnames */
+[class*="control"] {
+  background-color: var(--panel) !important;
+  border-color: var(--border) !important;
+}
+
+[class*="menu"] {
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+[class*="option"] {
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+[class*="singleValue"],
+[class*="multiValue"],
+[class*="placeholder"] {
+  color: var(--text) !important;
+}
+
+/* =========================================================
+   DATE PICKER: OLD + NEW DASH + RADIX
+   ========================================================= */
+
+/* Old AirBnB-style datepicker classes */
+.SingleDatePicker,
+.SingleDatePicker *,
+.SingleDatePickerInput,
+.SingleDatePickerInput *,
+.DateInput,
+.DateInput *,
+.DateInput_input,
+.DateInput_input__focused {
+  box-sizing: border-box;
+}
+
+.SingleDatePicker {
+  background: transparent !important;
+}
+
+.SingleDatePickerInput,
+.SingleDatePickerInput__withBorder,
+.DateInput,
+.DateInput_input,
+.DateInput_input__focused {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+.SingleDatePickerInput {
+  border: 1px solid var(--border) !important;
+  border-radius: 7px !important;
+  overflow: hidden !important;
+}
+
+.DateInput {
+  width: 140px !important;
+}
+
+.DateInput_input {
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  font-weight: 500 !important;
+  padding: 6px 8px !important;
+}
+
+.DateInput_input__focused {
+  border-bottom: 2px solid var(--accent) !important;
+}
+
+.DateInput_fang,
+.DateInput_fangShape {
+  fill: var(--panel) !important;
+  stroke: var(--border) !important;
+}
+
+.SingleDatePicker_picker,
+.DayPicker,
+.DayPicker_transitionContainer,
+.DayPicker_transitionContainer__horizontal,
+.CalendarMonthGrid,
+.CalendarMonthGrid__horizontal,
+.CalendarMonth,
+.CalendarMonth_table,
+.CalendarMonth_caption {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.DayPicker__withBorder {
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55) !important;
+}
+
+.CalendarMonth_caption strong {
+  color: var(--text) !important;
+}
+
+.DayPicker_weekHeaders,
+.DayPicker_weekHeader,
+.DayPicker_weekHeader_ul,
+.DayPicker_weekHeader_li,
+.DayPicker_weekHeader small {
+  background: var(--panel) !important;
+  color: var(--muted) !important;
+}
+
+.CalendarDay,
+.CalendarDay__default {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.CalendarDay__default:hover {
+  background: var(--panel-2) !important;
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+.CalendarDay__selected,
+.CalendarDay__selected:active,
+.CalendarDay__selected:hover {
+  background: var(--accent) !important;
+  color: #111 !important;
+  border-color: var(--accent) !important;
+}
+
+.CalendarDay__today {
+  color: var(--accent) !important;
+  font-weight: 700 !important;
+}
+
+.CalendarDay__outside,
+.CalendarDay__outside:hover,
+.CalendarDay__blocked_out_of_range,
+.CalendarDay__blocked_out_of_range:hover {
+  background: #101217 !important;
+  color: #555b66 !important;
+  border-color: var(--border) !important;
+}
+
+.DayPickerNavigation,
+.DayPickerNavigation_button,
+.DayPickerNavigation_button__default {
+  background: var(--panel-2) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+}
+
+.DayPickerNavigation_button:hover {
+  background: var(--accent) !important;
+  color: #111 !important;
+}
+
+.DayPickerNavigation_svg__horizontal {
+  fill: currentColor !important;
+}
+
+/* New Dash datepicker classes */
+.dash-datepicker-input-wrapper,
+.dash-datepicker-input-wrapper *,
+.dash-datepicker-content,
+.dash-datepicker-content *,
+.dash-datepicker-calendar-wrapper,
+.dash-datepicker-calendar-wrapper * {
+  box-sizing: border-box;
+}
+
+.dash-datepicker-input-wrapper {
+  display: inline-grid !important;
+  grid-template-columns: 1fr auto !important;
+  align-items: stretch !important;
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 7px !important;
+  overflow: hidden !important;
+
+  --Dash-Fill-Interactive-Weak: var(--panel) !important;
+  --Dash-Fill-Interactive-Weak-Hover: var(--panel-2) !important;
+  --Dash-Fill-Interactive-Strong: var(--accent) !important;
+  --Dash-Fill-Interactive-Strong-Hover: var(--accent-hover) !important;
+  --Dash-Stroke-Strong: var(--border) !important;
+  --Dash-Stroke-Weak: var(--border) !important;
+  --Dash-Text-Primary: var(--text) !important;
+  --Dash-Text-Secondary: var(--muted) !important;
+  --Dash-Text-Interactive: var(--accent) !important;
+}
+
+.dash-datepicker-input-wrapper > *,
+.dash-datepicker-input-wrapper > div,
+.dash-datepicker-input-wrapper > div > div,
+.dash-datepicker-input-wrapper > div > div > div,
+.dash-datepicker-input-wrapper button,
+.dash-datepicker-input-wrapper input,
+.dash-datepicker-input-wrapper [role="button"],
+.dash-datepicker-input-wrapper [aria-haspopup],
+.dash-datepicker-input-wrapper [data-state] {
+  background: var(--panel) !important;
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+  border-radius: 0 !important;
+  background-clip: padding-box !important;
+}
+
+.dash-datepicker-input-wrapper > div:first-child {
+  border-radius: 7px 0 0 7px !important;
+  overflow: hidden !important;
+}
+
+.dash-datepicker-input-wrapper > svg,
+.dash-datepicker-input-wrapper .dash-datepicker-caret-icon {
+  background: var(--panel) !important;
+  color: var(--muted) !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  border-radius: 0 7px 7px 0 !important;
+  padding: 0 8px !important;
+  height: 100% !important;
+  box-sizing: content-box !important;
+}
+
+.dash-datepicker-input-wrapper:hover,
+.dash-datepicker-input-wrapper:focus-within,
+.dash-datepicker-input-wrapper[aria-expanded="true"] {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 1px var(--accent-soft) !important;
+}
+
+.dash-datepicker-content {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55) !important;
+  overflow: hidden !important;
+}
+
+.dash-datepicker-calendar-wrapper {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: none !important;
+}
+
+.dash-datepicker-content div,
+.dash-datepicker-calendar-wrapper div {
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.dash-datepicker-content button,
+.dash-datepicker-calendar-wrapper button {
+  background: var(--panel-2) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+}
+
+.dash-datepicker-content button:hover,
+.dash-datepicker-calendar-wrapper button:hover {
+  background: var(--accent) !important;
+  color: #111 !important;
+  border-color: var(--accent) !important;
+}
+
+.dash-datepicker-content [role="gridcell"],
+.dash-datepicker-calendar-wrapper [role="gridcell"],
+.dash-datepicker-content td,
+.dash-datepicker-calendar-wrapper td {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+.dash-datepicker-content [role="gridcell"]:hover,
+.dash-datepicker-calendar-wrapper [role="gridcell"]:hover,
+.dash-datepicker-content td:hover,
+.dash-datepicker-calendar-wrapper td:hover {
+  background: var(--panel-2) !important;
+  color: var(--accent) !important;
+}
+
+.dash-datepicker-content [aria-selected="true"],
+.dash-datepicker-calendar-wrapper [aria-selected="true"],
+.dash-datepicker-content [data-selected="true"],
+.dash-datepicker-calendar-wrapper [data-selected="true"] {
+  background: var(--accent) !important;
+  color: #111 !important;
+  border-color: var(--accent) !important;
+}
+
+.dash-datepicker-content [aria-disabled="true"],
+.dash-datepicker-calendar-wrapper [aria-disabled="true"],
+.dash-datepicker-content [data-outside-month="true"],
+.dash-datepicker-calendar-wrapper [data-outside-month="true"] {
+  background: #101217 !important;
+  color: #555b66 !important;
+}
+
+.dash-datepicker-content [role="columnheader"],
+.dash-datepicker-calendar-wrapper [role="columnheader"] {
+  background: var(--panel) !important;
+  color: var(--muted) !important;
+}
+
+.dash-datepicker-content svg,
+.dash-datepicker-calendar-wrapper svg {
+  color: var(--text) !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+/* =========================================================
+   TABLES / DASH DATATABLE
+   ========================================================= */
+
+table,
+td,
+th {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+td,
+th {
+  border-bottom: 1px solid var(--border) !important;
+  padding: 6px 10px;
+}
+
+.dash-table-container,
+.dash-spreadsheet-container,
+.dash-spreadsheet-inner,
+.dash-spreadsheet-inner table {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.dash-spreadsheet-inner th,
+.dash-spreadsheet-inner td {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+.dash-spreadsheet-inner tr:hover td {
+  background: var(--panel-2) !important;
+}
+
+/* =========================================================
+   DETAILS / PANELS
+   ========================================================= */
+
+details {
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px !important;
+  padding: 8px 10px !important;
+}
+
+summary {
+  color: var(--text) !important;
+}
+
+/* =========================================================
+   NO-BLUE ACCENT KILL SWITCH
+   Keep near bottom.
+   ========================================================= */
+
+[style*="blue"],
+[style*="#0d6efd"],
+[style*="#007bff"],
+[style*="#1f77b4"],
+[style*="rgb(0, 123, 255)"],
+[style*="rgb(13, 110, 253)"] {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+[style*="background: blue"],
+[style*="background-color: blue"],
+[style*="background:#0d6efd"],
+[style*="background-color:#0d6efd"],
+[style*="background: #0d6efd"],
+[style*="background-color: #0d6efd"],
+[style*="background:#007bff"],
+[style*="background-color:#007bff"],
+[style*="background: #007bff"],
+[style*="background-color: #007bff"] {
+  background: var(--accent-soft) !important;
+  background-color: var(--accent-soft) !important;
+  color: var(--text) !important;
+}
+
+/* =========================================================
+   LAST-RESORT WHITE/BLUE BACKGROUND KILLERS FOR DASH/RADIX POPUPS
+   Keep these at the bottom.
+   ========================================================= */
+
+[data-radix-popper-content-wrapper] div,
+[data-radix-popper-content-wrapper] section,
+[data-radix-popper-content-wrapper] article,
+[data-radix-popper-content-wrapper] ul,
+[data-radix-popper-content-wrapper] li,
+[data-radix-popper-content-wrapper] table,
+[data-radix-popper-content-wrapper] tbody,
+[data-radix-popper-content-wrapper] thead,
+[data-radix-popper-content-wrapper] tr,
+[data-radix-popper-content-wrapper] td,
+[data-radix-popper-content-wrapper] th {
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+[data-radix-popper-content-wrapper] button {
+  background-color: var(--panel-2) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+[data-radix-popper-content-wrapper] button:hover {
+  background-color: var(--accent) !important;
+  color: #111 !important;
+  border-color: var(--accent) !important;
+}
+
+/* Keep form elements coherent */
+.dash-dropdown-grid-container,
+.dash-dropdown-search-container,
+.Select-control {
+  border-radius: 8px !important;
+}
+
+.dash-dropdown-grid-container:focus-within,
+.dash-dropdown-search-container:focus-within,
+.Select-control:focus-within {
+  border-color: var(--accent) !important;
+}
+
+/* =========================================================
+   ANTI-FLASH / DARK FIRST PAINT
+   ========================================================= */
+
+html,
+body,
+#react-entry-point,
+#_dash-app-content,
+._dash-app-content,
+.dash-debug-menu,
+.dash-debug-menu__outer {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+#tab_content {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  min-height: 100vh;
+}
+
+/* Dash loading states */
+._dash-loading,
+._dash-loading-callback,
+.dash-loading,
+.dash-spinner,
+*[data-dash-is-loading="true"] {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+/* Kill transient white backgrounds during component mount */
+#tab_content *,
+.app-shell * {
+  transition-property: color, border-color, background-color;
+  transition-duration: 0s !important;
+}
+
+.dash-datepicker-input-wrapper,
+.SingleDatePicker,
+.SingleDatePickerInput {
+  min-width: 140px !important;
+  width: 140px !important;
+}
+
+.DateInput {
+  min-width: 140px !important;
+  width: 140px !important;
+}
+
+.dash-datepicker-input-wrapper input,
+.DateInput_input {
+  min-width: 110px !important;
+}
+
+/* =========================================================
+   DATEPICKER CORNER PURGE
+   outer wrapper transparent, inner control owns the shape
+   ========================================================= */
+
+.dash-datepicker {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+
+/* The actual closed date control */
+.dash-datepicker-input-wrapper {
+  position: relative !important;
+  isolation: isolate !important;
+  width: 140px !important;
+  min-width: 140px !important;
+  height: 35px !important;
+  min-height: 35px !important;
+
+  background: var(--panel) !important;
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+
+  border: 1px solid var(--border) !important;
+  border-radius: 7px !important;
+  overflow: hidden !important;
+}
+
+/* Paint an exact dark rounded base behind all children */
+.dash-datepicker-input-wrapper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+
+  background: var(--panel) !important;
+  border-radius: 7px !important;
+}
+
+/* Kill any child corner/background leaks */
+.dash-datepicker-input-wrapper > *,
+.dash-datepicker-input-wrapper > div,
+.dash-datepicker-input-wrapper > div > *,
+.dash-datepicker-input-wrapper > div > div > *,
+.dash-datepicker-input-wrapper button,
+.dash-datepicker-input-wrapper input,
+.dash-datepicker-input-wrapper svg {
+  background: transparent !important;
+  background-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Date text area */
+.dash-datepicker-input-wrapper > div:first-child {
+  background: transparent !important;
+  color: var(--text) !important;
+  min-width: 110px !important;
+  width: 110px !important;
+}
+
+/* Inner displayed date text */
+.dash-datepicker-input-wrapper > div:first-child * {
+  background: transparent !important;
+  color: var(--text) !important;
+}
+
+/* Caret/icon area */
+.dash-datepicker-input-wrapper > svg,
+.dash-datepicker-input-wrapper .dash-datepicker-caret-icon {
+  background: transparent !important;
+  color: var(--muted) !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  width: 15px !important;
+  min-width: 15px !important;
+}
+
+/* Hover/focus/open state */
+.dash-datepicker-input-wrapper:hover,
+.dash-datepicker-input-wrapper:focus-within,
+.dash-datepicker-input-wrapper[aria-expanded="true"] {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 1px var(--accent-soft) !important;
+}
+
+/* Prevent Dash tokens from painting blue/light behind it */
+.dash-datepicker,
+.dash-datepicker *,
+.dash-datepicker-input-wrapper,
+.dash-datepicker-input-wrapper * {
+  --Dash-Fill-Interactive-Weak: transparent !important;
+  --Dash-Fill-Interactive-Weak-Hover: transparent !important;
+  --Dash-Fill-Interactive-Strong: var(--accent) !important;
+  --Dash-Fill-Interactive-Strong-Hover: var(--accent-hover) !important;
+  --Dash-Stroke-Strong: var(--border) !important;
+  --Dash-Stroke-Weak: var(--border) !important;
+  --Dash-Text-Primary: var(--text) !important;
+  --Dash-Text-Secondary: var(--muted) !important;
+}

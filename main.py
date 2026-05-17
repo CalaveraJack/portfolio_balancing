@@ -13,7 +13,7 @@ from index_lib.app.logging_config import configure_logging
 
 load_dotenv()
 
-pio.templates.default = "ggplot2"
+pio.templates.default = "plotly_dark"
 
 
 def parse_args() -> argparse.Namespace:
