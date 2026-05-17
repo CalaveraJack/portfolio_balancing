@@ -1,38 +1,36 @@
 from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence
+
 from dotenv import load_dotenv
 
 load_dotenv()
-# ============================================================================
-# Index Builder (Dash App)
-# - Universe Inspector: single-ticker stats + charts
-# - Index Composer: multi-ticker index backtest with rebalancing, caps, optional vol-target
-# ============================================================================
-
-import time
-import math
-from pathlib import Path
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
-import yfinance as yf
 
 import numpy as np  # type: ignore
 import pandas as pd  # type: ignore
 import plotly.graph_objects as go  # type: ignore
 import plotly.io as pio  # type: ignore
-from dash import Dash, Input, Output, State, dash_table, dcc, html
-from index_lib.vectorization_utilities.mc_block_bootstrap_fast import (
-    block_bootstrap_indices,
+from dash import Dash, Input, Output, State, dcc, html
+
+from index_lib.app.figures import (
+    empty_fig,
+    make_hist_fig,
+    make_line_fig,
+    make_weight_fig,
+)
+from index_lib.app.formatting import fmt_num, fmt_pct
+from index_lib.app.tables import (
+    make_latest_weights_table,
+    rates_stats_table,
+    stats_table,
 )
 from index_lib.core import (
     apply_vol_target_overlay,
     build_index_series,
     compute_stats_from_price_series,
 )
-from index_lib.core import (
-    apply_weight_cap,
-    compute_weights,
-    rebalance_dates,
-)
+from index_lib.core.rates import compute_curve_spreads, tenor_sort_key
 from index_lib.loaders import (
     build_daily_funding_series,
     inspect_rates_cache,
@@ -42,24 +40,15 @@ from index_lib.loaders import (
     make_curve_snapshot_figure,
     make_funding_history_figure,
 )
-from index_lib.app.figures import (
-    empty_fig,
-    make_hist_fig,
-    make_line_fig,
-    make_weight_fig,
+from index_lib.loaders.market_caps import (
+    align_market_caps_to_prices,
+    load_market_caps,
 )
-
-from index_lib.app.formatting import fmt_num, fmt_pct
-
-from index_lib.app.tables import (
-    make_latest_weights_table,
-    rates_stats_table,
-    stats_table,
+from index_lib.simulation import (
+    build_mc_funding_fixed_last_matrix,
+    simulate_bootstrap_funding_paths,
+    simulate_ou_funding_paths,
 )
-
-from index_lib.core.rates import compute_curve_spreads, tenor_sort_key
-
-from index_lib.loaders.market_caps import align_market_caps_to_prices, load_market_caps
 
 pio.templates.default = "ggplot2"
 
@@ -205,283 +194,6 @@ class RatesInspectorData:
     funding: pd.DataFrame
     curve: pd.DataFrame
     cache_info: Dict[str, object]
-
-# ============================================================================
-# Index construction: rebalancing + weighting + optional overlays
-# ============================================================================
-
-
-def build_mc_funding_fixed_last_matrix(
-    funding_df: pd.DataFrame,
-    num_simulations: int,
-    horizon_days: int,
-    *,
-    borrow_spread_ann: float,
-    day_count: int = 252,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Build constant funding paths for Monte Carlo using the last observed SOFR.
-
-    Returns
-    -------
-    rate_paths   : (S,H) annualized decimal short rates
-    cash_paths   : (S,H) daily decimal cash carry
-    borrow_paths : (S,H) daily decimal borrowing cost
-    """
-    last_sofr = 0.0
-
-    if (
-        funding_df is not None
-        and not funding_df.empty
-        and "USD_SOFR" in funding_df.columns
-    ):
-        s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna()
-        if not s.empty:
-            last_sofr = float(s.iloc[-1]) / 100.0  # annualized decimal
-
-    rate_paths = np.full((num_simulations, horizon_days), last_sofr, dtype=float)
-    cash_paths = rate_paths / float(day_count)
-    borrow_paths = (rate_paths + float(borrow_spread_ann) / 100.0) / float(day_count)
-
-    return rate_paths, cash_paths, borrow_paths
-
-
-def estimate_ou_params_from_sofr(
-    funding_df: pd.DataFrame,
-) -> Tuple[float, float, float]:
-    """
-    Estimate discrete-time OU/AR(1)-style parameters from USD_SOFR.
-
-    Returns
-    -------
-    kappa : mean reversion speed
-    theta : long-run mean (annualized decimal)
-    sigma : innovation std (annualized-decimal space, daily step)
-    """
-    if funding_df is None or funding_df.empty or "USD_SOFR" not in funding_df.columns:
-        return 0.05, 0.0, 0.0
-
-    s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna() / 100.0
-    if len(s) < 20:
-        theta = float(s.iloc[-1]) if not s.empty else 0.0
-        return 0.05, theta, 0.0
-
-    x = s.iloc[:-1].to_numpy(dtype=float)
-    y = s.iloc[1:].to_numpy(dtype=float)
-
-    A = np.column_stack([np.ones_like(x), x])
-    beta, *_ = np.linalg.lstsq(A, y, rcond=None)
-    a, b = float(beta[0]), float(beta[1])
-
-    b = min(max(b, 1e-6), 0.9999)
-    kappa = 1.0 - b
-    theta = a / (1.0 - b) if abs(1.0 - b) > 1e-10 else float(s.mean())
-
-    resid = y - (a + b * x)
-    sigma = float(np.std(resid, ddof=1)) if len(resid) > 1 else 0.0
-
-    return float(kappa), float(theta), float(sigma)
-
-
-def simulate_ou_funding_paths(
-    funding_df: pd.DataFrame,
-    num_simulations: int,
-    horizon_days: int,
-    *,
-    borrow_spread_ann: float,
-    seed: int = 42,
-    day_count: int = 252,
-    floor_rate_ann: float = -0.02,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Simulate OU funding paths.
-
-    Returns
-    -------
-    rate_paths   : (S,H) annualized decimal short rates
-    cash_paths   : (S,H) daily decimal cash carry
-    borrow_paths : (S,H) daily decimal borrowing cost
-    """
-    if funding_df is None or funding_df.empty or "USD_SOFR" not in funding_df.columns:
-        return build_mc_funding_fixed_last_matrix(
-            funding_df,
-            num_simulations,
-            horizon_days,
-            borrow_spread_ann=borrow_spread_ann,
-            day_count=day_count,
-        )
-
-    s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna() / 100.0
-    if s.empty:
-        return build_mc_funding_fixed_last_matrix(
-            funding_df,
-            num_simulations,
-            horizon_days,
-            borrow_spread_ann=borrow_spread_ann,
-            day_count=day_count,
-        )
-
-    r0 = float(s.iloc[-1])
-    kappa, theta, sigma = estimate_ou_params_from_sofr(funding_df)
-
-    rng = np.random.default_rng(seed)
-    rate_paths = np.empty((num_simulations, horizon_days), dtype=float)
-
-    prev = np.full(num_simulations, r0, dtype=float)
-    for t in range(horizon_days):
-        eps = rng.standard_normal(num_simulations)
-        nxt = prev + kappa * (theta - prev) + sigma * eps
-        nxt = np.maximum(nxt, floor_rate_ann)
-        rate_paths[:, t] = nxt
-        prev = nxt
-
-    cash_paths = rate_paths / float(day_count)
-    borrow_paths = (rate_paths + float(borrow_spread_ann) / 100.0) / float(day_count)
-
-    return rate_paths, cash_paths, borrow_paths
-
-
-def simulate_bootstrap_funding_paths(
-    funding_df: pd.DataFrame,
-    num_simulations: int,
-    horizon_days: int,
-    *,
-    borrow_spread_ann: float,
-    block_len: int = 20,
-    seed: int = 42,
-    day_count: int = 252,
-    floor_rate_ann: float = -0.02,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Simulate funding paths by block-bootstrapping daily SOFR changes.
-
-    Returns
-    -------
-    rate_paths   : (S,H) annualized decimal short rates
-    cash_paths   : (S,H) daily decimal cash carry
-    borrow_paths : (S,H) daily decimal borrowing cost
-    """
-    if funding_df is None or funding_df.empty or "USD_SOFR" not in funding_df.columns:
-        return build_mc_funding_fixed_last_matrix(
-            funding_df,
-            num_simulations,
-            horizon_days,
-            borrow_spread_ann=borrow_spread_ann,
-            day_count=day_count,
-        )
-
-    s = pd.to_numeric(funding_df["USD_SOFR"], errors="coerce").dropna() / 100.0
-    if len(s) < 5:
-        return build_mc_funding_fixed_last_matrix(
-            funding_df,
-            num_simulations,
-            horizon_days,
-            borrow_spread_ann=borrow_spread_ann,
-            day_count=day_count,
-        )
-
-    dr = s.diff().dropna()
-    if dr.empty:
-        return build_mc_funding_fixed_last_matrix(
-            funding_df,
-            num_simulations,
-            horizon_days,
-            borrow_spread_ann=borrow_spread_ann,
-            day_count=day_count,
-        )
-
-    idx = block_bootstrap_indices(
-        len(dr),
-        num_simulations=num_simulations,
-        horizon_days=horizon_days,
-        block_len=block_len,
-        seed=seed,
-    )
-
-    sampled_dr = dr.to_numpy(dtype=float)[idx]  # (S,H)
-    r0 = float(s.iloc[-1])
-
-    rate_paths = r0 + np.cumsum(sampled_dr, axis=1)
-    rate_paths = np.maximum(rate_paths, floor_rate_ann)
-
-    cash_paths = rate_paths / float(day_count)
-    borrow_paths = (rate_paths + float(borrow_spread_ann) / 100.0) / float(day_count)
-
-    return rate_paths, cash_paths, borrow_paths
-
-
-def run_monte_carlo_simulation(
-    close: pd.DataFrame,
-    constituents: Sequence[str],
-    method: str,
-    rebalance_freq: str,
-    lookback: int,
-    cap: Optional[float],
-    *,
-    num_simulations: int,
-    horizon_days: int,
-    vol_target_on: bool,
-    target_vol_ann: float,
-    vol_lookback: int,
-    max_leverage: float,
-    min_leverage: float,
-) -> Tuple[np.ndarray, np.ndarray]:
-    px_hist = close[constituents].dropna(how="all")
-    returns_hist = px_hist.pct_change().dropna()
-
-    mean_vec = returns_hist.mean().values
-    cov_mat = returns_hist.cov().values
-
-    tickers = px_hist.columns.tolist()
-    # Use last observed real prices as simulation starting point
-    last_prices = px_hist.iloc[-1].values.astype(float)
-
-    # Create synthetic future trading dates starting after last historical date
-    last_hist_date = px_hist.index[-1]
-    sim_dates = pd.bdate_range(
-        start=last_hist_date + pd.Timedelta(days=1), periods=horizon_days
-    )
-    np.random.seed(42)
-    results = np.zeros((num_simulations, horizon_days))
-
-    for i in range(num_simulations):
-        simulated_rets = np.random.multivariate_normal(mean_vec, cov_mat, horizon_days)
-
-        price_paths = np.cumprod(1 + simulated_rets, axis=0)
-        price_paths = price_paths * last_prices  # scale by real last prices
-
-        sim_prices = pd.DataFrame(price_paths, columns=tickers)
-        sim_prices.index = sim_dates
-        sim_index, _, base_returns, _ = build_index_series(
-            close=sim_prices,
-            constituents=tickers,
-            method=method,
-            start=None,
-            end=None,
-            rebalance_freq=rebalance_freq,
-            lookback=lookback,
-            cap=cap,
-            base_level=1.0,
-        )
-
-        port_rets = base_returns.values
-
-        if vol_target_on:
-            r_series = pd.Series(port_rets, index=sim_dates)
-            vc_returns, _, _, _ = apply_vol_target_overlay(
-                r_series,
-                target_vol_ann=target_vol_ann,
-                vol_lookback=vol_lookback,
-                max_leverage=max_leverage,
-                min_leverage=min_leverage,
-            )
-            port_rets = vc_returns.fillna(0.0).values
-
-        results[i] = np.cumprod(1 + port_rets)
-
-    final_values = results[:, -1]
-
-    return results, final_values
 
 # ============================================================================
 # Dash app: layout + callbacks
