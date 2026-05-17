@@ -68,6 +68,38 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     if not default_pick:
         default_pick = available[:6]
 
+    SIMPLE_PASSIVE_METHODS = {
+        "equal",
+        "price_weight",
+        "cap_weight",
+    }
+
+    INV_VOL_METHODS = {
+        "inv_vol",
+    }
+
+    OPTIMIZER_METHODS = {
+        "min_var",
+        "risk_parity",
+        "max_sharpe",
+        "max_diversification",
+    }
+
+    TURNOVER_UTILITY_METHODS = {
+        "utility_turnover",
+    }
+
+    LOOKBACK_METHODS = (
+        INV_VOL_METHODS
+        | OPTIMIZER_METHODS
+        | TURNOVER_UTILITY_METHODS
+    )
+    VALID_CONSTRUCTION_METHODS = (
+        SIMPLE_PASSIVE_METHODS
+        | INV_VOL_METHODS
+        | OPTIMIZER_METHODS
+        | TURNOVER_UTILITY_METHODS
+    )
     project_root = Path(__file__).resolve().parents[2]
 
     app = Dash(
@@ -250,30 +282,60 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                     children=[
                                         html.Div(
                                             children=[
-                                                html.Div("Weighting method"),
+                                                html.Div("Construction method"),
                                                 dcc.Dropdown(
                                                     id="comp_method",
                                                     options=[
                                                         {
-                                                            "label": "Equal Weight",
-                                                            "value": "equal",
+                                                            "label": html.Div(
+                                                                "Passive strategies",
+                                                                style={
+                                                                    "fontWeight": "800",
+                                                                    "fontSize": "12px",
+                                                                    "textTransform": "uppercase",
+                                                                    "letterSpacing": "0.06em",
+                                                                    "color": "#d9822b",
+                                                                    "padding": "4px 0",
+                                                                },
+                                                            ),
+                                                            "value": "__passive_header__",
+                                                            "disabled": True,
+                                                        },
+                                                        {"label": "CM.0.0  Equal Weight", "value": "equal"},
+                                                        {"label": "CM.0.1  Cap Weight", "value": "cap_weight"},
+                                                        {"label": "CM.0.2  Price Weight", "value": "price_weight"},
+                                                        {"label": "CM.0.3  Inverse Volatility", "value": "inv_vol"},
+                                                        {
+                                                            "label": html.Div(
+                                                                "PM classics",
+                                                                style={
+                                                                    "fontWeight": "800",
+                                                                    "fontSize": "12px",
+                                                                    "textTransform": "uppercase",
+                                                                    "letterSpacing": "0.06em",
+                                                                    "color": "#d9822b",
+                                                                    "padding": "4px 0",
+                                                                },
+                                                            ),
+                                                            "value": "__pm_classics_header__",
+                                                            "disabled": True,
+                                                        },
+                                                        {"label": "CM.1.0  Minimum Variance", "value": "min_var"},
+                                                        {"label": "CM.1.1  Risk Parity / ERC", "value": "risk_parity"},
+                                                        {"label": "CM.1.2  Maximum Sharpe", "value": "max_sharpe"},
+                                                        {
+                                                            "label": "CM.1.3  Maximum Diversification",
+                                                            "value": "max_diversification",
                                                         },
                                                         {
-                                                            "label": "Price Weight",
-                                                            "value": "price_weight",
-                                                        },
-                                                        {
-                                                            "label": "Inverse Volatility",
-                                                            "value": "inv_vol",
-                                                        },
-                                                        {
-                                                            "label": "Cap Weight",
-                                                            "value": "cap_weight",
+                                                            "label": "CM.1.4  Utility + Turnover Penalty",
+                                                            "value": "utility_turnover",
                                                         },
                                                     ],
                                                     value="equal",
                                                     clearable=False,
-                                                    style={"width": "240px"},
+                                                    searchable=False,
+                                                    style={"width": "320px"},
                                                 ),
                                             ]
                                         ),
@@ -352,6 +414,160 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                         ),
                                     ],
                                 ),
+                                html.Div(style={"height": "8px"}),
+                                html.Div(
+                                    children=[
+                                        html.Div(
+                                            "Method Parameters",
+                                            style={
+                                                "fontWeight": "700",
+                                                "marginBottom": "6px",
+                                            },
+                                        ),
+                                        html.Div(
+                                            id="method_params_simple",
+                                            style={
+                                                "display": "flex",
+                                                "gap": "12px",
+                                                "flexWrap": "wrap",
+                                                "marginTop": "6px",
+                                                "marginBottom": "8px",
+                                            },
+                                            children=[
+                                                html.Div(
+                                                    "No additional method parameters for this construction method.",
+                                                    style={"color": "#a0a6b3"},
+                                                )
+                                            ],
+                                        ),
+                                        html.Div(
+                                            id="method_params_inv_vol",
+                                            style={"display": "none"},
+                                            children=[
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Volatility lookback (days)"),
+                                                        dcc.Input(
+                                                            id="param_vol_lookback",
+                                                            type="number",
+                                                            value=126,
+                                                            min=20,
+                                                            step=1,
+                                                            style={"width": "150px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                            ],
+                                        ),
+                                        html.Div(
+                                            id="method_params_optimizer",
+                                            style={"display": "none"},
+                                            children=[
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Covariance lookback (days)"),
+                                                        dcc.Input(
+                                                            id="param_cov_lookback",
+                                                            type="number",
+                                                            value=126,
+                                                            min=20,
+                                                            step=1,
+                                                            style={"width": "170px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Min weight (%)"),
+                                                        dcc.Input(
+                                                            id="param_min_weight",
+                                                            type="number",
+                                                            value=0.0,
+                                                            min=0.0,
+                                                            step=0.5,
+                                                            style={"width": "130px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Risk-free rate (% p.a.)"),
+                                                        dcc.Input(
+                                                            id="param_rf_rate",
+                                                            type="number",
+                                                            value=0.0,
+                                                            step=0.25,
+                                                            style={"width": "150px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Covariance estimator"),
+                                                        dcc.Dropdown(
+                                                            id="param_cov_estimator",
+                                                            options=[
+                                                                {
+                                                                    "label": "Sample covariance",
+                                                                    "value": "sample",
+                                                                },
+                                                            ],
+                                                            value="sample",
+                                                            clearable=False,
+                                                            style={"width": "210px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                            ],
+                                        ),
+                                        html.Div(
+                                            id="method_params_turnover",
+                                            style={"display": "none"},
+                                            children=[
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Risk aversion"),
+                                                        dcc.Input(
+                                                            id="param_risk_aversion",
+                                                            type="number",
+                                                            value=5.0,
+                                                            min=0.0,
+                                                            step=0.5,
+                                                            style={"width": "130px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Turnover penalty"),
+                                                        dcc.Input(
+                                                            id="param_turnover_penalty",
+                                                            type="number",
+                                                            value=0.0,
+                                                            min=0.0,
+                                                            step=0.1,
+                                                            style={"width": "150px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Trading cost (bps)"),
+                                                        dcc.Input(
+                                                            id="param_trading_cost_bps",
+                                                            type="number",
+                                                            value=0.0,
+                                                            min=0.0,
+                                                            step=0.5,
+                                                            style={"width": "150px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                            ],
+                                        ),
+                                    ],
+                                ),
+
                                 html.Div(style={"height": "8px"}),
                                 html.Div(
                                     style={
@@ -774,6 +990,34 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     # ------------------------------------------------------------------------
     # UI toggles (hide/show; inputs stay mounted)
     # ------------------------------------------------------------------------
+    @app.callback(
+        Output("method_params_simple", "style"),
+        Output("method_params_inv_vol", "style"),
+        Output("method_params_optimizer", "style"),
+        Output("method_params_turnover", "style"),
+        Input("comp_method", "value"),
+    )
+    def toggle_method_params(method: str):
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
+        base = {
+            "display": "flex",
+            "gap": "12px",
+            "flexWrap": "wrap",
+            "marginTop": "6px",
+            "marginBottom": "8px",
+        }
+
+        hidden = {
+            "display": "none",
+        }
+
+        return (
+            base if method in SIMPLE_PASSIVE_METHODS else hidden,
+            base if method in INV_VOL_METHODS else hidden,
+            base if method in OPTIMIZER_METHODS or method in TURNOVER_UTILITY_METHODS else hidden,
+            base if method in TURNOVER_UTILITY_METHODS else hidden,
+        )
     @app.callback(Output("comp_vol_controls", "style"), Input("comp_vol_on", "value"))
     def toggle_vol_controls(vol_on: str):
         return (
@@ -808,6 +1052,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         Input("comp_method", "value"),
     )
     def toggle_lookback(method: str):
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
         base_style = {
             "width": "120px",
             "backgroundColor": "#171a21",
@@ -815,7 +1061,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             "border": "1px solid #2b313d",
         }
 
-        if method == "inv_vol":
+        if method in LOOKBACK_METHODS:
             return False, base_style
 
         return True, {
@@ -963,7 +1209,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         borrow_spread_pct: Optional[float],
     ):
         constituents = constituents or []
-
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
         cap = None
         if cap_pct is not None and cap_pct > 0:
             cap = float(cap_pct) / 100.0
@@ -1228,7 +1475,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 html.Div("-"),
                 None,
             )
-
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
         cap = float(cap_pct) / 100 if cap_pct else None
 
         # Slice historical panel consistently with backtest window
