@@ -709,7 +709,16 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                             ),
                         ]
                     ),
-                    html.Div("v0.1", className="app-badge"),
+                    html.Div(
+                        className="app-header-right",
+                        children=[
+                            html.Img(
+                                src="/assets/logo.svg",
+                                className="app-logo",
+                            ),
+                            html.Div("v0.1", className="app-badge"),
+                        ],
+                    ),
                 ],
             ),
             dcc.Tabs(

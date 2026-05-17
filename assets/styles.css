@@ -964,3 +964,17 @@ body > div[class*="Loading"] {
   background-color: var(--accent-soft) !important;
   color: var(--text) !important;
 }
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-logo {
+  height: 28px;
+  width: auto;
+  max-width: 260px;
+  object-fit: contain;
+  display: block;
+  opacity: 0.92;
+}
