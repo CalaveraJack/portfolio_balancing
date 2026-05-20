@@ -96,6 +96,12 @@ def compute_weights(
             min_weight=min_weight,
             risk_free_rate=risk_free_rate,
         )
+        print(
+            f"[optimizer] method={method} success={diagnostics.get('success')} "
+            f"message={diagnostics.get('message')} "
+            f"n={len(w)} max_w={float(w.max()) if not w.empty else None:.4f} "
+            f"min_w={float(w.min()) if not w.empty else None:.4f}"
+        )
 
         if return_diagnostics:
             return w, diagnostics

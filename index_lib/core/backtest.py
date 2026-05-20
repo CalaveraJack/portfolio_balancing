@@ -7,6 +7,13 @@ import pandas as pd
 from .rebalancing import rebalance_dates
 from .weighting import compute_weights
 
+LOOKBACK_METHODS = {
+    "inv_vol",
+    "min_var",
+    "risk_parity",
+    "max_sharpe",
+    "max_diversification",
+}
 
 def build_index_series(
     close: pd.DataFrame,
@@ -20,6 +27,9 @@ def build_index_series(
     cap: Optional[float],
     base_level: float = 100.0,
     market_caps: Optional[pd.DataFrame] = None,
+    optimizer_form: str = "long_only",
+    min_weight: float = 0.0,
+    risk_free_rate: float = 0.0,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Backtest a simple long-only strategy with periodic rebalancing and daily weight drift.
@@ -72,6 +82,8 @@ def build_index_series(
         lookback=lookback,
         cap=cap,
         market_caps=caps_series_init,
+        min_weight=min_weight,
+        risk_free_rate=risk_free_rate,
     )
 
     level = float(base_level)
@@ -87,7 +99,9 @@ def build_index_series(
             else:
                 hist_px = px.iloc[:hist_end]
 
-                if method == "inv_vol":
+                # At rebalance date t, target weights are computed using data
+                # strictly before t. Those weights are then used for return on t.
+                if method in LOOKBACK_METHODS:
                     hist = hist_px.tail(max(lookback + 1, 2))
                 else:
                     hist = hist_px
@@ -108,6 +122,8 @@ def build_index_series(
                 lookback=lookback,
                 cap=cap,
                 market_caps=caps_series,
+                min_weight=min_weight,
+                risk_free_rate=risk_free_rate,
             )
 
             weights_hist[dt] = w

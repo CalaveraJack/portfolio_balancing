@@ -1211,6 +1211,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         Input("comp_max_lev", "value"),
         Input("comp_min_lev", "value"),
         Input("comp_borrow_spread", "value"),
+        Input("param_optimizer_form", "value"),
+        Input("param_cov_lookback", "value"),
+        Input("param_min_weight", "value"),
+        Input("param_rf_rate", "value"),
+        Input("param_cov_estimator", "value"),
     )
     def update_composer(
         constituents: List[str],
@@ -1226,10 +1231,30 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         max_lev: Optional[float],
         min_lev: Optional[float],
         borrow_spread_pct: Optional[float],
-    ):
+        optimizer_form: Optional[str],
+        cov_lookback: Optional[int],
+        min_weight_pct: Optional[float],
+        rf_rate_pct: Optional[float],
+        cov_estimator: Optional[str],
+        ):
         constituents = constituents or []
         if method not in VALID_CONSTRUCTION_METHODS:
             method = "equal"
+        optimizer_form = optimizer_form or "long_only"
+        if optimizer_form != "long_only":
+            optimizer_form = "long_only"
+
+        cov_lookback = int(cov_lookback) if cov_lookback is not None else 126
+        min_weight = float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
+        risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
+
+        cov_estimator = cov_estimator or "sample"
+        if cov_estimator != "sample":
+            cov_estimator = "sample"
+
+        effective_lookback = int(lookback) if lookback else 126
+        if method in OPTIMIZER_METHODS:
+            effective_lookback = cov_lookback
         cap = None
         if cap_pct is not None and cap_pct > 0:
             cap = float(cap_pct) / 100.0
@@ -1256,10 +1281,13 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             start=start_date,
             end=end_date,
             rebalance_freq=rebalance,
-            lookback=int(lookback) if lookback else 126,
+            lookback=effective_lookback,
             cap=cap,
             base_level=100.0,
             market_caps=market_caps_df,
+            optimizer_form=optimizer_form,
+            min_weight=min_weight,
+            risk_free_rate=risk_free_rate,
         )
 
         lev_fig = empty_fig(title="Vol Overlay Exposure", height=260)
@@ -1496,6 +1524,14 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             )
         if method not in VALID_CONSTRUCTION_METHODS:
             method = "equal"
+        if method in OPTIMIZER_METHODS:
+            return (
+                empty_fig(title="Monte Carlo Simulation"),
+                html.Div(
+                    "Monte Carlo for PM classic optimizers is not wired yet. Use passive construction methods for MC for now."
+                ),
+                None,
+            )
         cap = float(cap_pct) / 100 if cap_pct else None
 
         # Slice historical panel consistently with backtest window
