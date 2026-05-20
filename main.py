@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run Dash in debug mode.",
     )
+    parser.add_argument(
+        "--log-file",
+        help="Write logs to a file in addition to console output.",
+        default=None,
+    )
 
     return parser.parse_args()
 
@@ -54,7 +59,7 @@ def main() -> None:
         auto    -> fetch fresh data, fall back to cache on API/data errors.
     """
     args = parse_args()
-    configure_logging(debug=args.debug)
+    configure_logging(debug=args.debug, log_file=args.log_file)
     data_mode = "cache" if args.cache_only else args.data_mode
 
     data = load_data(

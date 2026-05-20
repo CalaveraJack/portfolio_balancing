@@ -72,6 +72,12 @@ Dash debug mode is disabled by default. Enable it explicitly:
 uv run index_builder --debug
 ```
 
+Write logs to a file while still keeping console output:
+
+```bash
+uv run index_builder --log-file logs/index_builder.log
+```
+
 Open:
 http://127.0.0.1:8050
 

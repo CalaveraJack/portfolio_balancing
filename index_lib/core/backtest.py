@@ -109,13 +109,6 @@ def build_index_series(
             available_dates = market_caps.index[market_caps.index <= first_date]
             if len(available_dates) > 0:
                 caps_series_init = market_caps.loc[available_dates[-1]]
-    if method in OPTIMIZER_METHODS:
-        ret_obs = hist.pct_change().dropna(how="all").shape[0]
-        print(
-            f"[rebalance] date={dt.date()} method={method} "
-            f"hist_prices={hist.shape[0]} hist_returns={ret_obs} "
-            f"names={hist.shape[1]} lookback={lookback}"
-        )
     # Initial state before the first rebalance.
     # Optimizers require historical returns, so they must not be called on px.iloc[:1].
     if method in OPTIMIZER_METHODS:
@@ -148,7 +141,13 @@ def build_index_series(
                     hist = hist_px.tail(max(lookback + 1, 2))
                 else:
                     hist = hist_px
-
+            if method in OPTIMIZER_METHODS:
+                ret_obs = hist.pct_change().dropna(how="all").shape[0]
+                print(
+                    f"[rebalance] date={dt.date()} method={method} "
+                    f"hist_prices={hist.shape[0]} hist_returns={ret_obs} "
+                    f"names={hist.shape[1]} lookback={lookback}"
+                )
             caps_series = None
 
             if method == "cap_weight" and market_caps is not None:
