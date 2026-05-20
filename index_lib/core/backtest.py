@@ -16,6 +16,33 @@ LOOKBACK_METHODS = {
     "max_diversification",
 }
 
+OPTIMIZER_METHODS = {
+    "min_var",
+    "risk_parity",
+    "max_sharpe",
+    "max_diversification",
+}
+
+def _equal_weights(columns: pd.Index) -> pd.Series:
+    if len(columns) == 0:
+        return pd.Series(dtype=float)
+    return pd.Series(1.0 / len(columns), index=columns, dtype=float)
+
+
+def _has_sufficient_history(hist: pd.DataFrame, min_obs: int) -> bool:
+    if hist.empty or hist.shape[1] == 0:
+        return False
+
+    returns = hist.pct_change().dropna(how="all")
+    if len(returns) < min_obs:
+        return False
+
+    usable_cols = [
+        c for c in returns.columns
+        if returns[c].replace([float("inf"), float("-inf")], pd.NA).dropna().shape[0] >= min_obs
+    ]
+
+    return len(usable_cols) >= 2
 
 def build_index_series(
     close: pd.DataFrame,
@@ -82,16 +109,27 @@ def build_index_series(
             available_dates = market_caps.index[market_caps.index <= first_date]
             if len(available_dates) > 0:
                 caps_series_init = market_caps.loc[available_dates[-1]]
-
-    w = compute_weights(
-        px.iloc[:1],
-        method,
-        lookback=lookback,
-        cap=cap,
-        market_caps=caps_series_init,
-        min_weight=min_weight,
-        risk_free_rate=risk_free_rate,
-    )
+    if method in OPTIMIZER_METHODS:
+        ret_obs = hist.pct_change().dropna(how="all").shape[0]
+        print(
+            f"[rebalance] date={dt.date()} method={method} "
+            f"hist_prices={hist.shape[0]} hist_returns={ret_obs} "
+            f"names={hist.shape[1]} lookback={lookback}"
+        )
+    # Initial state before the first rebalance.
+    # Optimizers require historical returns, so they must not be called on px.iloc[:1].
+    if method in OPTIMIZER_METHODS:
+        w = _equal_weights(px.columns)
+    else:
+        w = compute_weights(
+            px.iloc[:1],
+            method,
+            lookback=lookback,
+            cap=cap,
+            market_caps=caps_series_init,
+            min_weight=min_weight,
+            risk_free_rate=risk_free_rate,
+        )
 
     level = float(base_level)
     levels: List[Tuple[pd.Timestamp, float]] = []
@@ -121,15 +159,21 @@ def build_index_series(
                     if len(available_dates) > 0:
                         caps_series = market_caps.loc[available_dates[-1]]
 
-            w = compute_weights(
+            if method in OPTIMIZER_METHODS and not _has_sufficient_history(
                 hist,
-                method,
-                lookback=lookback,
-                cap=cap,
-                market_caps=caps_series,
-                min_weight=min_weight,
-                risk_free_rate=risk_free_rate,
-            )
+                min_obs=max(20, min(int(lookback), 60)),
+            ):
+                w = _equal_weights(hist.columns)
+            else:
+                w = compute_weights(
+                    hist,
+                    method,
+                    lookback=lookback,
+                    cap=cap,
+                    market_caps=caps_series,
+                    min_weight=min_weight,
+                    risk_free_rate=risk_free_rate,
+                )
 
             weights_hist[dt] = w
 
