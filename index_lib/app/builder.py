@@ -85,9 +85,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         "max_diversification",
     }
 
-    TURNOVER_UTILITY_METHODS = {
-        "utility_turnover",
-    }
+    TURNOVER_UTILITY_METHODS = set()
 
     LOOKBACK_METHODS = (
         INV_VOL_METHODS
@@ -253,7 +251,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     "color": "#f2f2f2",
                 },
             children=[
-                html.H4("Index Composer"),
+                html.H4("Strategy Composition Screen"),
                 html.Div(
                     style={
                         "display": "grid",
@@ -330,6 +328,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                         {
                                                             "label": "CM.1.4  Utility + Turnover Penalty",
                                                             "value": "utility_turnover",
+                                                            "disabled": True,
                                                         },
                                                     ],
                                                     value="equal",
@@ -463,6 +462,26 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                             id="method_params_optimizer",
                                             style={"display": "none"},
                                             children=[
+                                        html.Div(
+                                            children=[
+                                                html.Div("Optimizer form"),
+                                                dcc.Dropdown(
+                                                    id="param_optimizer_form",
+                                                    options=[
+                                                        {"label": "Long-only", "value": "long_only"},
+                                                        {
+                                                            "label": "Long/short — DO NOT TOUCH YET",
+                                                            "value": "long_short",
+                                                            "disabled": True,
+                                                        },
+                                                    ],
+                                                    value="long_only",
+                                                    clearable=False,
+                                                    searchable=False,
+                                                    style={"width": "230px"},
+                                                ),
+                                            ]
+                                        ),
                                                 html.Div(
                                                     children=[
                                                         html.Div("Covariance lookback (days)"),

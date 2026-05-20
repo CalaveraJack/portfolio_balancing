@@ -5,6 +5,21 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from index_lib.portfolio import solve_optimizer_weights
+
+PASSIVE_METHODS = {
+    "equal",
+    "price_weight",
+    "inv_vol",
+    "cap_weight",
+}
+
+OPTIMIZER_METHODS = {
+    "min_var",
+    "risk_parity",
+    "max_sharpe",
+    "max_diversification",
+}
 
 def apply_weight_cap(
     weights: pd.Series,
