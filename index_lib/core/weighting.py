@@ -103,7 +103,11 @@ def compute_weights(
             f"min_w={float(w.min()) if not w.empty else None:.4f}"
         )
 
+        if cap is not None and not w.empty:
+            w = apply_weight_cap(w, float(cap))
+
         if return_diagnostics:
+            diagnostics["weights"] = w.to_dict()
             return w, diagnostics
 
         return w

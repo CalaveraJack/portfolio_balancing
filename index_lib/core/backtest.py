@@ -7,6 +7,7 @@ import pandas as pd
 from .rebalancing import rebalance_dates
 from .weighting import compute_weights
 
+
 LOOKBACK_METHODS = {
     "inv_vol",
     "min_var",
@@ -14,6 +15,7 @@ LOOKBACK_METHODS = {
     "max_sharpe",
     "max_diversification",
 }
+
 
 def build_index_series(
     close: pd.DataFrame,
@@ -32,18 +34,23 @@ def build_index_series(
     risk_free_rate: float = 0.0,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
-    Backtest a simple long-only strategy with periodic rebalancing and daily weight drift.
+    Backtest a long-only strategy with periodic rebalancing and daily weight drift.
 
-    Conventions:
-    - weights used for day t return are start-of-day weights
-    - on a rebalance date t, weights are reset using price history before t
-    - missing returns are handled by dropping unavailable names and renormalizing weights
+    Conventions
+    -----------
+    - Weights used for day t return are start-of-day weights.
+    - On a rebalance date t, target weights are computed using data strictly before t.
+    - Those target weights are then used for the return on t.
+    - Missing returns are handled by dropping unavailable names and renormalizing weights.
     """
+    if optimizer_form != "long_only":
+        raise ValueError("Only optimizer_form='long_only' is currently supported.")
+
     px = close.reindex(columns=list(constituents)).copy()
     px = px.dropna(axis=1, how="all")
 
     if start:
-        px = px.loc[pd.to_datetime(start) :]
+        px = px.loc[pd.to_datetime(start):]
 
     if end:
         px = px.loc[: pd.to_datetime(end)]
@@ -99,8 +106,6 @@ def build_index_series(
             else:
                 hist_px = px.iloc[:hist_end]
 
-                # At rebalance date t, target weights are computed using data
-                # strictly before t. Those weights are then used for return on t.
                 if method in LOOKBACK_METHODS:
                     hist = hist_px.tail(max(lookback + 1, 2))
                 else:
@@ -138,14 +143,22 @@ def build_index_series(
             w_eff = w[mask]
             r_eff = r[mask].astype(float)
 
-            w_eff = w_eff / float(w_eff.sum())
-            base_r = float((w_eff * r_eff).sum())
+            w_eff_sum = float(w_eff.sum())
+            if w_eff_sum <= 0:
+                base_r = 0.0
+                w_drift = w
+            else:
+                w_eff = w_eff / w_eff_sum
+                base_r = float((w_eff * r_eff).sum())
 
-            gross = 1.0 + r_eff
-            denom = 1.0 + base_r
+                gross = 1.0 + r_eff
+                denom = 1.0 + base_r
 
-            w_drift = (w_eff * gross) / denom
-            w_drift = w_drift / float(w_drift.sum())
+                if denom == 0:
+                    w_drift = w_eff
+                else:
+                    w_drift = (w_eff * gross) / denom
+                    w_drift = w_drift / float(w_drift.sum())
 
         base_ret_list.append((dt, base_r))
 
