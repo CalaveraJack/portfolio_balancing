@@ -5,7 +5,11 @@ import pandas as pd
 
 def rebalance_dates(idx: pd.DatetimeIndex, freq: str) -> pd.DatetimeIndex:
     """
-    Compute rebalance dates as the last observed date in each period.
+    Compute rebalance dates as the last observed trading date in each period.
+
+    The backtest treats these dates as start-of-day rebalance dates:
+    target weights are computed from data available strictly before the date,
+    then applied to that date's return.
     """
     if idx.empty:
         return idx

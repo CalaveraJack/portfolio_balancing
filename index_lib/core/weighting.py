@@ -96,16 +96,6 @@ def compute_weights(
             min_weight=min_weight,
             risk_free_rate=risk_free_rate,
         )
-        max_w = float(w.max()) if not w.empty else None
-        min_w = float(w.min()) if not w.empty else None
-
-        print(
-            f"[optimizer] method={method} success={diagnostics.get('success')} "
-            f"message={diagnostics.get('message')} "
-            f"n={len(w)} "
-            f"max_w={max_w if max_w is not None else 'NA'} "
-            f"min_w={min_w if min_w is not None else 'NA'}"
-        )
 
         if cap is not None and not w.empty:
             w = apply_weight_cap(w, float(cap))

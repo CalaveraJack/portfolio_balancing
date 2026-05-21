@@ -43,7 +43,9 @@ from index_lib.simulation import (
     simulate_bootstrap_funding_paths,
     simulate_ou_funding_paths,
 )
-
+from index_lib.simulation.strategy_return_bootstrap import (
+    run_strategy_return_bootstrap_mc,
+)
 
 def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     """
@@ -855,6 +857,15 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                         ),
                     ],
                 ),
+                html.Div(
+                    id="mc_method_note",
+                    style={
+                        "marginTop": "8px",
+                        "marginBottom": "8px",
+                        "color": "#a0a6b3",
+                        "fontSize": "12px",
+                    },
+                ),
                 dcc.Loading(
                     id="mc_loading",
                     type="circle",
@@ -1056,6 +1067,57 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             }
         return {"display": "none"}
 
+    @app.callback(
+        Output("mc_method", "options"),
+        Output("mc_method", "value"),
+        Output("mc_method_note", "children"),
+        Input("comp_method", "value"),
+    )
+    def toggle_mc_methods(method: str):
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
+
+        passive_options = [
+            {"label": "Constituent Bootstrap (blocks)", "value": "bootstrap"},
+            {"label": "Constituent GBM (correlated)", "value": "gbm"},
+        ]
+
+        optimizer_options = [
+            {
+                "label": "Strategy Return Bootstrap",
+                "value": "strategy_bootstrap",
+            },
+        ]
+
+        if method in OPTIMIZER_METHODS:
+            note = html.Div(
+                [
+                    html.Div(
+                        "MC note: PM classic strategies currently use return bootstrapping "
+                        "of the realized strategy return stream. Constituent-path re-optimization "
+                        "inside each simulation is not implemented yet."
+                    ),
+                    html.Div(
+                        "Funding simulation remains unchanged. Trading costs, slippage, taxes, "
+                        "and short-borrow costs are currently assumed to be zero."
+                    ),
+                ]
+            )
+            return optimizer_options, "strategy_bootstrap", note
+
+        note = html.Div(
+            [
+                html.Div(
+                    "MC note: passive/simple strategies use constituent-level simulations. "
+                    "Bootstrap resamples constituent return blocks; GBM simulates correlated constituent paths."
+                ),
+                html.Div(
+                    "Funding simulation remains unchanged. Trading costs, slippage, taxes, "
+                    "and short-borrow costs are currently assumed to be zero."
+                ),
+            ]
+        )
+        return passive_options, "bootstrap", note
     @app.callback(
         Output("mc_funding_method_wrap", "style"),
         Input("mc_funding_model", "value"),
@@ -1486,6 +1548,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         State("comp_max_lev", "value"),
         State("comp_min_lev", "value"),
         State("comp_borrow_spread", "value"),
+        State("param_optimizer_form", "value"),
+        State("param_cov_lookback", "value"),
+        State("param_min_weight", "value"),
+        State("param_rf_rate", "value"),
+        State("param_cov_estimator", "value"),
         State("mc_method", "value"),
         State("mc_funding_model", "value"),
         State("mc_funding_method", "value"),
@@ -1509,6 +1576,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         max_lev,
         min_lev,
         borrow_spread_pct,
+        optimizer_form,
+        cov_lookback,
+        min_weight_pct,
+        rf_rate_pct,
+        cov_estimator,
         mc_method,
         funding_model,
         funding_method,
@@ -1524,14 +1596,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             )
         if method not in VALID_CONSTRUCTION_METHODS:
             method = "equal"
-        if method in OPTIMIZER_METHODS:
-            return (
-                empty_fig(title="Monte Carlo Simulation"),
-                html.Div(
-                    "Monte Carlo for PM classic optimizers is not wired yet. Use passive construction methods for MC for now."
-                ),
-                None,
-            )
+
         cap = float(cap_pct) / 100 if cap_pct else None
 
         # Slice historical panel consistently with backtest window
@@ -1551,9 +1616,25 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         target_vol_pct = float(target_vol_pct) if target_vol_pct is not None else 10.0
         alpha = float(alpha) if alpha else 5.0
 
+        optimizer_form = optimizer_form or "long_only"
+        if optimizer_form != "long_only":
+            optimizer_form = "long_only"
+
+        cov_lookback = int(cov_lookback) if cov_lookback is not None else 126
+        min_weight = float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
+        risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
+
+        cov_estimator = cov_estimator or "sample"
+        if cov_estimator != "sample":
+            cov_estimator = "sample"
+
+        effective_lookback = lookback
+        if method in OPTIMIZER_METHODS:
+            effective_lookback = cov_lookback
         borrow_spread_pct = (
             float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
         )
+
         # Load market caps for Monte Carlo if using cap_weight
 
         mc_market_caps = None
@@ -1613,42 +1694,50 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 else:
                     raise ValueError(f"Unknown funding_method: {funding_method}")
 
-        if mc_method == "gbm":
-            from index_lib.vectorization_utilities.mc_gbm_fast import (
-                run_monte_carlo_gbm_fast,
-            )
+        if method in OPTIMIZER_METHODS:
+            # PM classic MC:
+            # Bootstrap realized strategy returns after the historical optimizer backtest.
+            # This avoids pretending that we re-optimize every simulated constituent path.
+            mc_market_caps_df = None
 
-            results, final_vals = run_monte_carlo_gbm_fast(
-                close=px_hist,
+            if method == "cap_weight" and constituents:
+                mc_market_caps_df = load_market_caps(
+                    constituents,
+                    data_dir="data",
+                    use_cache_only=True,
+                )
+
+                if not mc_market_caps_df.empty:
+                    mc_market_caps_df = align_market_caps_to_prices(
+                        mc_market_caps_df,
+                        data.close.index,
+                    )
+
+            _, _, mc_base_returns, _ = build_index_series(
+                close=data.close,
                 constituents=constituents,
                 method=method,
+                start=start_date,
+                end=end_date,
                 rebalance_freq=rebalance,
-                lookback=lookback,
+                lookback=effective_lookback,
                 cap=cap,
-                num_simulations=num_sim,
-                horizon_days=horizon,
-                vol_target_on=(vol_on == "on"),
-                target_vol_ann=target_vol_pct / 100.0,
-                vol_lookback=vol_lb,
-                max_leverage=max_lev,
-                min_leverage=min_lev,
-                cash_paths=cash_paths,
-                borrow_paths=borrow_paths,
-                seed=42,
-                dtype=np.float32,
-            )
-        else:
-            from index_lib.vectorization_utilities.mc_block_bootstrap_fast import (
-                run_monte_carlo_block_bootstrap_fast,
+                base_level=100.0,
+                market_caps=mc_market_caps_df,
+                optimizer_form=optimizer_form,
+                min_weight=min_weight,
+                risk_free_rate=risk_free_rate,
             )
 
-            results, final_vals = run_monte_carlo_block_bootstrap_fast(
-                close=px_hist,
-                constituents=constituents,
-                method=method,
-                rebalance_freq=rebalance,
-                lookback=lookback,
-                cap=cap,
+            if mc_base_returns.empty:
+                return (
+                    empty_fig(title="Monte Carlo Simulation"),
+                    html.Div("No base strategy returns available for Monte Carlo."),
+                    None,
+                )
+
+            results, final_vals = run_strategy_return_bootstrap_mc(
+                mc_base_returns,
                 num_simulations=num_sim,
                 horizon_days=horizon,
                 block_len=20,
@@ -1659,11 +1748,64 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 min_leverage=min_lev,
                 cash_paths=cash_paths,
                 borrow_paths=borrow_paths,
-                market_caps=mc_market_caps,
                 seed=42,
                 dtype=np.float32,
             )
 
+        else:
+            # Passive/simple MC:
+            # Existing constituent-level engines remain active.
+            if mc_method == "gbm":
+                from index_lib.vectorization_utilities.mc_gbm_fast import (
+                    run_monte_carlo_gbm_fast,
+                )
+
+                results, final_vals = run_monte_carlo_gbm_fast(
+                    close=px_hist,
+                    constituents=constituents,
+                    method=method,
+                    rebalance_freq=rebalance,
+                    lookback=lookback,
+                    cap=cap,
+                    num_simulations=num_sim,
+                    horizon_days=horizon,
+                    vol_target_on=(vol_on == "on"),
+                    target_vol_ann=target_vol_pct / 100.0,
+                    vol_lookback=vol_lb,
+                    max_leverage=max_lev,
+                    min_leverage=min_lev,
+                    cash_paths=cash_paths,
+                    borrow_paths=borrow_paths,
+                    market_caps=mc_market_caps,
+                    seed=42,
+                    dtype=np.float32,
+                )
+            else:
+                from index_lib.vectorization_utilities.mc_block_bootstrap_fast import (
+                    run_monte_carlo_block_bootstrap_fast,
+                )
+
+                results, final_vals = run_monte_carlo_block_bootstrap_fast(
+                    close=px_hist,
+                    constituents=constituents,
+                    method=method,
+                    rebalance_freq=rebalance,
+                    lookback=lookback,
+                    cap=cap,
+                    num_simulations=num_sim,
+                    horizon_days=horizon,
+                    block_len=20,
+                    vol_target_on=(vol_on == "on"),
+                    target_vol_ann=target_vol_pct / 100.0,
+                    vol_lookback=vol_lb,
+                    max_leverage=max_lev,
+                    min_leverage=min_lev,
+                    cash_paths=cash_paths,
+                    borrow_paths=borrow_paths,
+                    market_caps=mc_market_caps,
+                    seed=42,
+                    dtype=np.float32,
+                )
         mean_path = results.mean(axis=0)
 
         lower_q = alpha
@@ -1714,6 +1856,18 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
 
         summary = html.Div(
             [
+                html.Div(
+                    "MC engine: "
+                    + (
+                        "Strategy Return Bootstrap"
+                        if method in OPTIMIZER_METHODS
+                        else (
+                            "Constituent GBM"
+                            if mc_method == "gbm"
+                            else "Constituent Block Bootstrap"
+                        )
+                    )
+                ),
                 html.Div(
                     f"Funding: {funding_model}"
                     + (f" / {funding_method}" if funding_model == "mc" else "")

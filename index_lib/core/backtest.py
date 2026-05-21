@@ -141,13 +141,7 @@ def build_index_series(
                     hist = hist_px.tail(max(lookback + 1, 2))
                 else:
                     hist = hist_px
-            if method in OPTIMIZER_METHODS:
-                ret_obs = hist.pct_change().dropna(how="all").shape[0]
-                print(
-                    f"[rebalance] date={dt.date()} method={method} "
-                    f"hist_prices={hist.shape[0]} hist_returns={ret_obs} "
-                    f"names={hist.shape[1]} lookback={lookback}"
-                )
+
             caps_series = None
 
             if method == "cap_weight" and market_caps is not None:
