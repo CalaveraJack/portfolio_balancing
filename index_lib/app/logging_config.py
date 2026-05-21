@@ -5,14 +5,18 @@ import sys
 from pathlib import Path
 
 
-def configure_logging(*, debug: bool = False, log_file: Path | str | None = None) -> None:
+def configure_logging(
+    *, debug: bool = False, log_file: Path | str | None = None
+) -> None:
     level = logging.DEBUG if debug else logging.INFO
     root_logger = logging.getLogger()
 
     if root_logger.handlers:
         root_logger.handlers.clear()
 
-    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    )
 
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)

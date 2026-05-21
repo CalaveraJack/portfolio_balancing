@@ -36,11 +36,7 @@ def run_strategy_return_bootstrap_mc(
     historical backtest. It is therefore construction-method agnostic and works for
     optimized portfolios without pathwise re-optimization.
     """
-    r = (
-        base_returns.replace([np.inf, -np.inf], np.nan)
-        .dropna()
-        .astype(float)
-    )
+    r = base_returns.replace([np.inf, -np.inf], np.nan).dropna().astype(float)
 
     if r.shape[0] < 2:
         raise ValueError("Not enough strategy returns for return-bootstrap MC.")

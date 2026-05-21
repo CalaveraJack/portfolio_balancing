@@ -47,6 +47,7 @@ from index_lib.simulation.strategy_return_bootstrap import (
     run_strategy_return_bootstrap_mc,
 )
 
+
 def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     """
     Build the Dash app.
@@ -89,11 +90,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
 
     TURNOVER_UTILITY_METHODS = set()
 
-    LOOKBACK_METHODS = (
-        INV_VOL_METHODS
-        | OPTIMIZER_METHODS
-        | TURNOVER_UTILITY_METHODS
-    )
+    LOOKBACK_METHODS = INV_VOL_METHODS | OPTIMIZER_METHODS | TURNOVER_UTILITY_METHODS
     VALID_CONSTRUCTION_METHODS = (
         SIMPLE_PASSIVE_METHODS
         | INV_VOL_METHODS
@@ -109,6 +106,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         assets_url_path="/assets",
     )
     app.title = "Strategy Forge"
+
     # ------------------------------------------------------------------------
     # Tab content renderer
     # ------------------------------------------------------------------------
@@ -173,7 +171,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     dcc.Graph(id="rates_curve_snapshot_fig"),
                     dcc.Graph(id="rates_curve_history_fig"),
                     dcc.Graph(id="rates_spread_fig"),
-                ]
+                ],
             )
         if tab == "tab_inspector":
             return html.Div(
@@ -243,15 +241,15 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                             dcc.Graph(id="insp_dd"),
                         ],
                     ),
-                ]
+                ],
             )
 
         # tab_composer
         return html.Div(
-                style={
-                    "backgroundColor": "#0f1115",
-                    "color": "#f2f2f2",
-                },
+            style={
+                "backgroundColor": "#0f1115",
+                "color": "#f2f2f2",
+            },
             children=[
                 html.H4("Strategy Composition Screen"),
                 html.Div(
@@ -301,10 +299,22 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                             "value": "__passive_header__",
                                                             "disabled": True,
                                                         },
-                                                        {"label": "CM.0.0  Equal Weight", "value": "equal"},
-                                                        {"label": "CM.0.1  Cap Weight", "value": "cap_weight"},
-                                                        {"label": "CM.0.2  Price Weight", "value": "price_weight"},
-                                                        {"label": "CM.0.3  Inverse Volatility", "value": "inv_vol"},
+                                                        {
+                                                            "label": "CM.0.0  Equal Weight",
+                                                            "value": "equal",
+                                                        },
+                                                        {
+                                                            "label": "CM.0.1  Cap Weight",
+                                                            "value": "cap_weight",
+                                                        },
+                                                        {
+                                                            "label": "CM.0.2  Price Weight",
+                                                            "value": "price_weight",
+                                                        },
+                                                        {
+                                                            "label": "CM.0.3  Inverse Volatility",
+                                                            "value": "inv_vol",
+                                                        },
                                                         {
                                                             "label": html.Div(
                                                                 "PM classics",
@@ -320,9 +330,18 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                             "value": "__pm_classics_header__",
                                                             "disabled": True,
                                                         },
-                                                        {"label": "CM.1.0  Minimum Variance", "value": "min_var"},
-                                                        {"label": "CM.1.1  Risk Parity / ERC", "value": "risk_parity"},
-                                                        {"label": "CM.1.2  Maximum Sharpe", "value": "max_sharpe"},
+                                                        {
+                                                            "label": "CM.1.0  Minimum Variance",
+                                                            "value": "min_var",
+                                                        },
+                                                        {
+                                                            "label": "CM.1.1  Risk Parity / ERC",
+                                                            "value": "risk_parity",
+                                                        },
+                                                        {
+                                                            "label": "CM.1.2  Maximum Sharpe",
+                                                            "value": "max_sharpe",
+                                                        },
                                                         {
                                                             "label": "CM.1.3  Maximum Diversification",
                                                             "value": "max_diversification",
@@ -447,7 +466,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                             children=[
                                                 html.Div(
                                                     children=[
-                                                        html.Div("Volatility lookback (days)"),
+                                                        html.Div(
+                                                            "Volatility lookback (days)"
+                                                        ),
                                                         dcc.Input(
                                                             id="param_vol_lookback",
                                                             type="number",
@@ -464,29 +485,34 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                             id="method_params_optimizer",
                                             style={"display": "none"},
                                             children=[
-                                        html.Div(
-                                            children=[
-                                                html.Div("Optimizer form"),
-                                                dcc.Dropdown(
-                                                    id="param_optimizer_form",
-                                                    options=[
-                                                        {"label": "Long-only", "value": "long_only"},
-                                                        {
-                                                            "label": "Long/short — DO NOT TOUCH YET",
-                                                            "value": "long_short",
-                                                            "disabled": True,
-                                                        },
-                                                    ],
-                                                    value="long_only",
-                                                    clearable=False,
-                                                    searchable=False,
-                                                    style={"width": "230px"},
-                                                ),
-                                            ]
-                                        ),
                                                 html.Div(
                                                     children=[
-                                                        html.Div("Covariance lookback (days)"),
+                                                        html.Div("Optimizer form"),
+                                                        dcc.Dropdown(
+                                                            id="param_optimizer_form",
+                                                            options=[
+                                                                {
+                                                                    "label": "Long-only",
+                                                                    "value": "long_only",
+                                                                },
+                                                                {
+                                                                    "label": "Long/short — DO NOT TOUCH YET",
+                                                                    "value": "long_short",
+                                                                    "disabled": True,
+                                                                },
+                                                            ],
+                                                            value="long_only",
+                                                            clearable=False,
+                                                            searchable=False,
+                                                            style={"width": "230px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div(
+                                                            "Covariance lookback (days)"
+                                                        ),
                                                         dcc.Input(
                                                             id="param_cov_lookback",
                                                             type="number",
@@ -512,7 +538,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 ),
                                                 html.Div(
                                                     children=[
-                                                        html.Div("Risk-free rate (% p.a.)"),
+                                                        html.Div(
+                                                            "Risk-free rate (% p.a.)"
+                                                        ),
                                                         dcc.Input(
                                                             id="param_rf_rate",
                                                             type="number",
@@ -524,7 +552,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 ),
                                                 html.Div(
                                                     children=[
-                                                        html.Div("Covariance estimator"),
+                                                        html.Div(
+                                                            "Covariance estimator"
+                                                        ),
                                                         dcc.Dropdown(
                                                             id="param_cov_estimator",
                                                             options=[
@@ -588,7 +618,6 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                         ),
                                     ],
                                 ),
-
                                 html.Div(style={"height": "8px"}),
                                 html.Div(
                                     style={
@@ -910,8 +939,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                         dcc.Graph(id="mc_funding_fig"),
                     ],
                 ),
-            ]
+            ],
         )
+
     # ------------------------------------------------------------------------
     # Tab visibility toggle
     # ------------------------------------------------------------------------
@@ -1016,7 +1046,6 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         ],
     )
 
-
     # ------------------------------------------------------------------------
     # UI toggles (hide/show; inputs stay mounted)
     # ------------------------------------------------------------------------
@@ -1045,9 +1074,12 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         return (
             base if method in SIMPLE_PASSIVE_METHODS else hidden,
             base if method in INV_VOL_METHODS else hidden,
-            base if method in OPTIMIZER_METHODS or method in TURNOVER_UTILITY_METHODS else hidden,
+            base
+            if method in OPTIMIZER_METHODS or method in TURNOVER_UTILITY_METHODS
+            else hidden,
             base if method in TURNOVER_UTILITY_METHODS else hidden,
         )
+
     @app.callback(Output("comp_vol_controls", "style"), Input("comp_vol_on", "value"))
     def toggle_vol_controls(vol_on: str):
         return (
@@ -1118,6 +1150,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             ]
         )
         return passive_options, "bootstrap", note
+
     @app.callback(
         Output("mc_funding_method_wrap", "style"),
         Input("mc_funding_model", "value"),
@@ -1150,6 +1183,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             "backgroundColor": "#1f2430",
             "color": "#a0a6b3",
         }
+
     # ------------------------------------------------------------------------
     # Rates Inspector: update rates and charts
     # ------------------------------------------------------------------------
@@ -1298,7 +1332,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         min_weight_pct: Optional[float],
         rf_rate_pct: Optional[float],
         cov_estimator: Optional[str],
-        ):
+    ):
         constituents = constituents or []
         if method not in VALID_CONSTRUCTION_METHODS:
             method = "equal"
@@ -1307,7 +1341,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             optimizer_form = "long_only"
 
         cov_lookback = int(cov_lookback) if cov_lookback is not None else 126
-        min_weight = float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
+        min_weight = (
+            float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
+        )
         risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
 
         cov_estimator = cov_estimator or "sample"
@@ -1621,7 +1657,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             optimizer_form = "long_only"
 
         cov_lookback = int(cov_lookback) if cov_lookback is not None else 126
-        min_weight = float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
+        min_weight = (
+            float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
+        )
         risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
 
         cov_estimator = cov_estimator or "sample"

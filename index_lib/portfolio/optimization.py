@@ -112,7 +112,9 @@ def _to_weight_series(w: np.ndarray, tickers: list[str]) -> pd.Series:
     return s / total
 
 
-def _fallback_equal(tickers: list[str], method: str, message: str) -> Tuple[pd.Series, Dict[str, object]]:
+def _fallback_equal(
+    tickers: list[str], method: str, message: str
+) -> Tuple[pd.Series, Dict[str, object]]:
     w = pd.Series(1.0 / len(tickers), index=tickers, dtype=float)
 
     return w, {
@@ -223,7 +225,11 @@ def calc_min_var_weights(
     tickers = list(cov.columns)
 
     if len(tickers) == 0:
-        return pd.Series(dtype=float), {"method": method, "success": False, "message": "No valid returns"}
+        return pd.Series(dtype=float), {
+            "method": method,
+            "success": False,
+            "message": "No valid returns",
+        }
 
     bounds = _normalize_bounds(tickers, min_weight=min_weight, max_weight=max_weight)
     cov_values = cov.to_numpy(dtype=float)
@@ -263,7 +269,11 @@ def calc_max_sharpe_weights(
     tickers = list(cov.columns)
 
     if len(tickers) == 0:
-        return pd.Series(dtype=float), {"method": method, "success": False, "message": "No valid returns"}
+        return pd.Series(dtype=float), {
+            "method": method,
+            "success": False,
+            "message": "No valid returns",
+        }
 
     bounds = _normalize_bounds(tickers, min_weight=min_weight, max_weight=max_weight)
     mu_values = mu.reindex(tickers).fillna(0.0).to_numpy(dtype=float)
@@ -306,7 +316,11 @@ def calc_max_diversification_weights(
     tickers = list(cov.columns)
 
     if len(tickers) == 0:
-        return pd.Series(dtype=float), {"method": method, "success": False, "message": "No valid returns"}
+        return pd.Series(dtype=float), {
+            "method": method,
+            "success": False,
+            "message": "No valid returns",
+        }
 
     bounds = _normalize_bounds(tickers, min_weight=min_weight, max_weight=max_weight)
 
@@ -353,7 +367,11 @@ def calc_risk_parity_weights(
     tickers = list(cov.columns)
 
     if len(tickers) == 0:
-        return pd.Series(dtype=float), {"method": method, "success": False, "message": "No valid returns"}
+        return pd.Series(dtype=float), {
+            "method": method,
+            "success": False,
+            "message": "No valid returns",
+        }
 
     bounds = _normalize_bounds(tickers, min_weight=min_weight, max_weight=max_weight)
 

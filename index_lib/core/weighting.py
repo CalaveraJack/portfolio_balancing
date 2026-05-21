@@ -21,6 +21,7 @@ OPTIMIZER_METHODS = {
     "max_diversification",
 }
 
+
 def apply_weight_cap(
     weights: pd.Series,
     cap: float,
@@ -77,7 +78,7 @@ def compute_weights(
     min_weight: float = 0.0,
     risk_free_rate: float = 0.0,
     return_diagnostics: bool = False,
-    ):
+):
     """
     Compute target weights for the last available row in a price history panel.
     """

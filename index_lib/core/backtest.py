@@ -23,6 +23,7 @@ OPTIMIZER_METHODS = {
     "max_diversification",
 }
 
+
 def _equal_weights(columns: pd.Index) -> pd.Series:
     if len(columns) == 0:
         return pd.Series(dtype=float)
@@ -38,11 +39,14 @@ def _has_sufficient_history(hist: pd.DataFrame, min_obs: int) -> bool:
         return False
 
     usable_cols = [
-        c for c in returns.columns
-        if returns[c].replace([float("inf"), float("-inf")], pd.NA).dropna().shape[0] >= min_obs
+        c
+        for c in returns.columns
+        if returns[c].replace([float("inf"), float("-inf")], pd.NA).dropna().shape[0]
+        >= min_obs
     ]
 
     return len(usable_cols) >= 2
+
 
 def build_index_series(
     close: pd.DataFrame,
@@ -77,7 +81,7 @@ def build_index_series(
     px = px.dropna(axis=1, how="all")
 
     if start:
-        px = px.loc[pd.to_datetime(start):]
+        px = px.loc[pd.to_datetime(start) :]
 
     if end:
         px = px.loc[: pd.to_datetime(end)]
