@@ -107,6 +107,37 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     )
     app.title = "Strategy Forge"
 
+    section_style = {
+        "backgroundColor": "#11151d",
+        "border": "1px solid #2b313d",
+        "borderRadius": "10px",
+        "padding": "12px",
+        "marginTop": "12px",
+    }
+
+    section_header_style = {
+        "fontWeight": "800",
+        "fontSize": "13px",
+        "textTransform": "uppercase",
+        "letterSpacing": "0.06em",
+        "color": "#d9822b",
+        "marginBottom": "10px",
+    }
+
+    row_style = {
+        "display": "flex",
+        "gap": "12px",
+        "flexWrap": "wrap",
+        "alignItems": "flex-end",
+    }
+
+    note_style = {
+        "marginTop": "8px",
+        "color": "#a0a6b3",
+        "fontSize": "12px",
+        "lineHeight": "1.45",
+    }
+
     # ------------------------------------------------------------------------
     # Tab content renderer
     # ------------------------------------------------------------------------
@@ -251,7 +282,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 "color": "#f2f2f2",
             },
             children=[
-                html.H4("Strategy Composition Screen"),
+                html.H4("Strategy Builder"),
                 html.Div(
                     style={
                         "display": "grid",
@@ -260,7 +291,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     },
                     children=[
                         html.Div(
+                            style=section_style,
                             children=[
+                                html.Div("Construction", style=section_header_style),
                                 html.Div("Constituents"),
                                 dcc.Dropdown(
                                     id="comp_constituents",
@@ -272,11 +305,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                 ),
                                 html.Div(style={"height": "8px"}),
                                 html.Div(
-                                    style={
-                                        "display": "flex",
-                                        "gap": "12px",
-                                        "flexWrap": "wrap",
-                                    },
+                                    style=row_style,
                                     children=[
                                         html.Div(
                                             children=[
@@ -414,36 +443,13 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 ),
                                             ]
                                         ),
-                                        html.Div(
-                                            children=[
-                                                html.Div("Vol Target"),
-                                                dcc.Dropdown(
-                                                    id="comp_vol_on",
-                                                    options=[
-                                                        {
-                                                            "label": "Off",
-                                                            "value": "off",
-                                                        },
-                                                        {"label": "On", "value": "on"},
-                                                    ],
-                                                    value="off",
-                                                    clearable=False,
-                                                    style={"width": "160px"},
-                                                ),
-                                            ]
-                                        ),
                                     ],
                                 ),
                                 html.Div(style={"height": "8px"}),
                                 html.Div(
+                                    style=section_style,
                                     children=[
-                                        html.Div(
-                                            "Method Parameters",
-                                            style={
-                                                "fontWeight": "700",
-                                                "marginBottom": "6px",
-                                            },
-                                        ),
+                                        html.Div("Method Parameters", style=section_header_style),
                                         html.Div(
                                             id="method_params_simple",
                                             style={
@@ -618,123 +624,144 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                         ),
                                     ],
                                 ),
-                                html.Div(style={"height": "8px"}),
+
                                 html.Div(
-                                    style={
-                                        "display": "flex",
-                                        "gap": "12px",
-                                        "flexWrap": "wrap",
-                                    },
+                                    style=section_style,
                                     children=[
+                                        html.Div("Overlay Parameters", style=section_header_style),
                                         html.Div(
-                                            children=[
-                                                html.Div("Start date"),
-                                                dcc.DatePickerSingle(
-                                                    id="comp_start",
-                                                    date=str(
-                                                        data.close.index.min().date()
-                                                    )
-                                                    if not data.close.empty
-                                                    else None,
-                                                ),
-                                            ]
-                                        ),
-                                        html.Div(
-                                            children=[
-                                                html.Div("End date"),
-                                                dcc.DatePickerSingle(
-                                                    id="comp_end",
-                                                    date=str(
-                                                        data.close.index.max().date()
-                                                    )
-                                                    if not data.close.empty
-                                                    else None,
-                                                ),
-                                            ]
-                                        ),
-                                    ],
-                                ),
-                                # Keep inputs mounted (Dash dependency graph), just hide/show.
-                                html.Div(
-                                    id="comp_vol_controls",
-                                    style={"marginTop": "10px", "display": "none"},
-                                    children=[
-                                        html.Div(
-                                            style={
-                                                "display": "flex",
-                                                "gap": "12px",
-                                                "flexWrap": "wrap",
-                                            },
+                                            style=row_style,
                                             children=[
                                                 html.Div(
                                                     children=[
-                                                        html.Div("Target vol (% p.a.)"),
-                                                        dcc.Input(
-                                                            id="comp_target_vol",
-                                                            type="number",
-                                                            value=10.0,
-                                                            min=1.0,
-                                                            step=0.5,
-                                                            style={"width": "140px"},
-                                                        ),
-                                                    ]
-                                                ),
-                                                html.Div(
-                                                    children=[
-                                                        html.Div("Vol lookback (days)"),
-                                                        dcc.Input(
-                                                            id="comp_vol_lb",
-                                                            type="number",
-                                                            value=63,
-                                                            min=10,
-                                                            step=1,
-                                                            style={"width": "140px"},
-                                                        ),
-                                                    ]
-                                                ),
-                                                html.Div(
-                                                    children=[
-                                                        html.Div("Max leverage (x)"),
-                                                        dcc.Input(
-                                                            id="comp_max_lev",
-                                                            type="number",
-                                                            value=2.0,
-                                                            min=0.0,
-                                                            step=0.1,
-                                                            style={"width": "140px"},
-                                                        ),
-                                                    ]
-                                                ),
-                                                html.Div(
-                                                    children=[
-                                                        html.Div("Min leverage (x)"),
-                                                        dcc.Input(
-                                                            id="comp_min_lev",
-                                                            type="number",
-                                                            value=0.0,
-                                                            min=0.0,
-                                                            step=0.1,
-                                                            style={"width": "140px"},
-                                                        ),
-                                                    ]
-                                                ),
-                                                html.Div(
-                                                    children=[
-                                                        html.Div(
-                                                            "Borrow spread (% p.a.)"
-                                                        ),
-                                                        dcc.Input(
-                                                            id="comp_borrow_spread",
-                                                            type="number",
-                                                            value=1.0,
-                                                            min=0.0,
-                                                            step=0.1,
-                                                            style={"width": "140px"},
+                                                        html.Div("Vol Target"),
+                                                        dcc.Dropdown(
+                                                            id="comp_vol_on",
+                                                            options=[
+                                                                {"label": "Off", "value": "off"},
+                                                                {"label": "On", "value": "on"},
+                                                            ],
+                                                            value="off",
+                                                            clearable=False,
+                                                            style={"width": "160px"},
                                                         ),
                                                     ]
                                                 ),
                                             ],
-                                        )
+                                        ),
+                                        html.Div(
+                                            id="comp_vol_controls",
+                                            style={"marginTop": "10px", "display": "none"},
+                                            children=[
+                                                html.Div(
+                                                    style=row_style,
+                                                    children=[
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div("Target vol (% p.a.)"),
+                                                                dcc.Input(
+                                                                    id="comp_target_vol",
+                                                                    type="number",
+                                                                    value=10.0,
+                                                                    min=1.0,
+                                                                    step=0.5,
+                                                                    style={"width": "140px"},
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div("Vol lookback (days)"),
+                                                                dcc.Input(
+                                                                    id="comp_vol_lb",
+                                                                    type="number",
+                                                                    value=63,
+                                                                    min=10,
+                                                                    step=1,
+                                                                    style={"width": "140px"},
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div("Max leverage (x)"),
+                                                                dcc.Input(
+                                                                    id="comp_max_lev",
+                                                                    type="number",
+                                                                    value=2.0,
+                                                                    min=0.0,
+                                                                    step=0.1,
+                                                                    style={"width": "140px"},
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div("Min leverage (x)"),
+                                                                dcc.Input(
+                                                                    id="comp_min_lev",
+                                                                    type="number",
+                                                                    value=0.0,
+                                                                    min=0.0,
+                                                                    step=0.1,
+                                                                    style={"width": "140px"},
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div("Borrow spread (% p.a.)"),
+                                                                dcc.Input(
+                                                                    id="comp_borrow_spread",
+                                                                    type="number",
+                                                                    value=1.0,
+                                                                    min=0.0,
+                                                                    step=0.1,
+                                                                    style={"width": "140px"},
+                                                                ),
+                                                            ]
+                                                        ),
+                                                    ],
+                                                )
+                                            ],
+                                        ),
+                                        html.Div(
+                                            "Overlay assumption: volatility targeting scales the full strategy return stream; it does not change construction weights.",
+                                            style=note_style,
+                                        ),
+                                    ],
+                                ),
+                                html.Div(
+                                    style=section_style,
+                                    children=[
+                                        html.Div("Backtest Window", style=section_header_style),
+                                        html.Div(
+                                            style=row_style,
+                                            children=[
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Start date"),
+                                                        dcc.DatePickerSingle(
+                                                            id="comp_start",
+                                                            date=str(data.close.index.min().date())
+                                                            if not data.close.empty
+                                                            else None,
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("End date"),
+                                                        dcc.DatePickerSingle(
+                                                            id="comp_end",
+                                                            date=str(data.close.index.max().date())
+                                                            if not data.close.empty
+                                                            else None,
+                                                        ),
+                                                    ]
+                                                ),
+                                            ],
+                                        ),
                                     ],
                                 ),
                             ]
@@ -747,196 +774,210 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                         ),
                     ],
                 ),
-                html.Hr(),
-                html.Div(id="comp_stats"),
-                dcc.Graph(id="comp_index_fig"),
-                html.Details(
-                    open=False,
-                    style={"marginTop": "6px"},
+                html.Div(
+                    style=section_style,
                     children=[
-                        html.Summary(
-                            "Constituent Weights (Top 20)",
-                            style={"cursor": "pointer", "fontWeight": "600"},
+                        html.Div("Backtest Output", style=section_header_style),
+                        html.Div(id="comp_stats"),
+                        dcc.Graph(id="comp_index_fig"),
+                        html.Details(
+                            open=False,
+                            style={"marginTop": "6px"},
+                            children=[
+                                html.Summary(
+                                    "Weight History",
+                                    style={"cursor": "pointer", "fontWeight": "600"},
+                                ),
+                                dcc.Graph(id="comp_weights_fig"),
+                            ],
                         ),
-                        dcc.Graph(id="comp_weights_fig"),
                     ],
                 ),
                 html.Div(
                     id="comp_vol_panel",
-                    style={
-                        "display": "none",
-                        "gridTemplateColumns": "1fr 1fr",
-                        "gap": "12px",
-                        "marginTop": "10px",
-                    },
-                    children=[
-                        dcc.Graph(id="comp_leverage_fig"),
-                        dcc.Graph(id="comp_realized_vol_fig"),
-                    ],
-                ),
-                html.Hr(),
-                dcc.Store(id="mc_funding_store"),
-                html.H4("Monte Carlo Simulation"),
-                html.Div(
-                    style={
-                        "display": "flex",
-                        "gap": "12px",
-                        "flexWrap": "wrap",
-                        "alignItems": "flex-end",
-                    },
+                    style={"display": "none"},
                     children=[
                         html.Div(
+                            style=section_style,
                             children=[
-                                html.Div("Simulations"),
-                                dcc.Input(
-                                    id="mc_num_sim",
-                                    type="number",
-                                    value=1000,
-                                    min=100,
-                                    step=100,
-                                    style={"width": "140px"},
-                                ),
-                            ]
-                        ),
-                        html.Div(
-                            children=[
-                                html.Div("Horizon (days)"),
-                                dcc.Input(
-                                    id="mc_horizon",
-                                    type="number",
-                                    value=252,
-                                    min=20,
-                                    step=10,
-                                    style={"width": "140px"},
-                                ),
-                            ]
-                        ),
-                        html.Div(
-                            children=[
-                                html.Div("MC method"),
-                                dcc.Dropdown(
-                                    id="mc_method",
-                                    options=[
-                                        {
-                                            "label": "Bootstrap (blocks)",
-                                            "value": "bootstrap",
-                                        },
-                                        {"label": "GBM (correlated)", "value": "gbm"},
+                                html.Div("Overlay Diagnostics", style=section_header_style),
+                                html.Div(
+                                    style={
+                                        "display": "grid",
+                                        "gridTemplateColumns": "1fr 1fr",
+                                        "gap": "12px",
+                                    },
+                                    children=[
+                                        dcc.Graph(id="comp_leverage_fig"),
+                                        dcc.Graph(id="comp_realized_vol_fig"),
                                     ],
-                                    value="bootstrap",
-                                    clearable=False,
-                                    style={"width": "220px"},
-                                ),
-                            ]
-                        ),
-                        html.Div(
-                            children=[
-                                html.Div("Funding model"),
-                                dcc.Dropdown(
-                                    id="mc_funding_model",
-                                    options=[
-                                        {
-                                            "label": "Fixed to last",
-                                            "value": "fixed_last",
-                                        },
-                                        {"label": "Monte Carlo", "value": "mc"},
-                                    ],
-                                    value="fixed_last",
-                                    clearable=False,
-                                    style={"width": "180px"},
-                                ),
-                            ]
-                        ),
-                        html.Div(
-                            id="mc_funding_method_wrap",
-                            style={"display": "none"},
-                            children=[
-                                html.Div("Funding MC method"),
-                                dcc.Dropdown(
-                                    id="mc_funding_method",
-                                    options=[
-                                        {"label": "OU", "value": "ou"},
-                                        {"label": "Bootstrap", "value": "bootstrap"},
-                                    ],
-                                    value="ou",
-                                    clearable=False,
-                                    style={"width": "220px"},
                                 ),
                             ],
-                        ),
-                        html.Div(
-                            children=[
-                                html.Div("VaR alpha (%)"),
-                                dcc.Input(
-                                    id="mc_alpha",
-                                    type="number",
-                                    value=5.0,
-                                    min=0.1,
-                                    max=49.0,
-                                    step=0.5,
-                                    style={"width": "140px"},
-                                ),
-                            ]
-                        ),
-                        html.Button(
-                            "Calculate Monte Carlo",
-                            id="mc_button",
-                            n_clicks=0,
-                            style={"height": "38px"},
-                        ),
+                        )
                     ],
                 ),
                 html.Div(
-                    id="mc_method_note",
-                    style={
-                        "marginTop": "8px",
-                        "marginBottom": "8px",
-                        "color": "#a0a6b3",
-                        "fontSize": "12px",
-                    },
-                ),
-                dcc.Loading(
-                    id="mc_loading",
-                    type="circle",
-                    fullscreen=True,
+                    style=section_style,
                     children=[
-                        dcc.Graph(id="mc_fig"),
-                        html.Div(id="mc_summary"),
-                    ],
-                ),
-                html.Details(
-                    open=False,
-                    style={"marginTop": "8px"},
-                    children=[
-                        html.Summary(
-                            "Monte Carlo Funding Path Inspector",
-                            style={"cursor": "pointer", "fontWeight": "600"},
-                        ),
+                        dcc.Store(id="mc_funding_store"),
+                        html.Div("Monte Carlo Simulation", style=section_header_style),
                         html.Div(
-                            style={
-                                "display": "flex",
-                                "gap": "12px",
-                                "flexWrap": "wrap",
-                                "alignItems": "flex-end",
-                                "marginTop": "8px",
-                            },
+                            style=row_style,
                             children=[
                                 html.Div(
                                     children=[
-                                        html.Div("Funding path id"),
+                                        html.Div("Simulations"),
                                         dcc.Input(
-                                            id="mc_funding_path_id",
+                                            id="mc_num_sim",
                                             type="number",
-                                            value=0,
-                                            min=0,
-                                            step=1,
+                                            value=1000,
+                                            min=100,
+                                            step=100,
                                             style={"width": "140px"},
                                         ),
                                     ]
                                 ),
+                                html.Div(
+                                    children=[
+                                        html.Div("Horizon (days)"),
+                                        dcc.Input(
+                                            id="mc_horizon",
+                                            type="number",
+                                            value=252,
+                                            min=20,
+                                            step=10,
+                                            style={"width": "140px"},
+                                        ),
+                                    ]
+                                ),
+                                html.Div(
+                                    children=[
+                                        html.Div("MC method"),
+                                        dcc.Dropdown(
+                                            id="mc_method",
+                                            options=[
+                                                {
+                                                    "label": "Bootstrap (blocks)",
+                                                    "value": "bootstrap",
+                                                },
+                                                {"label": "GBM (correlated)", "value": "gbm"},
+                                            ],
+                                            value="bootstrap",
+                                            clearable=False,
+                                            style={"width": "220px"},
+                                        ),
+                                    ]
+                                ),
+                                html.Div(
+                                    children=[
+                                        html.Div("Funding model"),
+                                        dcc.Dropdown(
+                                            id="mc_funding_model",
+                                            options=[
+                                                {
+                                                    "label": "Fixed to last",
+                                                    "value": "fixed_last",
+                                                },
+                                                {"label": "Monte Carlo", "value": "mc"},
+                                            ],
+                                            value="fixed_last",
+                                            clearable=False,
+                                            style={"width": "180px"},
+                                        ),
+                                    ]
+                                ),
+                                html.Div(
+                                    id="mc_funding_method_wrap",
+                                    style={"display": "none"},
+                                    children=[
+                                        html.Div("Funding MC method"),
+                                        dcc.Dropdown(
+                                            id="mc_funding_method",
+                                            options=[
+                                                {"label": "OU", "value": "ou"},
+                                                {"label": "Bootstrap", "value": "bootstrap"},
+                                            ],
+                                            value="ou",
+                                            clearable=False,
+                                            style={"width": "220px"},
+                                        ),
+                                    ],
+                                ),
+                                html.Div(
+                                    children=[
+                                        html.Div("VaR alpha (%)"),
+                                        dcc.Input(
+                                            id="mc_alpha",
+                                            type="number",
+                                            value=5.0,
+                                            min=0.1,
+                                            max=49.0,
+                                            step=0.5,
+                                            style={"width": "140px"},
+                                        ),
+                                    ]
+                                ),
+                                html.Button(
+                                    "Calculate Monte Carlo",
+                                    id="mc_button",
+                                    n_clicks=0,
+                                    style={"height": "38px"},
+                                ),
                             ],
                         ),
-                        dcc.Graph(id="mc_funding_fig"),
+                        html.Div(
+                            id="mc_method_note",
+                            style={
+                                **note_style,
+                                "width": "100%",
+                                "boxSizing": "border-box",
+                                "padding": "10px 12px",
+                                "border": "1px solid #2b313d",
+                                "borderRadius": "8px",
+                                "backgroundColor": "#171a21",
+                            },
+                        ),
+                        dcc.Loading(
+                            id="mc_loading",
+                            type="circle",
+                            fullscreen=True,
+                            children=[
+                                dcc.Graph(id="mc_fig"),
+                                html.Div(id="mc_summary"),
+                            ],
+                        ),
+                        html.Details(
+                            open=False,
+                            style={"marginTop": "8px"},
+                            children=[
+                                html.Summary(
+                                    "Monte Carlo Funding Path Inspector",
+                                    style={"cursor": "pointer", "fontWeight": "600"},
+                                ),
+                                html.Div(
+                                    style={
+                                        **row_style,
+                                        "marginTop": "8px",
+                                    },
+                                    children=[
+                                        html.Div(
+                                            children=[
+                                                html.Div("Funding path id"),
+                                                dcc.Input(
+                                                    id="mc_funding_path_id",
+                                                    type="number",
+                                                    value=0,
+                                                    min=0,
+                                                    step=1,
+                                                    style={"width": "140px"},
+                                                ),
+                                            ]
+                                        ),
+                                    ],
+                                ),
+                                dcc.Graph(id="mc_funding_fig"),
+                            ],
+                        ),
                     ],
                 ),
             ],
@@ -1091,12 +1132,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     @app.callback(Output("comp_vol_panel", "style"), Input("comp_vol_on", "value"))
     def toggle_vol_panel(vol_on: str):
         if vol_on == "on":
-            return {
-                "display": "grid",
-                "gridTemplateColumns": "1fr 1fr",
-                "gap": "12px",
-                "marginTop": "10px",
-            }
+            return {"display": "block"}
         return {"display": "none"}
 
     @app.callback(
@@ -1388,8 +1424,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             risk_free_rate=risk_free_rate,
         )
 
-        lev_fig = empty_fig(title="Vol Overlay Exposure", height=260)
-        vol_fig = empty_fig(title="Vol Estimate + Funding Rates", height=260)
+        lev_fig = empty_fig(title="Overlay Exposure", height=260)
+        vol_fig = empty_fig(title="Overlay Volatility + Funding", height=260)
 
         if index_level.empty:
             return (
@@ -1455,7 +1491,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 )
             )
             lev_fig.update_layout(
-                title="Vol Overlay Exposure",
+                title="Overlay Exposure",
                 xaxis_title="Date",
                 yaxis_title="Weight / x",
                 height=260,
@@ -1487,7 +1523,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 )
             )
             vol_fig.update_layout(
-                title="Vol Estimate + Funding Rates",
+                title="Overlay Volatility + Funding",
                 xaxis_title="Date",
                 yaxis_title="Annualized level",
                 height=260,
@@ -1496,7 +1532,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
 
         fig_index = make_line_fig("Index Level", index_level, "Index level", height=320)
         fig_weights = make_weight_fig(
-            daily_wh, "Constituent Weights (Top 20)", top_n=20, height=360
+            daily_wh, "Top 20 Constituent Weights", top_n=20, height=360
         )
 
         stats = compute_stats_from_price_series(index_level)
@@ -1558,10 +1594,22 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 ],
             )
 
-        stats_block = html.Div(
-            [stats_tbl] + ([extra_stats] if extra_stats is not None else [])
-        )
         weights_tbl = make_latest_weights_table(weights_history)
+
+        assumptions_block = html.Div(
+            "Backtest assumptions: trading costs, slippage, taxes, and short-borrow costs are currently zero. "
+            "Scheduled rebalances use only prior data.",
+            style={
+                "marginTop": "8px",
+                "color": "#a0a6b3",
+                "fontSize": "12px",
+                "lineHeight": "1.4",
+            },
+        )
+
+        stats_block = html.Div(
+            [stats_tbl, assumptions_block] + ([extra_stats] if extra_stats is not None else [])
+        )
 
         return fig_index, fig_weights, lev_fig, vol_fig, stats_block, weights_tbl
 
