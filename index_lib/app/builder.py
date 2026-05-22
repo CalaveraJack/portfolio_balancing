@@ -1164,6 +1164,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     html.Div(
                         "Funding simulation remains unchanged. Trading costs, slippage, taxes, "
                         "and short-borrow costs are currently assumed to be zero."
+                        "funding costs for the target vol are implemented by proxi through FRED Curves"
                     ),
                 ]
             )
@@ -1178,6 +1179,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 html.Div(
                     "Funding simulation remains unchanged. Trading costs, slippage, taxes, "
                     "and short-borrow costs are currently assumed to be zero."
+                    "funding costs for the target vol are implemented by proxi through FRED Curves"
                 ),
             ]
         )
