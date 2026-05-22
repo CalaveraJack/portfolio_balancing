@@ -34,10 +34,6 @@ from index_lib.loaders import (
     make_curve_snapshot_figure,
     make_funding_history_figure,
 )
-from index_lib.loaders.market_caps import (
-    align_market_caps_to_prices,
-    load_market_caps,
-)
 from index_lib.simulation import (
     build_mc_funding_fixed_last_matrix,
     simulate_bootstrap_funding_paths,
@@ -1393,20 +1389,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         if cap_pct is not None and cap_pct > 0:
             cap = float(cap_pct) / 100.0
 
-        # Load market caps for cap-weighting
         market_caps_df = None
-
         if method == "cap_weight" and constituents:
-            market_caps_df = load_market_caps(
-                constituents,
-                data_dir="data",
-                use_cache_only=False,
-            )
-
-            market_caps_df = align_market_caps_to_prices(
-                market_caps_df,
-                data.close.index,
-            )
+            market_caps_df = data.market_caps.reindex(columns=constituents)
 
         index_level, weights_history, base_returns, daily_wh = build_index_series(
             close=data.close,
@@ -1726,14 +1711,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         mc_market_caps = None
 
         if method == "cap_weight" and constituents:
-            caps_df = load_market_caps(
-                constituents,
-                data_dir="data",
-                use_cache_only=True,
-            )
+            caps_df = data.market_caps.reindex(columns=constituents)
 
             if not caps_df.empty:
-                last_caps = caps_df.reindex(columns=constituents).ffill().iloc[-1]
+                last_caps = caps_df.ffill().iloc[-1]
                 mc_market_caps = np.full(
                     (num_sim, len(constituents)),
                     last_caps.fillna(0.0).to_numpy(dtype=np.float32),
@@ -1785,19 +1766,6 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             # Bootstrap realized strategy returns after the historical optimizer backtest.
             # This avoids pretending that we re-optimize every simulated constituent path.
             mc_market_caps_df = None
-
-            if method == "cap_weight" and constituents:
-                mc_market_caps_df = load_market_caps(
-                    constituents,
-                    data_dir="data",
-                    use_cache_only=True,
-                )
-
-                if not mc_market_caps_df.empty:
-                    mc_market_caps_df = align_market_caps_to_prices(
-                        mc_market_caps_df,
-                        data.close.index,
-                    )
 
             _, _, mc_base_returns, _ = build_index_series(
                 close=data.close,

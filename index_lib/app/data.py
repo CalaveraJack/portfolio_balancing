@@ -11,6 +11,11 @@ from index_lib.loaders import (
     load_universe_close_volume_cached,
 )
 
+from index_lib.loaders.market_caps import (
+    align_market_caps_to_prices,
+    load_market_caps,
+)
+
 
 def normalize_index_timezone(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -91,9 +96,56 @@ def load_data(
     ):
         raise ValueError("Loaded Yahoo data is empty or invalid.")
 
+    close = normalize_index_timezone(data.close)
+    volume = normalize_index_timezone(data.volume)
+
+    try:
+        market_caps = load_market_caps(
+            tickers=list(tickers),
+            data_dir=data_dir,
+            use_cache_only=(cache_mode == "cache"),
+            refresh=(cache_mode == "refresh"),
+        )
+    except Exception as exc:
+        if cache_mode == "auto":
+            market_caps = load_market_caps(
+                tickers=list(tickers),
+                data_dir=data_dir,
+                use_cache_only=True,
+                refresh=False,
+            )
+        elif cache_mode == "refresh":
+            recommendation = ""
+            try:
+                cached_caps = load_market_caps(
+                    tickers=list(tickers),
+                    data_dir=data_dir,
+                    use_cache_only=True,
+                    refresh=False,
+                )
+                if not cached_caps.empty:
+                    recommendation = (
+                        " Local market-cap cache exists; rerun with "
+                        "--data-mode cache or --data-mode auto."
+                    )
+            except Exception:
+                pass
+
+            raise RuntimeError(
+                f"Failed to refresh Yahoo market-cap data: {exc}.{recommendation}"
+            ) from exc
+        else:
+            raise
+
+    market_caps = align_market_caps_to_prices(
+        market_caps,
+        close.index,
+    )
+
     return UniverseData(
-        close=normalize_index_timezone(data.close),
-        volume=normalize_index_timezone(data.volume),
+        close=close,
+        volume=volume,
+        market_caps=market_caps,
     )
 
 

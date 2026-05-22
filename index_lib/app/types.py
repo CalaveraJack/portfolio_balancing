@@ -14,6 +14,7 @@ class UniverseData:
 
     close: pd.DataFrame
     volume: pd.DataFrame
+    market_caps: pd.DataFrame
 
 
 @dataclass(frozen=True)

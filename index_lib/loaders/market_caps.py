@@ -42,10 +42,8 @@ def read_market_caps_cache(
     caps = _normalize_datetime_index(caps)
 
     if tickers is not None:
-        available = [ticker for ticker in tickers if ticker in caps.columns]
-        if not available:
-            return _empty_caps_frame(tickers)
-        caps = caps[available]
+        tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
+        caps = caps.reindex(columns=tickers)
 
     return caps
 
@@ -135,7 +133,6 @@ def fetch_market_caps_yahoo(
 
     return caps
 
-
 def load_market_caps(
     tickers: Sequence[str],
     *,
@@ -148,35 +145,65 @@ def load_market_caps(
 
     Modes:
     - use_cache_only=True: read cache only
-    - refresh=True: fetch fresh data and overwrite cache
-    - default: use cache if present, otherwise fetch
+    - refresh=True: fetch all requested tickers and merge into cache
+    - default: use cache, but fetch missing requested tickers
     """
     tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
+    tickers = list(dict.fromkeys(tickers))
 
     if not tickers:
         return _empty_caps_frame([])
 
-    cached = read_market_caps_cache(data_dir=data_dir, tickers=tickers)
+    cached_all = read_market_caps_cache(data_dir=data_dir, tickers=None)
+
+    cached_requested = pd.DataFrame()
+
+    if not cached_all.empty:
+        cached_requested = cached_all.reindex(columns=tickers)
 
     if use_cache_only:
-        return cached
+        if cached_requested.empty:
+            return _empty_caps_frame(tickers)
+        return cached_requested
 
-    if not refresh and not cached.empty:
-        return cached
+    if refresh:
+        missing_tickers = tickers
+    else:
+        if cached_requested.empty:
+            missing_tickers = tickers
+        else:
+            missing_tickers = [
+                t
+                for t in tickers
+                if t not in cached_requested.columns
+                or cached_requested[t].dropna().empty
+                or (cached_requested[t].fillna(0.0) <= 0.0).all()
+            ]
 
-    fetched = fetch_market_caps_yahoo(tickers)
+    if missing_tickers:
+        logger.warning(
+            "Fetching missing market caps for %s",
+            ", ".join(missing_tickers),
+        )
 
-    if fetched.empty:
-        if not cached.empty:
-            logger.warning("Market cap refresh failed; using existing cache")
-            return cached
+        fetched = fetch_market_caps_yahoo(missing_tickers)
 
+        if not fetched.empty:
+            if cached_all.empty:
+                merged = fetched
+            else:
+                merged = cached_all.combine_first(fetched)
+                merged.update(fetched)
+
+            write_market_caps_cache(merged, data_dir=data_dir)
+
+            cached_all = read_market_caps_cache(data_dir=data_dir, tickers=None)
+            cached_requested = cached_all.reindex(columns=tickers)
+
+    if cached_requested.empty:
         return _empty_caps_frame(tickers)
 
-    write_market_caps_cache(fetched, data_dir=data_dir)
-
-    return read_market_caps_cache(data_dir=data_dir, tickers=tickers)
-
+    return cached_requested
 
 def align_market_caps_to_prices(
     market_caps: pd.DataFrame,
