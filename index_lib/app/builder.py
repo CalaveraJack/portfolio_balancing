@@ -1146,6 +1146,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             {"label": "Constituent GBM (correlated)", "value": "gbm"},
         ]
 
+        cap_weight_options = [
+            {"label": "Constituent Bootstrap with Historical Caps", "value": "bootstrap"},
+        ]
+
         optimizer_options = [
             {
                 "label": "Strategy Return Bootstrap",
@@ -1157,29 +1161,76 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             note = html.Div(
                 [
                     html.Div(
-                        "MC note: PM classic strategies currently use return bootstrapping "
-                        "of the realized strategy return stream. Constituent-path re-optimization "
-                        "inside each simulation is not implemented yet."
+                        "PM classic Monte Carlo",
+                        style={
+                            "fontWeight": "700",
+                            "color": "#f2f2f2",
+                            "marginBottom": "4px",
+                        },
                     ),
                     html.Div(
-                        "Funding simulation remains unchanged. Trading costs, slippage, taxes, "
-                        "and short-borrow costs are currently assumed to be zero."
-                        "funding costs for the target vol are implemented by proxi through FRED Curves"
+                        "PM classic strategies currently use return bootstrapping of the realized strategy return stream. "
+                        "Constituent-path re-optimization inside each simulation is not implemented yet."
+                    ),
+                    html.Div(
+                        "Funding simulation remains unchanged. If volatility targeting is enabled, funding costs are applied through the configured FRED-based cash and borrow-rate paths.",
+                        style={"marginTop": "4px"},
+                    ),
+                    html.Div(
+                        "Trading costs, slippage, taxes, market impact, and short-borrow costs are currently assumed to be zero.",
+                        style={"marginTop": "4px"},
                     ),
                 ]
             )
             return optimizer_options, "strategy_bootstrap", note
 
+        if method == "cap_weight":
+            note = html.Div(
+                [
+                    html.Div(
+                        "Cap-weight Monte Carlo",
+                        style={
+                            "fontWeight": "700",
+                            "color": "#f2f2f2",
+                            "marginBottom": "4px",
+                        },
+                    ),
+                    html.Div(
+                        "Cap-weighted strategies currently use constituent block bootstrap only. "
+                        "At simulated rebalance dates, the engine uses sampled historical market-cap states aligned with the sampled historical return blocks."
+                    ),
+                    html.Div(
+                        "GBM is disabled for cap-weighting because the current GBM engine does not simulate shares outstanding, market-cap paths, corporate actions, or cap-rank dynamics.",
+                        style={"marginTop": "4px"},
+                    ),
+                    html.Div(
+                        "Funding simulation remains unchanged. Trading costs, slippage, taxes, market impact, and short-borrow costs are currently assumed to be zero.",
+                        style={"marginTop": "4px"},
+                    ),
+                ]
+            )
+            return cap_weight_options, "bootstrap", note
+
         note = html.Div(
             [
                 html.Div(
-                    "MC note: passive/simple strategies use constituent-level simulations. "
-                    "Bootstrap resamples constituent return blocks; GBM simulates correlated constituent paths."
+                    "Passive/simple Monte Carlo",
+                    style={
+                        "fontWeight": "700",
+                        "color": "#f2f2f2",
+                        "marginBottom": "4px",
+                    },
                 ),
                 html.Div(
-                    "Funding simulation remains unchanged. Trading costs, slippage, taxes, "
-                    "and short-borrow costs are currently assumed to be zero."
-                    "funding costs for the target vol are implemented by proxi through FRED Curves"
+                    "Passive/simple strategies use constituent-level simulations. Bootstrap resamples historical constituent-return blocks; GBM simulates correlated constituent paths."
+                ),
+                html.Div(
+                    "Funding simulation remains unchanged. If volatility targeting is enabled, funding costs are applied through the configured FRED-based cash and borrow-rate paths.",
+                    style={"marginTop": "4px"},
+                ),
+                html.Div(
+                    "Trading costs, slippage, taxes, market impact, and short-borrow costs are currently assumed to be zero.",
+                    style={"marginTop": "4px"},
                 ),
             ]
         )
@@ -1667,6 +1718,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             )
         if method not in VALID_CONSTRUCTION_METHODS:
             method = "equal"
+        if method == "cap_weight" and mc_method == "gbm":
+            mc_method = "bootstrap"
 
         cap = float(cap_pct) / 100 if cap_pct else None
 
@@ -1708,20 +1761,23 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
         )
 
-        # Load market caps for Monte Carlo if using cap_weight
 
+        # Market caps for cap-weight MC.
+        # For cap-weight bootstrap, pass the historical cap panel.
+        # The bootstrap engine samples cap rows with the same historical indices
+        # used for sampled constituent returns.
         mc_market_caps = None
 
         if method == "cap_weight" and constituents:
             caps_df = data.market_caps.reindex(columns=constituents)
 
             if not caps_df.empty:
-                last_caps = caps_df.ffill().iloc[-1]
-                mc_market_caps = np.full(
-                    (num_sim, len(constituents)),
-                    last_caps.fillna(0.0).to_numpy(dtype=np.float32),
-                    dtype=np.float32,
+                caps_df = (
+                    caps_df.reindex(index=px_hist.index, columns=constituents)
+                    .ffill()
+                    .fillna(0.0)
                 )
+                mc_market_caps = caps_df
 
         rate_paths = None
         cash_paths = None
