@@ -133,6 +133,7 @@ def fetch_market_caps_yahoo(
 
     return caps
 
+
 def load_market_caps(
     tickers: Sequence[str],
     *,
@@ -204,6 +205,7 @@ def load_market_caps(
         return _empty_caps_frame(tickers)
 
     return cached_requested
+
 
 def align_market_caps_to_prices(
     market_caps: pd.DataFrame,
