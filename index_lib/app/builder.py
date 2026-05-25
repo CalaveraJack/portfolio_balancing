@@ -134,6 +134,14 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         "lineHeight": "1.45",
     }
 
+    graph_card_style = {
+        "backgroundColor": "#0f1115",
+        "border": "1px solid #1f2430",
+        "borderRadius": "8px",
+        "padding": "10px",
+        "marginTop": "10px",
+    }
+
     # ------------------------------------------------------------------------
     # Tab content renderer
     # ------------------------------------------------------------------------
@@ -763,10 +771,19 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                             ]
                         ),
                         html.Div(
+                            style={
+                                **section_style,
+                                "alignSelf": "start",
+                            },
                             children=[
-                                html.Div("Latest Weights"),
-                                html.Div(id="comp_weights_table"),
-                            ]
+                                html.Div("Latest Weights", style=section_header_style),
+                                html.Div(
+                                    id="comp_weights_table",
+                                    style={
+                                        "marginTop": "8px",
+                                    },
+                                ),
+                            ],
                         ),
                     ],
                 ),
@@ -775,14 +792,26 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     children=[
                         html.Div("Backtest Output", style=section_header_style),
                         html.Div(id="comp_stats"),
-                        dcc.Graph(id="comp_index_fig"),
+                        html.Div(
+                            style=graph_card_style,
+                            children=[
+                                dcc.Graph(id="comp_index_fig"),
+                            ],
+                        ),
                         html.Details(
                             open=False,
-                            style={"marginTop": "6px"},
+                            style={
+                                **graph_card_style,
+                                "marginTop": "12px",
+                            },
                             children=[
                                 html.Summary(
-                                    "Weight History",
-                                    style={"cursor": "pointer", "fontWeight": "600"},
+                                    "Visual Inspection",
+                                    style={
+                                        "cursor": "pointer",
+                                        "fontWeight": "700",
+                                        "marginBottom": "12px",
+                                    },
                                 ),
                                 dcc.Graph(id="comp_weights_fig"),
                             ],
@@ -798,13 +827,14 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                             children=[
                                 html.Div("Overlay Diagnostics", style=section_header_style),
                                 html.Div(
-                                    style={
-                                        "display": "grid",
-                                        "gridTemplateColumns": "1fr 1fr",
-                                        "gap": "12px",
-                                    },
+                                    style=graph_card_style,
                                     children=[
                                         dcc.Graph(id="comp_leverage_fig"),
+                                    ],
+                                ),
+                                html.Div(
+                                    style=graph_card_style,
+                                    children=[
                                         dcc.Graph(id="comp_realized_vol_fig"),
                                     ],
                                 ),
@@ -931,49 +961,70 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                 "border": "1px solid #2b313d",
                                 "borderRadius": "8px",
                                 "backgroundColor": "#171a21",
+                                "marginTop": "12px",
+                                "marginBottom": "14px",
                             },
                         ),
-                        dcc.Loading(
-                            id="mc_loading",
-                            type="circle",
-                            fullscreen=True,
-                            children=[
-                                dcc.Graph(id="mc_fig"),
-                                html.Div(id="mc_summary"),
-                            ],
-                        ),
-                        html.Details(
-                            open=False,
-                            style={"marginTop": "8px"},
-                            children=[
-                                html.Summary(
-                                    "Monte Carlo Funding Path Inspector",
-                                    style={"cursor": "pointer", "fontWeight": "600"},
-                                ),
-                                html.Div(
-                                    style={
-                                        **row_style,
-                                        "marginTop": "8px",
-                                    },
-                                    children=[
-                                        html.Div(
-                                            children=[
-                                                html.Div("Funding path id"),
-                                                dcc.Input(
-                                                    id="mc_funding_path_id",
-                                                    type="number",
-                                                    value=0,
-                                                    min=0,
-                                                    step=1,
-                                                    style={"width": "140px"},
-                                                ),
-                                            ]
-                                        ),
-                                    ],
-                                ),
-                                dcc.Graph(id="mc_funding_fig"),
-                            ],
-                        ),
+                        html.Div(
+                            style=graph_card_style,
+                                children=[
+                                    dcc.Loading(
+                                        id="mc_loading",
+                                        type="circle",
+                                        fullscreen=True,
+                                        children=[
+                                            dcc.Graph(id="mc_fig"),
+                                            html.Div(
+                                                id="mc_summary",
+                                                style={
+                                                    "marginTop": "10px",
+                                                    "padding": "0 4px 4px 4px",
+                                                },
+                                            ),
+                                        ],
+                                    ),
+                                ],
+                            ),
+                            html.Details(
+                                open=False,
+                                style={
+                                    **graph_card_style,
+                                    "marginTop": "12px",
+                                },
+                                children=[
+                                    html.Summary(
+                                        "Monte Carlo Funding Path Inspector",
+                                        style={
+                                            "cursor": "pointer",
+                                            "fontWeight": "700",
+                                            "marginBottom": "12px",
+                                        },
+                                    ),
+                                    html.Div(
+                                        style={
+                                            **row_style,
+                                            "marginTop": "8px",
+                                            "marginBottom": "10px",
+                                        },
+                                        children=[
+                                            html.Div(
+                                                children=[
+                                                    html.Div("Funding path id"),
+                                                    dcc.Input(
+                                                        id="mc_funding_path_id",
+                                                        type="number",
+                                                        value=0,
+                                                        min=0,
+                                                        step=1,
+                                                        style={"width": "140px"},
+                                                    ),
+                                                ]
+                                            ),
+                                        ],
+                                    ),
+                                    dcc.Graph(id="mc_funding_fig"),
+                                ],
+                            ),
                     ],
                 ),
             ],
@@ -1462,8 +1513,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             risk_free_rate=risk_free_rate,
         )
 
-        lev_fig = empty_fig(title="Overlay Exposure", height=260)
-        vol_fig = empty_fig(title="Overlay Volatility + Funding", height=260)
+        lev_fig = empty_fig(title="Overlay Exposure", height=320)
+        vol_fig = empty_fig(title="Overlay Volatility + Funding", height=320)
 
         if index_level.empty:
             return (
@@ -1532,7 +1583,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 title="Overlay Exposure",
                 xaxis_title="Date",
                 yaxis_title="Weight / x",
-                height=260,
+                height=320,
                 margin=dict(l=60, r=40, t=50, b=40),
             )
             vol_fig = go.Figure()
@@ -1564,7 +1615,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 title="Overlay Volatility + Funding",
                 xaxis_title="Date",
                 yaxis_title="Annualized level",
-                height=260,
+                height=320,
                 margin=dict(l=60, r=40, t=50, b=40),
             )
 
@@ -1638,7 +1689,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             "Backtest assumptions: trading costs, slippage, taxes, and short-borrow costs are currently zero. "
             "Scheduled rebalances use only prior data.",
             style={
-                "marginTop": "8px",
+                "marginTop": "10px",
+                "marginBottom": "12px",
                 "color": "#a0a6b3",
                 "fontSize": "12px",
                 "lineHeight": "1.4",

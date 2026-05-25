@@ -1,8 +1,8 @@
 # Strategy Forge
 
-A Dash-based research prototype for **strategy construction, index logic, funding-aware overlays, and forward simulation**.
+A Dash-based research prototype for **strategy construction, passive index logic, PM-classic portfolio methods, funding-aware overlays, and forward simulation**.
 
-The current version supports universe inspection, portfolio/index construction, local data caching, cap-weighted balancing, funding-aware volatility targeting, and Monte Carlo simulation.
+The current version supports universe inspection, strategy construction, local data caching, cap-weighted balancing, PM-classic optimizers, funding-aware volatility targeting, and method-aware Monte Carlo simulation.
 
 Repository: https://github.com/CalaveraJack/portfolio_balancing
 
@@ -89,8 +89,8 @@ The application consists of four tightly connected layers:
 
 1. **Rates Inspector** — macro + funding layer  
 2. **Universe Inspector** — single-asset diagnostics  
-3. **Index Composer** — portfolio construction engine  
-4. **Monte Carlo Engine** — forward simulation  
+3. **Strategy Forge** — passive and PM-classic strategy construction  
+4. **Monte Carlo Engine** — method-aware forward simulation  
 
 ---
 
@@ -114,17 +114,17 @@ The application consists of four tightly connected layers:
 
 ---
 
-## ⚠️ Integration into Portfolio Mechanics
+## ⚠️ Integration into Strategy Mechanics
 
 Rates are directly integrated into strategy mechanics.
 
 ### Historical backtests
 - Cash sleeve earns SOFR  
-- Leveraged sleeve pays SOFR + spread (as per current version is an abstraction of user-defined constant)
+- Leveraged sleeve pays SOFR + user-defined borrow spread  
 
 ### Monte Carlo simulation
 - Same funding logic applied per simulated path  
-- Optional stochastic rate generation  
+- Optional stochastic funding-rate generation  
 
 ---
 
@@ -135,7 +135,7 @@ Rates are directly integrated into strategy mechanics.
 ## Features
 
 - Price time series  
-- Return distribution (histogram)  
+- Return distribution  
 - Drawdown profile  
 - Performance statistics  
 
@@ -149,25 +149,40 @@ Rates are directly integrated into strategy mechanics.
 
 ---
 
-# 🧩 Index Composer
+# 🧩 Strategy Forge
 
 ![Vol Off](docs/screenshots/index_composer_vol_off.png)  
 ![Vol On](docs/screenshots/index_composer_vol_on.png)
 
 ## Core functionality
 
-### Portfolio construction
+### Strategy construction
 - Multi-asset selection  
-- Flexible weighting schemes  
+- Passive construction methods  
+- PM-classic optimizer methods  
 - Periodic rebalancing  
-- Weight drift  
+- Daily weight drift  
 - Weight caps  
+- Funding-aware overlays  
 
-### Weighting methods
+### Passive methods
 - Equal Weight  
 - Price Weight  
 - Inverse Volatility  
-- Cap-Weighted  
+- Cap Weight  
+
+### PM Classics
+Available now:
+- Minimum Variance  
+- Risk Parity / ERC  
+- Maximum Sharpe  
+- Maximum Diversification  
+
+Current implementation status:
+- PM-classic methods are implemented as **long-only optimizers**.  
+- The optimizer form selector is present, but **long/short is not enabled yet**.  
+- Long/short constraints, gross exposure controls, short-side caps, and short-borrow-cost handling are planned for the next development stage.  
+- The covariance estimator selector is currently limited to **sample covariance**. Additional estimators such as EWMA, Ledoit-Wolf, OAS, and eigenvalue-based cleaning are planned.  
 
 ### Rebalancing
 - Daily  
@@ -176,14 +191,23 @@ Rates are directly integrated into strategy mechanics.
 - Quarterly  
 
 ### Constraints
+Available now:
 - Weight caps  
 - Automatic redistribution  
+- Long-only optimizer constraints for PM Classics  
+
+Not available yet:
+- Long/short optimizer form  
+- Short-side position caps  
+- Net exposure targets  
+- Gross exposure limits  
+- Non-zero short-borrow-cost modelling inside PM-classic construction  
 
 ---
 
 ## 💰 Funding-aware Volatility Targeting
 
-When enabled, the overlay becomes economically realistic.
+When enabled, the overlay scales the full strategy return stream.
 
 ### Mechanics
 
@@ -191,22 +215,32 @@ When enabled, the overlay becomes economically realistic.
 - λ > 1 → leveraged capital pays funding cost  
 
 ### User input
-- Borrow spread (fixed number - an abstraction for now)
+- Target volatility  
+- Volatility lookback  
+- Minimum leverage  
+- Maximum leverage  
+- Borrow spread  
+
+The volatility-targeting overlay does not change the underlying construction weights. It scales the strategy exposure after the base strategy return has been generated.
 
 ---
 
-# ⚖️ Weight Evolution (Debug Layer)
+# ⚖️ Visual Inspection
 
 ![Weights](docs/screenshots/weight_inspector.png)
 
 ## Purpose
 
-Explicit validation of index mechanics:
+Explicit validation of strategy mechanics:
 
 - Rebalance correctness  
 - Daily drift  
 - Cap enforcement  
 - Method consistency  
+- Latest weights  
+- Historical weight evolution  
+
+Current visual inspection starts with weight history. Planned extensions include cap-weight diagnostics, covariance inspection, risk contributions, optimizer diagnostics, and rebalance-date-specific PM-classic visuals.
 
 ---
 
@@ -216,7 +250,7 @@ Explicit validation of index mechanics:
 
 ## Purpose
 
-Forward simulation with **full reapplication of index logic**.
+Forward simulation with method-aware strategy mechanics.
 
 ---
 
@@ -225,27 +259,39 @@ Forward simulation with **full reapplication of index logic**.
 - Asset returns  
 - Rebalancing  
 - Weight drift  
-- Vol targeting  
+- Volatility targeting  
 - Funding overlay  
 
 ---
 
 ## Engines
 
-### Block Bootstrap (default)
+Monte Carlo engines are selected by construction method.
 
-Preserves:
-- Correlation structure  
-- Volatility clustering  
-- Tail distribution  
+### Passive/simple methods
 
----
+For Equal Weight, Price Weight, and Inverse Volatility:
 
-### Correlated GBM
+- Constituent Block Bootstrap  
+- Correlated GBM  
 
-- Parametric  
-- Smooth  
-- Fast  
+### Cap Weight
+
+For Cap Weight:
+
+- Constituent Block Bootstrap with historical market-cap states  
+
+GBM is disabled for cap-weighting because the current GBM engine does not simulate shares outstanding, market-cap paths, corporate actions, or cap-rank dynamics.
+
+In bootstrap mode, cap-weight simulation samples historical constituent-return rows and uses aligned historical market-cap rows at simulated rebalance dates. This keeps the cap-weight state tied to historically observed market structure rather than using a static latest-cap vector.
+
+### PM Classics
+
+For PM-classic optimizers:
+
+- Strategy Return Bootstrap  
+
+PM-classic strategies currently bootstrap the realized strategy return stream after historical construction. Constituent-path re-optimization inside each simulation is not implemented yet.
 
 ---
 
@@ -254,12 +300,13 @@ Preserves:
 Two independent stochastic layers:
 
 ## Asset process
-- Bootstrap  
-- GBM  
+- Constituent block bootstrap  
+- Correlated GBM  
+- Strategy return bootstrap for PM Classics  
 
 ## Funding process
-- Fixed  
-- OU-inspired mean reverting process (not OU per se for now)
+- Fixed to latest observed SOFR  
+- OU-inspired mean-reverting process  
 - Bootstrap  
 
 ---
@@ -274,7 +321,6 @@ Mean-reverting short-rate process estimated from SOFR.
 
 Empirical rate shocks preserved.
 
-
 ---
 
 # 🔍 Funding Path Inspector
@@ -283,8 +329,8 @@ Empirical rate shocks preserved.
 
 ## Capabilities
 
-- Inspect simulated paths  
-- Compare the path to mean  
+- Inspect simulated funding paths  
+- Compare a selected path to the mean  
 - Validate process behaviour  
 
 ---
@@ -310,7 +356,7 @@ $$
 ## Funding-aware overlay
 
 $$
-R_t^{VC} = \lambda_t R_t^{port} + \max(1-\lambda_t,0)*r_t^{cash} - \max(\lambda_t-1,0)*r_t^{borrow}
+R_t^{VC} = \lambda_t R_t^{port} + \max(1-\lambda_t,0) \cdot r_t^{cash} - \max(\lambda_t-1,0) \cdot r_t^{borrow}
 $$
 
 ---
@@ -336,8 +382,40 @@ $$
 Block sampling:
 
 $$
-r_{t_1}, …, r_{t_1+L-1}, r_{t_2}, …
+r_{t_1}, \ldots, r_{t_1+L-1}, r_{t_2}, \ldots
 $$
+
+---
+
+## Cap-weight bootstrap
+
+Cap-weighted Monte Carlo uses sampled historical return rows together with aligned historical market-cap rows.
+
+At simulated rebalance dates:
+
+$$
+w_{i,t}^{cap} = \frac{MCAP_{i,t}}{\sum_j MCAP_{j,t}}
+$$
+
+If all sampled market caps are unavailable for a simulation row, the engine falls back to equal weight for that row.
+
+---
+
+## PM-classic return bootstrap
+
+PM-classic Monte Carlo currently simulates from the realized base strategy return stream:
+
+$$
+R_t^{strategy} = f(w_t, r_t)
+$$
+
+The bootstrap samples from historical strategy returns after optimizer construction. It does not yet re-optimize portfolios inside every simulated constituent path.
+
+Current PM-classic limits:
+- Optimizers are long-only.  
+- The covariance estimator is sample covariance only.  
+- Long/short form is visible in the interface but disabled.  
+- Strategy-return bootstrap is used for PM-classic Monte Carlo until pathwise re-optimization is implemented.  
 
 ---
 
@@ -347,10 +425,25 @@ $$
 - Yahoo Finance  
 - Local parquet cache  
 
+## Market caps
+- Yahoo Finance  
+- Local parquet cache  
+- Approximation: historical close × current shares outstanding  
+- Used for cap-weighted construction and cap-weighted bootstrap simulation  
+
+Market-cap data is cached separately from close/volume data. In refresh mode, the loader should update the configured universe and repair missing requested market-cap columns where possible. In cache mode, no external calls are made; any still-missing market-cap values are treated as unavailable data and can become zero in cap-weight calculations.
+
 ## Rates
 - FRED  
 - Local parquet cache  
 
+## Data modes
+
+- `refresh`: fetch fresh data, update cache, fail loudly on API/data errors  
+- `cache`: use local cache only  
+- `auto`: fetch fresh data first, fall back to cache if fresh loading fails  
+
+---
 
 # Tests
 
@@ -367,14 +460,14 @@ Recommended local release checks:
 ```bash
 uv run python -m compileall index_lib main.py
 uv run pytest
-uv run index_builder -- --data-mode cache
+uv run index_builder --data-mode cache
 ```
 
 Optional data-mode checks:
 
 ```bash
-uv run index_builder -- --data-mode auto
-uv run index_builder -- --data-mode refresh
+uv run index_builder --data-mode auto
+uv run index_builder --data-mode refresh
 ```
 
 Expected behavior:
@@ -401,6 +494,29 @@ Default universe:
 DEFAULT_UNIVERSE = PHARMA_48
 ```
 
+## Strategy construction
+
+Core strategy mechanics are in:
+
+```text
+index_lib/core/backtest.py
+index_lib/core/weighting.py
+index_lib/core/rebalancing.py
+```
+
+## PM-classic optimization
+
+Optimizer logic is in:
+
+```text
+index_lib/portfolio/optimization.py
+```
+
+Current optimizer scope:
+- Long-only PM Classics are available.  
+- Long/short is not available yet.  
+- The covariance selector is currently limited to sample covariance.  
+
 ## Overlay
 
 Volatility targeting logic is in:
@@ -409,27 +525,23 @@ Volatility targeting logic is in:
 index_lib/core/overlays.py
 ```
 
-## Backtest engine
+## Monte Carlo simulation
 
-Index and portfolio mechanics are in:
-
-```text
-index_lib/core/backtest.py
-index_lib/core/weighting.py
-index_lib/core/rebalancing.py
-```
-
-## Funding simulation
-
-Funding path logic is in:
+Simulation logic is in:
 
 ```text
+index_lib/vectorization_utilities/mc_block_bootstrap_fast.py
+index_lib/vectorization_utilities/mc_gbm_fast.py
+index_lib/simulation/strategy_return_bootstrap.py
 index_lib/simulation/funding.py
 ```
 
 ---
 
 # Version Log
+
+## 2026-05-26
+PM Classics + method-aware MC
 
 ## 2026-05-17
 Release cleanup: core/app/data separation
@@ -453,4 +565,4 @@ Equal-weight correction
 
 # Notes
 
-This is a research prototype. The current release prepares the application for the next stage: visual redesign, strategy persistence, strategy comparison, regime diagnostics, and broader systematic portfolio management functionality.
+This is a research prototype. The current release prepares the application for the next stage: strategy persistence, strategy comparison, long/short PM Classics, robust covariance estimators, cap-weight diagnostics, visual inspection modules, and broader systematic portfolio management functionality.
