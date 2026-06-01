@@ -62,6 +62,10 @@ def build_index_series(
     market_caps: Optional[pd.DataFrame] = None,
     optimizer_form: str = "long_only",
     min_weight: float = 0.0,
+    max_weight: Optional[float] = None,
+    net_exposure: float = 1.0,
+    max_gross_exposure: float = 1.0,
+    short_borrow_cost: float = 0.0,
     risk_free_rate: float = 0.0,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
@@ -74,8 +78,11 @@ def build_index_series(
     - Those target weights are then used for the return on t.
     - Missing returns are handled by dropping unavailable names and renormalizing weights.
     """
-    if optimizer_form != "long_only":
-        raise ValueError("Only optimizer_form='long_only' is currently supported.")
+    if optimizer_form not in {"long_only", "long_short"}:
+        raise ValueError("optimizer_form must be 'long_only' or 'long_short'.")
+
+    if optimizer_form == "long_short" and net_exposure <= 0:
+        raise ValueError("Long/short currently requires positive net_exposure.")
 
     px = close.reindex(columns=list(constituents)).copy()
     px = px.dropna(axis=1, how="all")
@@ -124,7 +131,12 @@ def build_index_series(
             lookback=lookback,
             cap=cap,
             market_caps=caps_series_init,
+            optimizer_form=optimizer_form,
             min_weight=min_weight,
+            max_weight=max_weight,
+            net_exposure=net_exposure,
+            max_gross_exposure=max_gross_exposure,
+            short_borrow_cost=short_borrow_cost,
             risk_free_rate=risk_free_rate,
         )
 
@@ -168,7 +180,12 @@ def build_index_series(
                     lookback=lookback,
                     cap=cap,
                     market_caps=caps_series,
+                    optimizer_form=optimizer_form,
                     min_weight=min_weight,
+                    max_weight=max_weight,
+                    net_exposure=net_exposure,
+                    max_gross_exposure=max_gross_exposure,
+                    short_borrow_cost=short_borrow_cost,
                     risk_free_rate=risk_free_rate,
                 )
 
@@ -191,6 +208,10 @@ def build_index_series(
             else:
                 w_eff = w_eff / w_eff_sum
                 base_r = float((w_eff * r_eff).sum())
+
+                if optimizer_form == "long_short" and short_borrow_cost > 0.0:
+                    short_notional = float((-w_eff[w_eff < 0.0]).sum())
+                    base_r -= short_notional * float(short_borrow_cost) / 252.0
 
                 gross = 1.0 + r_eff
                 denom = 1.0 + base_r

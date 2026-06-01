@@ -509,9 +509,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                                     "value": "long_only",
                                                                 },
                                                                 {
-                                                                    "label": "Long/short — DO NOT TOUCH YET",
+                                                                    "label": "Long/short",
                                                                     "value": "long_short",
-                                                                    "disabled": True,
                                                                 },
                                                             ],
                                                             value="long_only",
@@ -543,7 +542,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                             id="param_min_weight",
                                                             type="number",
                                                             value=0.0,
-                                                            min=0.0,
+                                                            min=-100.0,
                                                             step=0.5,
                                                             style={"width": "130px"},
                                                         ),
@@ -551,17 +550,103 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 ),
                                                 html.Div(
                                                     children=[
-                                                        html.Div(
-                                                            "Risk-free rate (% p.a.)"
-                                                        ),
+                                                        html.Div("PM max weight (%)"),
                                                         dcc.Input(
-                                                            id="param_rf_rate",
+                                                            id="param_max_weight",
                                                             type="number",
-                                                            value=0.0,
-                                                            step=0.25,
-                                                            style={"width": "150px"},
+                                                            value=100.0,
+                                                            step=0.5,
+                                                            style={"width": "130px"},
                                                         ),
                                                     ]
+                                                ),
+                                                html.Div(
+                                                    id="long_short_params",
+                                                    style={
+                                                        "display": "flex",
+                                                        "gap": "12px",
+                                                        "flexWrap": "wrap",
+                                                        "alignItems": "flex-end",
+                                                    },
+                                                    children=[
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div(
+                                                                    "Net exposure (%)"
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="param_net_exposure",
+                                                                    type="number",
+                                                                    value=100.0,
+                                                                    step=5.0,
+                                                                    style={
+                                                                        "width": "140px"
+                                                                    },
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div(
+                                                                    "Max gross exposure (%)"
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="param_max_gross_exposure",
+                                                                    type="number",
+                                                                    value=150.0,
+                                                                    min=0.0,
+                                                                    step=5.0,
+                                                                    style={
+                                                                        "width": "170px"
+                                                                    },
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div(
+                                                                    "Short borrow cost (% p.a.)"
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="param_short_borrow_cost",
+                                                                    type="number",
+                                                                    value=0.0,
+                                                                    min=0.0,
+                                                                    step=0.25,
+                                                                    style={
+                                                                        "width": "170px"
+                                                                    },
+                                                                ),
+                                                            ]
+                                                        ),
+                                                    ],
+                                                ),
+                                                html.Div(
+                                                    id="max_sharpe_params",
+                                                    style={
+                                                        "display": "none",
+                                                        "gap": "12px",
+                                                        "flexWrap": "wrap",
+                                                        "alignItems": "flex-end",
+                                                    },
+                                                    children=[
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div(
+                                                                    "Risk-free rate (% p.a.)"
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="param_rf_rate",
+                                                                    type="number",
+                                                                    value=0.0,
+                                                                    step=0.25,
+                                                                    style={
+                                                                        "width": "150px"
+                                                                    },
+                                                                ),
+                                                            ]
+                                                        ),
+                                                    ],
                                                 ),
                                                 html.Div(
                                                     children=[
@@ -581,6 +666,16 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                             style={"width": "210px"},
                                                         ),
                                                     ]
+                                                ),
+                                                html.Div(
+                                                    "Cap hierarchy: Construction Weight Cap is a global hard cap. PM max weight is method-specific. The optimizer uses the stricter of the two.",
+                                                    style={
+                                                        "color": "#a0a6b3",
+                                                        "fontSize": "12px",
+                                                        "lineHeight": "1.4",
+                                                        "width": "100%",
+                                                        "marginTop": "4px",
+                                                    },
                                                 ),
                                             ],
                                         ),
@@ -1217,6 +1312,51 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             base if method in TURNOVER_UTILITY_METHODS else hidden,
         )
 
+    @app.callback(
+        Output("long_short_params", "style"),
+        Input("param_optimizer_form", "value"),
+    )
+    def toggle_long_short_params(optimizer_form: str):
+        base = {
+            "display": "flex",
+            "gap": "12px",
+            "flexWrap": "wrap",
+            "alignItems": "flex-end",
+            "width": "100%",
+        }
+
+        hidden = {
+            **base,
+            "display": "none",
+        }
+
+        if optimizer_form == "long_short":
+            return base
+
+        return hidden
+
+    @app.callback(
+        Output("max_sharpe_params", "style"),
+        Input("comp_method", "value"),
+    )
+    def toggle_max_sharpe_params(method: str):
+        base = {
+            "display": "flex",
+            "gap": "12px",
+            "flexWrap": "wrap",
+            "alignItems": "flex-end",
+        }
+
+        hidden = {
+            **base,
+            "display": "none",
+        }
+
+        if method == "max_sharpe":
+            return base
+
+        return hidden
+
     @app.callback(Output("comp_vol_controls", "style"), Input("comp_vol_on", "value"))
     def toggle_vol_controls(vol_on: str):
         return (
@@ -1498,6 +1638,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         Input("param_optimizer_form", "value"),
         Input("param_cov_lookback", "value"),
         Input("param_min_weight", "value"),
+        Input("param_max_weight", "value"),
+        Input("param_net_exposure", "value"),
+        Input("param_max_gross_exposure", "value"),
+        Input("param_short_borrow_cost", "value"),
         Input("param_rf_rate", "value"),
         Input("param_cov_estimator", "value"),
     )
@@ -1518,6 +1662,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         optimizer_form: Optional[str],
         cov_lookback: Optional[int],
         min_weight_pct: Optional[float],
+        max_weight_pct: Optional[float],
+        net_exposure_pct: Optional[float],
+        max_gross_exposure_pct: Optional[float],
+        short_borrow_cost_pct: Optional[float],
         rf_rate_pct: Optional[float],
         cov_estimator: Optional[str],
     ):
@@ -1525,13 +1673,35 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         if method not in VALID_CONSTRUCTION_METHODS:
             method = "equal"
         optimizer_form = optimizer_form or "long_only"
-        if optimizer_form != "long_only":
+        if optimizer_form not in {"long_only", "long_short"}:
             optimizer_form = "long_only"
 
         cov_lookback = int(cov_lookback) if cov_lookback is not None else 126
         min_weight = (
             float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
         )
+        max_weight = (
+            float(max_weight_pct) / 100.0 if max_weight_pct is not None else None
+        )
+        net_exposure = (
+            float(net_exposure_pct) / 100.0 if net_exposure_pct is not None else 1.0
+        )
+        max_gross_exposure = (
+            float(max_gross_exposure_pct) / 100.0
+            if max_gross_exposure_pct is not None
+            else 1.0
+        )
+        short_borrow_cost = (
+            float(short_borrow_cost_pct) / 100.0
+            if short_borrow_cost_pct is not None
+            else 0.0
+        )
+
+        if optimizer_form == "long_only":
+            min_weight = max(min_weight, 0.0)
+            net_exposure = 1.0
+            max_gross_exposure = 1.0
+            short_borrow_cost = 0.0
         risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
 
         cov_estimator = cov_estimator or "sample"
@@ -1562,6 +1732,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             market_caps=market_caps_df,
             optimizer_form=optimizer_form,
             min_weight=min_weight,
+            max_weight=max_weight,
+            net_exposure=net_exposure,
+            max_gross_exposure=max_gross_exposure,
+            short_borrow_cost=short_borrow_cost,
             risk_free_rate=risk_free_rate,
         )
 
@@ -1778,6 +1952,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         State("param_optimizer_form", "value"),
         State("param_cov_lookback", "value"),
         State("param_min_weight", "value"),
+        State("param_max_weight", "value"),
+        State("param_net_exposure", "value"),
+        State("param_max_gross_exposure", "value"),
+        State("param_short_borrow_cost", "value"),
         State("param_rf_rate", "value"),
         State("param_cov_estimator", "value"),
         State("mc_method", "value"),
@@ -1806,6 +1984,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         optimizer_form,
         cov_lookback,
         min_weight_pct,
+        max_weight_pct,
+        net_exposure_pct,
+        max_gross_exposure_pct,
+        short_borrow_cost_pct,
         rf_rate_pct,
         cov_estimator,
         mc_method,
@@ -1846,13 +2028,35 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         alpha = float(alpha) if alpha else 5.0
 
         optimizer_form = optimizer_form or "long_only"
-        if optimizer_form != "long_only":
+        if optimizer_form not in {"long_only", "long_short"}:
             optimizer_form = "long_only"
 
         cov_lookback = int(cov_lookback) if cov_lookback is not None else 126
         min_weight = (
             float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
         )
+        max_weight = (
+            float(max_weight_pct) / 100.0 if max_weight_pct is not None else None
+        )
+        net_exposure = (
+            float(net_exposure_pct) / 100.0 if net_exposure_pct is not None else 1.0
+        )
+        max_gross_exposure = (
+            float(max_gross_exposure_pct) / 100.0
+            if max_gross_exposure_pct is not None
+            else 1.0
+        )
+        short_borrow_cost = (
+            float(short_borrow_cost_pct) / 100.0
+            if short_borrow_cost_pct is not None
+            else 0.0
+        )
+
+        if optimizer_form == "long_only":
+            min_weight = max(min_weight, 0.0)
+            net_exposure = 1.0
+            max_gross_exposure = 1.0
+            short_borrow_cost = 0.0
         risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
 
         cov_estimator = cov_estimator or "sample"
@@ -1942,6 +2146,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 market_caps=mc_market_caps_df,
                 optimizer_form=optimizer_form,
                 min_weight=min_weight,
+                max_weight=max_weight,
+                net_exposure=net_exposure,
+                max_gross_exposure=max_gross_exposure,
+                short_borrow_cost=short_borrow_cost,
                 risk_free_rate=risk_free_rate,
             )
 
