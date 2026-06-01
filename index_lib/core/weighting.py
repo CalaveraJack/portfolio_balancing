@@ -5,6 +5,22 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from index_lib.portfolio import solve_optimizer_weights
+
+PASSIVE_METHODS = {
+    "equal",
+    "price_weight",
+    "inv_vol",
+    "cap_weight",
+}
+
+OPTIMIZER_METHODS = {
+    "min_var",
+    "risk_parity",
+    "max_sharpe",
+    "max_diversification",
+}
+
 
 def apply_weight_cap(
     weights: pd.Series,
@@ -59,7 +75,10 @@ def compute_weights(
     lookback: int = 126,
     cap: Optional[float] = None,
     market_caps: Optional[pd.Series] = None,
-) -> pd.Series:
+    min_weight: float = 0.0,
+    risk_free_rate: float = 0.0,
+    return_diagnostics: bool = False,
+):
     """
     Compute target weights for the last available row in a price history panel.
     """
@@ -68,6 +87,25 @@ def compute_weights(
 
     if not tickers:
         return pd.Series(dtype=float)
+
+    if method in OPTIMIZER_METHODS:
+        w, diagnostics = solve_optimizer_weights(
+            px,
+            method=method,
+            lookback=lookback,
+            max_weight=cap,
+            min_weight=min_weight,
+            risk_free_rate=risk_free_rate,
+        )
+
+        if cap is not None and not w.empty:
+            w = apply_weight_cap(w, float(cap))
+
+        if return_diagnostics:
+            diagnostics["weights"] = w.to_dict()
+            return w, diagnostics
+
+        return w
 
     if method == "equal":
         w = pd.Series(1.0 / len(tickers), index=tickers)
@@ -117,4 +155,14 @@ def compute_weights(
     if total <= 0:
         return pd.Series(dtype=float)
 
-    return w.clip(lower=0) / total
+    w = w.clip(lower=0) / total
+
+    if return_diagnostics:
+        return w, {
+            "method": method,
+            "success": True,
+            "message": "Passive/simple construction method",
+            "weights": w.to_dict(),
+        }
+
+    return w

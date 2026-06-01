@@ -34,14 +34,13 @@ from index_lib.loaders import (
     make_curve_snapshot_figure,
     make_funding_history_figure,
 )
-from index_lib.loaders.market_caps import (
-    align_market_caps_to_prices,
-    load_market_caps,
-)
 from index_lib.simulation import (
     build_mc_funding_fixed_last_matrix,
     simulate_bootstrap_funding_paths,
     simulate_ou_funding_paths,
+)
+from index_lib.simulation.strategy_return_bootstrap import (
+    run_strategy_return_bootstrap_mc,
 )
 
 
@@ -68,6 +67,32 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     if not default_pick:
         default_pick = available[:6]
 
+    SIMPLE_PASSIVE_METHODS = {
+        "equal",
+        "price_weight",
+        "cap_weight",
+    }
+
+    INV_VOL_METHODS = {
+        "inv_vol",
+    }
+
+    OPTIMIZER_METHODS = {
+        "min_var",
+        "risk_parity",
+        "max_sharpe",
+        "max_diversification",
+    }
+
+    TURNOVER_UTILITY_METHODS = set()
+
+    LOOKBACK_METHODS = INV_VOL_METHODS | OPTIMIZER_METHODS | TURNOVER_UTILITY_METHODS
+    VALID_CONSTRUCTION_METHODS = (
+        SIMPLE_PASSIVE_METHODS
+        | INV_VOL_METHODS
+        | OPTIMIZER_METHODS
+        | TURNOVER_UTILITY_METHODS
+    )
     project_root = Path(__file__).resolve().parents[2]
 
     app = Dash(
@@ -77,6 +102,46 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         assets_url_path="/assets",
     )
     app.title = "Strategy Forge"
+
+    section_style = {
+        "backgroundColor": "#11151d",
+        "border": "1px solid #2b313d",
+        "borderRadius": "10px",
+        "padding": "12px",
+        "marginTop": "12px",
+    }
+
+    section_header_style = {
+        "fontWeight": "800",
+        "fontSize": "13px",
+        "textTransform": "uppercase",
+        "letterSpacing": "0.06em",
+        "color": "#d9822b",
+        "marginBottom": "10px",
+    }
+
+    row_style = {
+        "display": "flex",
+        "gap": "12px",
+        "flexWrap": "wrap",
+        "alignItems": "flex-end",
+    }
+
+    note_style = {
+        "marginTop": "8px",
+        "color": "#a0a6b3",
+        "fontSize": "12px",
+        "lineHeight": "1.45",
+    }
+
+    graph_card_style = {
+        "backgroundColor": "#0f1115",
+        "border": "1px solid #1f2430",
+        "borderRadius": "8px",
+        "padding": "10px",
+        "marginTop": "10px",
+    }
+
     # ------------------------------------------------------------------------
     # Tab content renderer
     # ------------------------------------------------------------------------
@@ -141,7 +206,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     dcc.Graph(id="rates_curve_snapshot_fig"),
                     dcc.Graph(id="rates_curve_history_fig"),
                     dcc.Graph(id="rates_spread_fig"),
-                ]
+                ],
             )
         if tab == "tab_inspector":
             return html.Div(
@@ -211,17 +276,17 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                             dcc.Graph(id="insp_dd"),
                         ],
                     ),
-                ]
+                ],
             )
 
         # tab_composer
         return html.Div(
-                style={
-                    "backgroundColor": "#0f1115",
-                    "color": "#f2f2f2",
-                },
+            style={
+                "backgroundColor": "#0f1115",
+                "color": "#f2f2f2",
+            },
             children=[
-                html.H4("Index Composer"),
+                html.H4("Strategy Builder"),
                 html.Div(
                     style={
                         "display": "grid",
@@ -230,7 +295,9 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                     },
                     children=[
                         html.Div(
+                            style=section_style,
                             children=[
+                                html.Div("Construction", style=section_header_style),
                                 html.Div("Constituents"),
                                 dcc.Dropdown(
                                     id="comp_constituents",
@@ -242,38 +309,86 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                 ),
                                 html.Div(style={"height": "8px"}),
                                 html.Div(
-                                    style={
-                                        "display": "flex",
-                                        "gap": "12px",
-                                        "flexWrap": "wrap",
-                                    },
+                                    style=row_style,
                                     children=[
                                         html.Div(
                                             children=[
-                                                html.Div("Weighting method"),
+                                                html.Div("Construction method"),
                                                 dcc.Dropdown(
                                                     id="comp_method",
                                                     options=[
                                                         {
-                                                            "label": "Equal Weight",
+                                                            "label": html.Div(
+                                                                "Passive strategies",
+                                                                style={
+                                                                    "fontWeight": "800",
+                                                                    "fontSize": "12px",
+                                                                    "textTransform": "uppercase",
+                                                                    "letterSpacing": "0.06em",
+                                                                    "color": "#d9822b",
+                                                                    "padding": "4px 0",
+                                                                },
+                                                            ),
+                                                            "value": "__passive_header__",
+                                                            "disabled": True,
+                                                        },
+                                                        {
+                                                            "label": "CM.0.0  Equal Weight",
                                                             "value": "equal",
                                                         },
                                                         {
-                                                            "label": "Price Weight",
+                                                            "label": "CM.0.1  Cap Weight",
+                                                            "value": "cap_weight",
+                                                        },
+                                                        {
+                                                            "label": "CM.0.2  Price Weight",
                                                             "value": "price_weight",
                                                         },
                                                         {
-                                                            "label": "Inverse Volatility",
+                                                            "label": "CM.0.3  Inverse Volatility",
                                                             "value": "inv_vol",
                                                         },
                                                         {
-                                                            "label": "Cap Weight",
-                                                            "value": "cap_weight",
+                                                            "label": html.Div(
+                                                                "PM classics",
+                                                                style={
+                                                                    "fontWeight": "800",
+                                                                    "fontSize": "12px",
+                                                                    "textTransform": "uppercase",
+                                                                    "letterSpacing": "0.06em",
+                                                                    "color": "#d9822b",
+                                                                    "padding": "4px 0",
+                                                                },
+                                                            ),
+                                                            "value": "__pm_classics_header__",
+                                                            "disabled": True,
+                                                        },
+                                                        {
+                                                            "label": "CM.1.0  Minimum Variance",
+                                                            "value": "min_var",
+                                                        },
+                                                        {
+                                                            "label": "CM.1.1  Risk Parity / ERC",
+                                                            "value": "risk_parity",
+                                                        },
+                                                        {
+                                                            "label": "CM.1.2  Maximum Sharpe",
+                                                            "value": "max_sharpe",
+                                                        },
+                                                        {
+                                                            "label": "CM.1.3  Maximum Diversification",
+                                                            "value": "max_diversification",
+                                                        },
+                                                        {
+                                                            "label": "CM.1.4  Utility + Turnover Penalty",
+                                                            "value": "utility_turnover",
+                                                            "disabled": True,
                                                         },
                                                     ],
                                                     value="equal",
                                                     clearable=False,
-                                                    style={"width": "240px"},
+                                                    searchable=False,
+                                                    style={"width": "320px"},
                                                 ),
                                             ]
                                         ),
@@ -332,340 +447,638 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                 ),
                                             ]
                                         ),
-                                        html.Div(
-                                            children=[
-                                                html.Div("Vol Target"),
-                                                dcc.Dropdown(
-                                                    id="comp_vol_on",
-                                                    options=[
-                                                        {
-                                                            "label": "Off",
-                                                            "value": "off",
-                                                        },
-                                                        {"label": "On", "value": "on"},
-                                                    ],
-                                                    value="off",
-                                                    clearable=False,
-                                                    style={"width": "160px"},
-                                                ),
-                                            ]
-                                        ),
                                     ],
                                 ),
                                 html.Div(style={"height": "8px"}),
                                 html.Div(
-                                    style={
-                                        "display": "flex",
-                                        "gap": "12px",
-                                        "flexWrap": "wrap",
-                                    },
+                                    style=section_style,
                                     children=[
                                         html.Div(
-                                            children=[
-                                                html.Div("Start date"),
-                                                dcc.DatePickerSingle(
-                                                    id="comp_start",
-                                                    date=str(
-                                                        data.close.index.min().date()
-                                                    )
-                                                    if not data.close.empty
-                                                    else None,
-                                                ),
-                                            ]
+                                            "Method Parameters",
+                                            style=section_header_style,
                                         ),
                                         html.Div(
-                                            children=[
-                                                html.Div("End date"),
-                                                dcc.DatePickerSingle(
-                                                    id="comp_end",
-                                                    date=str(
-                                                        data.close.index.max().date()
-                                                    )
-                                                    if not data.close.empty
-                                                    else None,
-                                                ),
-                                            ]
-                                        ),
-                                    ],
-                                ),
-                                # Keep inputs mounted (Dash dependency graph), just hide/show.
-                                html.Div(
-                                    id="comp_vol_controls",
-                                    style={"marginTop": "10px", "display": "none"},
-                                    children=[
-                                        html.Div(
+                                            id="method_params_simple",
                                             style={
                                                 "display": "flex",
                                                 "gap": "12px",
                                                 "flexWrap": "wrap",
+                                                "marginTop": "6px",
+                                                "marginBottom": "8px",
                                             },
                                             children=[
                                                 html.Div(
-                                                    children=[
-                                                        html.Div("Target vol (% p.a.)"),
-                                                        dcc.Input(
-                                                            id="comp_target_vol",
-                                                            type="number",
-                                                            value=10.0,
-                                                            min=1.0,
-                                                            step=0.5,
-                                                            style={"width": "140px"},
-                                                        ),
-                                                    ]
-                                                ),
+                                                    "No additional method parameters for this construction method.",
+                                                    style={"color": "#a0a6b3"},
+                                                )
+                                            ],
+                                        ),
+                                        html.Div(
+                                            id="method_params_inv_vol",
+                                            style={"display": "none"},
+                                            children=[
                                                 html.Div(
                                                     children=[
-                                                        html.Div("Vol lookback (days)"),
+                                                        html.Div(
+                                                            "Volatility lookback (days)"
+                                                        ),
                                                         dcc.Input(
-                                                            id="comp_vol_lb",
+                                                            id="param_vol_lookback",
                                                             type="number",
-                                                            value=63,
-                                                            min=10,
+                                                            value=126,
+                                                            min=20,
                                                             step=1,
-                                                            style={"width": "140px"},
+                                                            style={"width": "150px"},
                                                         ),
                                                     ]
                                                 ),
+                                            ],
+                                        ),
+                                        html.Div(
+                                            id="method_params_optimizer",
+                                            style={"display": "none"},
+                                            children=[
                                                 html.Div(
                                                     children=[
-                                                        html.Div("Max leverage (x)"),
-                                                        dcc.Input(
-                                                            id="comp_max_lev",
-                                                            type="number",
-                                                            value=2.0,
-                                                            min=0.0,
-                                                            step=0.1,
-                                                            style={"width": "140px"},
-                                                        ),
-                                                    ]
-                                                ),
-                                                html.Div(
-                                                    children=[
-                                                        html.Div("Min leverage (x)"),
-                                                        dcc.Input(
-                                                            id="comp_min_lev",
-                                                            type="number",
-                                                            value=0.0,
-                                                            min=0.0,
-                                                            step=0.1,
-                                                            style={"width": "140px"},
+                                                        html.Div("Optimizer form"),
+                                                        dcc.Dropdown(
+                                                            id="param_optimizer_form",
+                                                            options=[
+                                                                {
+                                                                    "label": "Long-only",
+                                                                    "value": "long_only",
+                                                                },
+                                                                {
+                                                                    "label": "Long/short — DO NOT TOUCH YET",
+                                                                    "value": "long_short",
+                                                                    "disabled": True,
+                                                                },
+                                                            ],
+                                                            value="long_only",
+                                                            clearable=False,
+                                                            searchable=False,
+                                                            style={"width": "230px"},
                                                         ),
                                                     ]
                                                 ),
                                                 html.Div(
                                                     children=[
                                                         html.Div(
-                                                            "Borrow spread (% p.a.)"
+                                                            "Covariance lookback (days)"
                                                         ),
                                                         dcc.Input(
-                                                            id="comp_borrow_spread",
+                                                            id="param_cov_lookback",
                                                             type="number",
-                                                            value=1.0,
+                                                            value=126,
+                                                            min=20,
+                                                            step=1,
+                                                            style={"width": "170px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Min weight (%)"),
+                                                        dcc.Input(
+                                                            id="param_min_weight",
+                                                            type="number",
+                                                            value=0.0,
                                                             min=0.0,
-                                                            step=0.1,
-                                                            style={"width": "140px"},
+                                                            step=0.5,
+                                                            style={"width": "130px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div(
+                                                            "Risk-free rate (% p.a.)"
+                                                        ),
+                                                        dcc.Input(
+                                                            id="param_rf_rate",
+                                                            type="number",
+                                                            value=0.0,
+                                                            step=0.25,
+                                                            style={"width": "150px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div(
+                                                            "Covariance estimator"
+                                                        ),
+                                                        dcc.Dropdown(
+                                                            id="param_cov_estimator",
+                                                            options=[
+                                                                {
+                                                                    "label": "Sample covariance",
+                                                                    "value": "sample",
+                                                                },
+                                                            ],
+                                                            value="sample",
+                                                            clearable=False,
+                                                            style={"width": "210px"},
                                                         ),
                                                     ]
                                                 ),
                                             ],
-                                        )
+                                        ),
+                                        html.Div(
+                                            id="method_params_turnover",
+                                            style={"display": "none"},
+                                            children=[
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Risk aversion"),
+                                                        dcc.Input(
+                                                            id="param_risk_aversion",
+                                                            type="number",
+                                                            value=5.0,
+                                                            min=0.0,
+                                                            step=0.5,
+                                                            style={"width": "130px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Turnover penalty"),
+                                                        dcc.Input(
+                                                            id="param_turnover_penalty",
+                                                            type="number",
+                                                            value=0.0,
+                                                            min=0.0,
+                                                            step=0.1,
+                                                            style={"width": "150px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Trading cost (bps)"),
+                                                        dcc.Input(
+                                                            id="param_trading_cost_bps",
+                                                            type="number",
+                                                            value=0.0,
+                                                            min=0.0,
+                                                            step=0.5,
+                                                            style={"width": "150px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                            ],
+                                        ),
                                     ],
                                 ),
-                            ]
+                                html.Div(
+                                    style=section_style,
+                                    children=[
+                                        html.Div(
+                                            "Overlay Parameters",
+                                            style=section_header_style,
+                                        ),
+                                        html.Div(
+                                            style=row_style,
+                                            children=[
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Vol Target"),
+                                                        dcc.Dropdown(
+                                                            id="comp_vol_on",
+                                                            options=[
+                                                                {
+                                                                    "label": "Off",
+                                                                    "value": "off",
+                                                                },
+                                                                {
+                                                                    "label": "On",
+                                                                    "value": "on",
+                                                                },
+                                                            ],
+                                                            value="off",
+                                                            clearable=False,
+                                                            style={"width": "160px"},
+                                                        ),
+                                                    ]
+                                                ),
+                                            ],
+                                        ),
+                                        html.Div(
+                                            id="comp_vol_controls",
+                                            style={
+                                                "marginTop": "10px",
+                                                "display": "none",
+                                            },
+                                            children=[
+                                                html.Div(
+                                                    style=row_style,
+                                                    children=[
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div(
+                                                                    "Target vol (% p.a.)"
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="comp_target_vol",
+                                                                    type="number",
+                                                                    value=10.0,
+                                                                    min=1.0,
+                                                                    step=0.5,
+                                                                    style={
+                                                                        "width": "140px"
+                                                                    },
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div(
+                                                                    "Vol lookback (days)"
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="comp_vol_lb",
+                                                                    type="number",
+                                                                    value=63,
+                                                                    min=10,
+                                                                    step=1,
+                                                                    style={
+                                                                        "width": "140px"
+                                                                    },
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div(
+                                                                    "Max leverage (x)"
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="comp_max_lev",
+                                                                    type="number",
+                                                                    value=2.0,
+                                                                    min=0.0,
+                                                                    step=0.1,
+                                                                    style={
+                                                                        "width": "140px"
+                                                                    },
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div(
+                                                                    "Min leverage (x)"
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="comp_min_lev",
+                                                                    type="number",
+                                                                    value=0.0,
+                                                                    min=0.0,
+                                                                    step=0.1,
+                                                                    style={
+                                                                        "width": "140px"
+                                                                    },
+                                                                ),
+                                                            ]
+                                                        ),
+                                                        html.Div(
+                                                            children=[
+                                                                html.Div(
+                                                                    "Borrow spread (% p.a.)"
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="comp_borrow_spread",
+                                                                    type="number",
+                                                                    value=1.0,
+                                                                    min=0.0,
+                                                                    step=0.1,
+                                                                    style={
+                                                                        "width": "140px"
+                                                                    },
+                                                                ),
+                                                            ]
+                                                        ),
+                                                    ],
+                                                )
+                                            ],
+                                        ),
+                                        html.Div(
+                                            "Overlay assumption: volatility targeting scales the full strategy return stream; it does not change construction weights.",
+                                            style=note_style,
+                                        ),
+                                    ],
+                                ),
+                                html.Div(
+                                    style=section_style,
+                                    children=[
+                                        html.Div(
+                                            "Backtest Window",
+                                            style=section_header_style,
+                                        ),
+                                        html.Div(
+                                            style=row_style,
+                                            children=[
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("Start date"),
+                                                        dcc.DatePickerSingle(
+                                                            id="comp_start",
+                                                            date=str(
+                                                                data.close.index.min().date()
+                                                            )
+                                                            if not data.close.empty
+                                                            else None,
+                                                        ),
+                                                    ]
+                                                ),
+                                                html.Div(
+                                                    children=[
+                                                        html.Div("End date"),
+                                                        dcc.DatePickerSingle(
+                                                            id="comp_end",
+                                                            date=str(
+                                                                data.close.index.max().date()
+                                                            )
+                                                            if not data.close.empty
+                                                            else None,
+                                                        ),
+                                                    ]
+                                                ),
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                            ],
                         ),
                         html.Div(
+                            style={
+                                **section_style,
+                                "alignSelf": "start",
+                            },
                             children=[
-                                html.Div("Latest Weights"),
-                                html.Div(id="comp_weights_table"),
-                            ]
+                                html.Div("Latest Weights", style=section_header_style),
+                                html.Div(
+                                    id="comp_weights_table",
+                                    style={
+                                        "marginTop": "8px",
+                                    },
+                                ),
+                            ],
                         ),
                     ],
                 ),
-                html.Hr(),
-                html.Div(id="comp_stats"),
-                dcc.Graph(id="comp_index_fig"),
-                html.Details(
-                    open=False,
-                    style={"marginTop": "6px"},
+                html.Div(
+                    style=section_style,
                     children=[
-                        html.Summary(
-                            "Constituent Weights (Top 20)",
-                            style={"cursor": "pointer", "fontWeight": "600"},
+                        html.Div("Backtest Output", style=section_header_style),
+                        html.Div(id="comp_stats"),
+                        html.Div(
+                            style=graph_card_style,
+                            children=[
+                                dcc.Graph(id="comp_index_fig"),
+                            ],
                         ),
-                        dcc.Graph(id="comp_weights_fig"),
+                        html.Details(
+                            open=False,
+                            style={
+                                **graph_card_style,
+                                "marginTop": "12px",
+                            },
+                            children=[
+                                html.Summary(
+                                    "Visual Inspection",
+                                    style={
+                                        "cursor": "pointer",
+                                        "fontWeight": "700",
+                                        "marginBottom": "12px",
+                                    },
+                                ),
+                                dcc.Graph(id="comp_weights_fig"),
+                            ],
+                        ),
                     ],
                 ),
                 html.Div(
                     id="comp_vol_panel",
-                    style={
-                        "display": "none",
-                        "gridTemplateColumns": "1fr 1fr",
-                        "gap": "12px",
-                        "marginTop": "10px",
-                    },
-                    children=[
-                        dcc.Graph(id="comp_leverage_fig"),
-                        dcc.Graph(id="comp_realized_vol_fig"),
-                    ],
-                ),
-                html.Hr(),
-                dcc.Store(id="mc_funding_store"),
-                html.H4("Monte Carlo Simulation"),
-                html.Div(
-                    style={
-                        "display": "flex",
-                        "gap": "12px",
-                        "flexWrap": "wrap",
-                        "alignItems": "flex-end",
-                    },
+                    style={"display": "none"},
                     children=[
                         html.Div(
+                            style=section_style,
                             children=[
-                                html.Div("Simulations"),
-                                dcc.Input(
-                                    id="mc_num_sim",
-                                    type="number",
-                                    value=1000,
-                                    min=100,
-                                    step=100,
-                                    style={"width": "140px"},
+                                html.Div(
+                                    "Overlay Diagnostics", style=section_header_style
                                 ),
-                            ]
-                        ),
-                        html.Div(
-                            children=[
-                                html.Div("Horizon (days)"),
-                                dcc.Input(
-                                    id="mc_horizon",
-                                    type="number",
-                                    value=252,
-                                    min=20,
-                                    step=10,
-                                    style={"width": "140px"},
-                                ),
-                            ]
-                        ),
-                        html.Div(
-                            children=[
-                                html.Div("MC method"),
-                                dcc.Dropdown(
-                                    id="mc_method",
-                                    options=[
-                                        {
-                                            "label": "Bootstrap (blocks)",
-                                            "value": "bootstrap",
-                                        },
-                                        {"label": "GBM (correlated)", "value": "gbm"},
+                                html.Div(
+                                    style=graph_card_style,
+                                    children=[
+                                        dcc.Graph(id="comp_leverage_fig"),
                                     ],
-                                    value="bootstrap",
-                                    clearable=False,
-                                    style={"width": "220px"},
                                 ),
-                            ]
-                        ),
-                        html.Div(
-                            children=[
-                                html.Div("Funding model"),
-                                dcc.Dropdown(
-                                    id="mc_funding_model",
-                                    options=[
-                                        {
-                                            "label": "Fixed to last",
-                                            "value": "fixed_last",
-                                        },
-                                        {"label": "Monte Carlo", "value": "mc"},
+                                html.Div(
+                                    style=graph_card_style,
+                                    children=[
+                                        dcc.Graph(id="comp_realized_vol_fig"),
                                     ],
-                                    value="fixed_last",
-                                    clearable=False,
-                                    style={"width": "180px"},
-                                ),
-                            ]
-                        ),
-                        html.Div(
-                            id="mc_funding_method_wrap",
-                            style={"display": "none"},
-                            children=[
-                                html.Div("Funding MC method"),
-                                dcc.Dropdown(
-                                    id="mc_funding_method",
-                                    options=[
-                                        {"label": "OU", "value": "ou"},
-                                        {"label": "Bootstrap", "value": "bootstrap"},
-                                    ],
-                                    value="ou",
-                                    clearable=False,
-                                    style={"width": "220px"},
                                 ),
                             ],
-                        ),
-                        html.Div(
-                            children=[
-                                html.Div("VaR alpha (%)"),
-                                dcc.Input(
-                                    id="mc_alpha",
-                                    type="number",
-                                    value=5.0,
-                                    min=0.1,
-                                    max=49.0,
-                                    step=0.5,
-                                    style={"width": "140px"},
-                                ),
-                            ]
-                        ),
-                        html.Button(
-                            "Calculate Monte Carlo",
-                            id="mc_button",
-                            n_clicks=0,
-                            style={"height": "38px"},
-                        ),
+                        )
                     ],
                 ),
-                dcc.Loading(
-                    id="mc_loading",
-                    type="circle",
-                    fullscreen=True,
+                html.Div(
+                    style=section_style,
                     children=[
-                        dcc.Graph(id="mc_fig"),
-                        html.Div(id="mc_summary"),
-                    ],
-                ),
-                html.Details(
-                    open=False,
-                    style={"marginTop": "8px"},
-                    children=[
-                        html.Summary(
-                            "Monte Carlo Funding Path Inspector",
-                            style={"cursor": "pointer", "fontWeight": "600"},
-                        ),
+                        dcc.Store(id="mc_funding_store"),
+                        html.Div("Monte Carlo Simulation", style=section_header_style),
                         html.Div(
-                            style={
-                                "display": "flex",
-                                "gap": "12px",
-                                "flexWrap": "wrap",
-                                "alignItems": "flex-end",
-                                "marginTop": "8px",
-                            },
+                            style=row_style,
                             children=[
                                 html.Div(
                                     children=[
-                                        html.Div("Funding path id"),
+                                        html.Div("Simulations"),
                                         dcc.Input(
-                                            id="mc_funding_path_id",
+                                            id="mc_num_sim",
                                             type="number",
-                                            value=0,
-                                            min=0,
-                                            step=1,
+                                            value=1000,
+                                            min=100,
+                                            step=100,
                                             style={"width": "140px"},
                                         ),
                                     ]
                                 ),
+                                html.Div(
+                                    children=[
+                                        html.Div("Horizon (days)"),
+                                        dcc.Input(
+                                            id="mc_horizon",
+                                            type="number",
+                                            value=252,
+                                            min=20,
+                                            step=10,
+                                            style={"width": "140px"},
+                                        ),
+                                    ]
+                                ),
+                                html.Div(
+                                    children=[
+                                        html.Div("MC method"),
+                                        dcc.Dropdown(
+                                            id="mc_method",
+                                            options=[
+                                                {
+                                                    "label": "Bootstrap (blocks)",
+                                                    "value": "bootstrap",
+                                                },
+                                                {
+                                                    "label": "GBM (correlated)",
+                                                    "value": "gbm",
+                                                },
+                                            ],
+                                            value="bootstrap",
+                                            clearable=False,
+                                            style={"width": "220px"},
+                                        ),
+                                    ]
+                                ),
+                                html.Div(
+                                    children=[
+                                        html.Div("Funding model"),
+                                        dcc.Dropdown(
+                                            id="mc_funding_model",
+                                            options=[
+                                                {
+                                                    "label": "Fixed to last",
+                                                    "value": "fixed_last",
+                                                },
+                                                {"label": "Monte Carlo", "value": "mc"},
+                                            ],
+                                            value="fixed_last",
+                                            clearable=False,
+                                            style={"width": "180px"},
+                                        ),
+                                    ]
+                                ),
+                                html.Div(
+                                    id="mc_funding_method_wrap",
+                                    style={"display": "none"},
+                                    children=[
+                                        html.Div("Funding MC method"),
+                                        dcc.Dropdown(
+                                            id="mc_funding_method",
+                                            options=[
+                                                {"label": "OU", "value": "ou"},
+                                                {
+                                                    "label": "Bootstrap",
+                                                    "value": "bootstrap",
+                                                },
+                                            ],
+                                            value="ou",
+                                            clearable=False,
+                                            style={"width": "220px"},
+                                        ),
+                                    ],
+                                ),
+                                html.Div(
+                                    children=[
+                                        html.Div("VaR alpha (%)"),
+                                        dcc.Input(
+                                            id="mc_alpha",
+                                            type="number",
+                                            value=5.0,
+                                            min=0.1,
+                                            max=49.0,
+                                            step=0.5,
+                                            style={"width": "140px"},
+                                        ),
+                                    ]
+                                ),
+                                html.Button(
+                                    "Calculate Monte Carlo",
+                                    id="mc_button",
+                                    n_clicks=0,
+                                    style={"height": "38px"},
+                                ),
                             ],
                         ),
-                        dcc.Graph(id="mc_funding_fig"),
+                        html.Div(
+                            id="mc_method_note",
+                            style={
+                                **note_style,
+                                "width": "100%",
+                                "boxSizing": "border-box",
+                                "padding": "10px 12px",
+                                "border": "1px solid #2b313d",
+                                "borderRadius": "8px",
+                                "backgroundColor": "#171a21",
+                                "marginTop": "12px",
+                                "marginBottom": "14px",
+                            },
+                        ),
+                        html.Div(
+                            style=graph_card_style,
+                            children=[
+                                dcc.Loading(
+                                    id="mc_loading",
+                                    type="circle",
+                                    fullscreen=True,
+                                    children=[
+                                        dcc.Graph(id="mc_fig"),
+                                        html.Div(
+                                            id="mc_summary",
+                                            style={
+                                                "marginTop": "10px",
+                                                "padding": "0 4px 4px 4px",
+                                            },
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
+                        html.Details(
+                            open=False,
+                            style={
+                                **graph_card_style,
+                                "marginTop": "12px",
+                            },
+                            children=[
+                                html.Summary(
+                                    "Monte Carlo Funding Path Inspector",
+                                    style={
+                                        "cursor": "pointer",
+                                        "fontWeight": "700",
+                                        "marginBottom": "12px",
+                                    },
+                                ),
+                                html.Div(
+                                    style={
+                                        **row_style,
+                                        "marginTop": "8px",
+                                        "marginBottom": "10px",
+                                    },
+                                    children=[
+                                        html.Div(
+                                            children=[
+                                                html.Div("Funding path id"),
+                                                dcc.Input(
+                                                    id="mc_funding_path_id",
+                                                    type="number",
+                                                    value=0,
+                                                    min=0,
+                                                    step=1,
+                                                    style={"width": "140px"},
+                                                ),
+                                            ]
+                                        ),
+                                    ],
+                                ),
+                                dcc.Graph(id="mc_funding_fig"),
+                            ],
+                        ),
                     ],
                 ),
-            ]
+            ],
         )
+
     # ------------------------------------------------------------------------
     # Tab visibility toggle
     # ------------------------------------------------------------------------
@@ -770,10 +1183,40 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         ],
     )
 
-
     # ------------------------------------------------------------------------
     # UI toggles (hide/show; inputs stay mounted)
     # ------------------------------------------------------------------------
+    @app.callback(
+        Output("method_params_simple", "style"),
+        Output("method_params_inv_vol", "style"),
+        Output("method_params_optimizer", "style"),
+        Output("method_params_turnover", "style"),
+        Input("comp_method", "value"),
+    )
+    def toggle_method_params(method: str):
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
+        base = {
+            "display": "flex",
+            "gap": "12px",
+            "flexWrap": "wrap",
+            "marginTop": "6px",
+            "marginBottom": "8px",
+        }
+
+        hidden = {
+            "display": "none",
+        }
+
+        return (
+            base if method in SIMPLE_PASSIVE_METHODS else hidden,
+            base if method in INV_VOL_METHODS else hidden,
+            base
+            if method in OPTIMIZER_METHODS or method in TURNOVER_UTILITY_METHODS
+            else hidden,
+            base if method in TURNOVER_UTILITY_METHODS else hidden,
+        )
+
     @app.callback(Output("comp_vol_controls", "style"), Input("comp_vol_on", "value"))
     def toggle_vol_controls(vol_on: str):
         return (
@@ -785,13 +1228,116 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
     @app.callback(Output("comp_vol_panel", "style"), Input("comp_vol_on", "value"))
     def toggle_vol_panel(vol_on: str):
         if vol_on == "on":
-            return {
-                "display": "grid",
-                "gridTemplateColumns": "1fr 1fr",
-                "gap": "12px",
-                "marginTop": "10px",
-            }
+            return {"display": "block"}
         return {"display": "none"}
+
+    @app.callback(
+        Output("mc_method", "options"),
+        Output("mc_method", "value"),
+        Output("mc_method_note", "children"),
+        Input("comp_method", "value"),
+    )
+    def toggle_mc_methods(method: str):
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
+
+        passive_options = [
+            {"label": "Constituent Bootstrap (blocks)", "value": "bootstrap"},
+            {"label": "Constituent GBM (correlated)", "value": "gbm"},
+        ]
+
+        cap_weight_options = [
+            {
+                "label": "Constituent Bootstrap with Historical Caps",
+                "value": "bootstrap",
+            },
+        ]
+
+        optimizer_options = [
+            {
+                "label": "Strategy Return Bootstrap",
+                "value": "strategy_bootstrap",
+            },
+        ]
+
+        if method in OPTIMIZER_METHODS:
+            note = html.Div(
+                [
+                    html.Div(
+                        "PM classic Monte Carlo",
+                        style={
+                            "fontWeight": "700",
+                            "color": "#f2f2f2",
+                            "marginBottom": "4px",
+                        },
+                    ),
+                    html.Div(
+                        "PM classic strategies currently use return bootstrapping of the realized strategy return stream. "
+                        "Constituent-path re-optimization inside each simulation is not implemented yet."
+                    ),
+                    html.Div(
+                        "Funding simulation remains unchanged. If volatility targeting is enabled, funding costs are applied through the configured FRED-based cash and borrow-rate paths.",
+                        style={"marginTop": "4px"},
+                    ),
+                    html.Div(
+                        "Trading costs, slippage, taxes, market impact, and short-borrow costs are currently assumed to be zero.",
+                        style={"marginTop": "4px"},
+                    ),
+                ]
+            )
+            return optimizer_options, "strategy_bootstrap", note
+
+        if method == "cap_weight":
+            note = html.Div(
+                [
+                    html.Div(
+                        "Cap-weight Monte Carlo",
+                        style={
+                            "fontWeight": "700",
+                            "color": "#f2f2f2",
+                            "marginBottom": "4px",
+                        },
+                    ),
+                    html.Div(
+                        "Cap-weighted strategies currently use constituent block bootstrap only. "
+                        "At simulated rebalance dates, the engine uses sampled historical market-cap states aligned with the sampled historical return blocks."
+                    ),
+                    html.Div(
+                        "GBM is disabled for cap-weighting because the current GBM engine does not simulate shares outstanding, market-cap paths, corporate actions, or cap-rank dynamics.",
+                        style={"marginTop": "4px"},
+                    ),
+                    html.Div(
+                        "Funding simulation remains unchanged. Trading costs, slippage, taxes, market impact, and short-borrow costs are currently assumed to be zero.",
+                        style={"marginTop": "4px"},
+                    ),
+                ]
+            )
+            return cap_weight_options, "bootstrap", note
+
+        note = html.Div(
+            [
+                html.Div(
+                    "Passive/simple Monte Carlo",
+                    style={
+                        "fontWeight": "700",
+                        "color": "#f2f2f2",
+                        "marginBottom": "4px",
+                    },
+                ),
+                html.Div(
+                    "Passive/simple strategies use constituent-level simulations. Bootstrap resamples historical constituent-return blocks; GBM simulates correlated constituent paths."
+                ),
+                html.Div(
+                    "Funding simulation remains unchanged. If volatility targeting is enabled, funding costs are applied through the configured FRED-based cash and borrow-rate paths.",
+                    style={"marginTop": "4px"},
+                ),
+                html.Div(
+                    "Trading costs, slippage, taxes, market impact, and short-borrow costs are currently assumed to be zero.",
+                    style={"marginTop": "4px"},
+                ),
+            ]
+        )
+        return passive_options, "bootstrap", note
 
     @app.callback(
         Output("mc_funding_method_wrap", "style"),
@@ -808,6 +1354,8 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         Input("comp_method", "value"),
     )
     def toggle_lookback(method: str):
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
         base_style = {
             "width": "120px",
             "backgroundColor": "#171a21",
@@ -815,7 +1363,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             "border": "1px solid #2b313d",
         }
 
-        if method == "inv_vol":
+        if method in LOOKBACK_METHODS:
             return False, base_style
 
         return True, {
@@ -823,6 +1371,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             "backgroundColor": "#1f2430",
             "color": "#a0a6b3",
         }
+
     # ------------------------------------------------------------------------
     # Rates Inspector: update rates and charts
     # ------------------------------------------------------------------------
@@ -946,6 +1495,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         Input("comp_max_lev", "value"),
         Input("comp_min_lev", "value"),
         Input("comp_borrow_spread", "value"),
+        Input("param_optimizer_form", "value"),
+        Input("param_cov_lookback", "value"),
+        Input("param_min_weight", "value"),
+        Input("param_rf_rate", "value"),
+        Input("param_cov_estimator", "value"),
     )
     def update_composer(
         constituents: List[str],
@@ -961,27 +1515,39 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         max_lev: Optional[float],
         min_lev: Optional[float],
         borrow_spread_pct: Optional[float],
+        optimizer_form: Optional[str],
+        cov_lookback: Optional[int],
+        min_weight_pct: Optional[float],
+        rf_rate_pct: Optional[float],
+        cov_estimator: Optional[str],
     ):
         constituents = constituents or []
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
+        optimizer_form = optimizer_form or "long_only"
+        if optimizer_form != "long_only":
+            optimizer_form = "long_only"
 
+        cov_lookback = int(cov_lookback) if cov_lookback is not None else 126
+        min_weight = (
+            float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
+        )
+        risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
+
+        cov_estimator = cov_estimator or "sample"
+        if cov_estimator != "sample":
+            cov_estimator = "sample"
+
+        effective_lookback = int(lookback) if lookback else 126
+        if method in OPTIMIZER_METHODS:
+            effective_lookback = cov_lookback
         cap = None
         if cap_pct is not None and cap_pct > 0:
             cap = float(cap_pct) / 100.0
 
-        # Load market caps for cap-weighting
         market_caps_df = None
-
         if method == "cap_weight" and constituents:
-            market_caps_df = load_market_caps(
-                constituents,
-                data_dir="data",
-                use_cache_only=False,
-            )
-
-            market_caps_df = align_market_caps_to_prices(
-                market_caps_df,
-                data.close.index,
-            )
+            market_caps_df = data.market_caps.reindex(columns=constituents)
 
         index_level, weights_history, base_returns, daily_wh = build_index_series(
             close=data.close,
@@ -990,14 +1556,17 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             start=start_date,
             end=end_date,
             rebalance_freq=rebalance,
-            lookback=int(lookback) if lookback else 126,
+            lookback=effective_lookback,
             cap=cap,
             base_level=100.0,
             market_caps=market_caps_df,
+            optimizer_form=optimizer_form,
+            min_weight=min_weight,
+            risk_free_rate=risk_free_rate,
         )
 
-        lev_fig = empty_fig(title="Vol Overlay Exposure", height=260)
-        vol_fig = empty_fig(title="Vol Estimate + Funding Rates", height=260)
+        lev_fig = empty_fig(title="Overlay Exposure", height=320)
+        vol_fig = empty_fig(title="Overlay Volatility + Funding", height=320)
 
         if index_level.empty:
             return (
@@ -1063,10 +1632,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 )
             )
             lev_fig.update_layout(
-                title="Vol Overlay Exposure",
+                title="Overlay Exposure",
                 xaxis_title="Date",
                 yaxis_title="Weight / x",
-                height=260,
+                height=320,
                 margin=dict(l=60, r=40, t=50, b=40),
             )
             vol_fig = go.Figure()
@@ -1095,16 +1664,16 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 )
             )
             vol_fig.update_layout(
-                title="Vol Estimate + Funding Rates",
+                title="Overlay Volatility + Funding",
                 xaxis_title="Date",
                 yaxis_title="Annualized level",
-                height=260,
+                height=320,
                 margin=dict(l=60, r=40, t=50, b=40),
             )
 
         fig_index = make_line_fig("Index Level", index_level, "Index level", height=320)
         fig_weights = make_weight_fig(
-            daily_wh, "Constituent Weights (Top 20)", top_n=20, height=360
+            daily_wh, "Top 20 Constituent Weights", top_n=20, height=360
         )
 
         stats = compute_stats_from_price_series(index_level)
@@ -1166,10 +1735,24 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 ],
             )
 
-        stats_block = html.Div(
-            [stats_tbl] + ([extra_stats] if extra_stats is not None else [])
-        )
         weights_tbl = make_latest_weights_table(weights_history)
+
+        assumptions_block = html.Div(
+            "Backtest assumptions: trading costs, slippage, taxes, and short-borrow costs are currently zero. "
+            "Scheduled rebalances use only prior data.",
+            style={
+                "marginTop": "10px",
+                "marginBottom": "12px",
+                "color": "#a0a6b3",
+                "fontSize": "12px",
+                "lineHeight": "1.4",
+            },
+        )
+
+        stats_block = html.Div(
+            [stats_tbl, assumptions_block]
+            + ([extra_stats] if extra_stats is not None else [])
+        )
 
         return fig_index, fig_weights, lev_fig, vol_fig, stats_block, weights_tbl
 
@@ -1192,6 +1775,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         State("comp_max_lev", "value"),
         State("comp_min_lev", "value"),
         State("comp_borrow_spread", "value"),
+        State("param_optimizer_form", "value"),
+        State("param_cov_lookback", "value"),
+        State("param_min_weight", "value"),
+        State("param_rf_rate", "value"),
+        State("param_cov_estimator", "value"),
         State("mc_method", "value"),
         State("mc_funding_model", "value"),
         State("mc_funding_method", "value"),
@@ -1215,6 +1803,11 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         max_lev,
         min_lev,
         borrow_spread_pct,
+        optimizer_form,
+        cov_lookback,
+        min_weight_pct,
+        rf_rate_pct,
+        cov_estimator,
         mc_method,
         funding_model,
         funding_method,
@@ -1228,6 +1821,10 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 html.Div("-"),
                 None,
             )
+        if method not in VALID_CONSTRUCTION_METHODS:
+            method = "equal"
+        if method == "cap_weight" and mc_method == "gbm":
+            mc_method = "bootstrap"
 
         cap = float(cap_pct) / 100 if cap_pct else None
 
@@ -1248,27 +1845,43 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         target_vol_pct = float(target_vol_pct) if target_vol_pct is not None else 10.0
         alpha = float(alpha) if alpha else 5.0
 
+        optimizer_form = optimizer_form or "long_only"
+        if optimizer_form != "long_only":
+            optimizer_form = "long_only"
+
+        cov_lookback = int(cov_lookback) if cov_lookback is not None else 126
+        min_weight = (
+            float(min_weight_pct) / 100.0 if min_weight_pct is not None else 0.0
+        )
+        risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
+
+        cov_estimator = cov_estimator or "sample"
+        if cov_estimator != "sample":
+            cov_estimator = "sample"
+
+        effective_lookback = lookback
+        if method in OPTIMIZER_METHODS:
+            effective_lookback = cov_lookback
         borrow_spread_pct = (
             float(borrow_spread_pct) if borrow_spread_pct is not None else 1.0
         )
-        # Load market caps for Monte Carlo if using cap_weight
 
+        # Market caps for cap-weight MC.
+        # For cap-weight bootstrap, pass the historical cap panel.
+        # The bootstrap engine samples cap rows with the same historical indices
+        # used for sampled constituent returns.
         mc_market_caps = None
 
         if method == "cap_weight" and constituents:
-            caps_df = load_market_caps(
-                constituents,
-                data_dir="data",
-                use_cache_only=True,
-            )
+            caps_df = data.market_caps.reindex(columns=constituents)
 
             if not caps_df.empty:
-                last_caps = caps_df.reindex(columns=constituents).ffill().iloc[-1]
-                mc_market_caps = np.full(
-                    (num_sim, len(constituents)),
-                    last_caps.fillna(0.0).to_numpy(dtype=np.float32),
-                    dtype=np.float32,
+                caps_df = (
+                    caps_df.reindex(index=px_hist.index, columns=constituents)
+                    .ffill()
+                    .fillna(0.0)
                 )
+                mc_market_caps = caps_df
 
         rate_paths = None
         cash_paths = None
@@ -1310,42 +1923,37 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 else:
                     raise ValueError(f"Unknown funding_method: {funding_method}")
 
-        if mc_method == "gbm":
-            from index_lib.vectorization_utilities.mc_gbm_fast import (
-                run_monte_carlo_gbm_fast,
-            )
+        if method in OPTIMIZER_METHODS:
+            # PM classic MC:
+            # Bootstrap realized strategy returns after the historical optimizer backtest.
+            # This avoids pretending that we re-optimize every simulated constituent path.
+            mc_market_caps_df = None
 
-            results, final_vals = run_monte_carlo_gbm_fast(
-                close=px_hist,
+            _, _, mc_base_returns, _ = build_index_series(
+                close=data.close,
                 constituents=constituents,
                 method=method,
+                start=start_date,
+                end=end_date,
                 rebalance_freq=rebalance,
-                lookback=lookback,
+                lookback=effective_lookback,
                 cap=cap,
-                num_simulations=num_sim,
-                horizon_days=horizon,
-                vol_target_on=(vol_on == "on"),
-                target_vol_ann=target_vol_pct / 100.0,
-                vol_lookback=vol_lb,
-                max_leverage=max_lev,
-                min_leverage=min_lev,
-                cash_paths=cash_paths,
-                borrow_paths=borrow_paths,
-                seed=42,
-                dtype=np.float32,
-            )
-        else:
-            from index_lib.vectorization_utilities.mc_block_bootstrap_fast import (
-                run_monte_carlo_block_bootstrap_fast,
+                base_level=100.0,
+                market_caps=mc_market_caps_df,
+                optimizer_form=optimizer_form,
+                min_weight=min_weight,
+                risk_free_rate=risk_free_rate,
             )
 
-            results, final_vals = run_monte_carlo_block_bootstrap_fast(
-                close=px_hist,
-                constituents=constituents,
-                method=method,
-                rebalance_freq=rebalance,
-                lookback=lookback,
-                cap=cap,
+            if mc_base_returns.empty:
+                return (
+                    empty_fig(title="Monte Carlo Simulation"),
+                    html.Div("No base strategy returns available for Monte Carlo."),
+                    None,
+                )
+
+            results, final_vals = run_strategy_return_bootstrap_mc(
+                mc_base_returns,
                 num_simulations=num_sim,
                 horizon_days=horizon,
                 block_len=20,
@@ -1356,11 +1964,64 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 min_leverage=min_lev,
                 cash_paths=cash_paths,
                 borrow_paths=borrow_paths,
-                market_caps=mc_market_caps,
                 seed=42,
                 dtype=np.float32,
             )
 
+        else:
+            # Passive/simple MC:
+            # Existing constituent-level engines remain active.
+            if mc_method == "gbm":
+                from index_lib.vectorization_utilities.mc_gbm_fast import (
+                    run_monte_carlo_gbm_fast,
+                )
+
+                results, final_vals = run_monte_carlo_gbm_fast(
+                    close=px_hist,
+                    constituents=constituents,
+                    method=method,
+                    rebalance_freq=rebalance,
+                    lookback=lookback,
+                    cap=cap,
+                    num_simulations=num_sim,
+                    horizon_days=horizon,
+                    vol_target_on=(vol_on == "on"),
+                    target_vol_ann=target_vol_pct / 100.0,
+                    vol_lookback=vol_lb,
+                    max_leverage=max_lev,
+                    min_leverage=min_lev,
+                    cash_paths=cash_paths,
+                    borrow_paths=borrow_paths,
+                    market_caps=mc_market_caps,
+                    seed=42,
+                    dtype=np.float32,
+                )
+            else:
+                from index_lib.vectorization_utilities.mc_block_bootstrap_fast import (
+                    run_monte_carlo_block_bootstrap_fast,
+                )
+
+                results, final_vals = run_monte_carlo_block_bootstrap_fast(
+                    close=px_hist,
+                    constituents=constituents,
+                    method=method,
+                    rebalance_freq=rebalance,
+                    lookback=lookback,
+                    cap=cap,
+                    num_simulations=num_sim,
+                    horizon_days=horizon,
+                    block_len=20,
+                    vol_target_on=(vol_on == "on"),
+                    target_vol_ann=target_vol_pct / 100.0,
+                    vol_lookback=vol_lb,
+                    max_leverage=max_lev,
+                    min_leverage=min_lev,
+                    cash_paths=cash_paths,
+                    borrow_paths=borrow_paths,
+                    market_caps=mc_market_caps,
+                    seed=42,
+                    dtype=np.float32,
+                )
         mean_path = results.mean(axis=0)
 
         lower_q = alpha
@@ -1411,6 +2072,18 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
 
         summary = html.Div(
             [
+                html.Div(
+                    "MC engine: "
+                    + (
+                        "Strategy Return Bootstrap"
+                        if method in OPTIMIZER_METHODS
+                        else (
+                            "Constituent GBM"
+                            if mc_method == "gbm"
+                            else "Constituent Block Bootstrap"
+                        )
+                    )
+                ),
                 html.Div(
                     f"Funding: {funding_model}"
                     + (f" / {funding_method}" if funding_model == "mc" else "")

@@ -8,6 +8,46 @@ from .rebalancing import rebalance_dates
 from .weighting import compute_weights
 
 
+LOOKBACK_METHODS = {
+    "inv_vol",
+    "min_var",
+    "risk_parity",
+    "max_sharpe",
+    "max_diversification",
+}
+
+OPTIMIZER_METHODS = {
+    "min_var",
+    "risk_parity",
+    "max_sharpe",
+    "max_diversification",
+}
+
+
+def _equal_weights(columns: pd.Index) -> pd.Series:
+    if len(columns) == 0:
+        return pd.Series(dtype=float)
+    return pd.Series(1.0 / len(columns), index=columns, dtype=float)
+
+
+def _has_sufficient_history(hist: pd.DataFrame, min_obs: int) -> bool:
+    if hist.empty or hist.shape[1] == 0:
+        return False
+
+    returns = hist.pct_change().dropna(how="all")
+    if len(returns) < min_obs:
+        return False
+
+    usable_cols = [
+        c
+        for c in returns.columns
+        if returns[c].replace([float("inf"), float("-inf")], pd.NA).dropna().shape[0]
+        >= min_obs
+    ]
+
+    return len(usable_cols) >= 2
+
+
 def build_index_series(
     close: pd.DataFrame,
     constituents: Sequence[str],
@@ -20,15 +60,23 @@ def build_index_series(
     cap: Optional[float],
     base_level: float = 100.0,
     market_caps: Optional[pd.DataFrame] = None,
+    optimizer_form: str = "long_only",
+    min_weight: float = 0.0,
+    risk_free_rate: float = 0.0,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
-    Backtest a simple long-only strategy with periodic rebalancing and daily weight drift.
+    Backtest a long-only strategy with periodic rebalancing and daily weight drift.
 
-    Conventions:
-    - weights used for day t return are start-of-day weights
-    - on a rebalance date t, weights are reset using price history before t
-    - missing returns are handled by dropping unavailable names and renormalizing weights
+    Conventions
+    -----------
+    - Weights used for day t return are start-of-day weights.
+    - On a rebalance date t, target weights are computed using data strictly before t.
+    - Those target weights are then used for the return on t.
+    - Missing returns are handled by dropping unavailable names and renormalizing weights.
     """
+    if optimizer_form != "long_only":
+        raise ValueError("Only optimizer_form='long_only' is currently supported.")
+
     px = close.reindex(columns=list(constituents)).copy()
     px = px.dropna(axis=1, how="all")
 
@@ -65,14 +113,20 @@ def build_index_series(
             available_dates = market_caps.index[market_caps.index <= first_date]
             if len(available_dates) > 0:
                 caps_series_init = market_caps.loc[available_dates[-1]]
-
-    w = compute_weights(
-        px.iloc[:1],
-        method,
-        lookback=lookback,
-        cap=cap,
-        market_caps=caps_series_init,
-    )
+    # Initial state before the first rebalance.
+    # Optimizers require historical returns, so they must not be called on px.iloc[:1].
+    if method in OPTIMIZER_METHODS:
+        w = _equal_weights(px.columns)
+    else:
+        w = compute_weights(
+            px.iloc[:1],
+            method,
+            lookback=lookback,
+            cap=cap,
+            market_caps=caps_series_init,
+            min_weight=min_weight,
+            risk_free_rate=risk_free_rate,
+        )
 
     level = float(base_level)
     levels: List[Tuple[pd.Timestamp, float]] = []
@@ -87,7 +141,7 @@ def build_index_series(
             else:
                 hist_px = px.iloc[:hist_end]
 
-                if method == "inv_vol":
+                if method in LOOKBACK_METHODS:
                     hist = hist_px.tail(max(lookback + 1, 2))
                 else:
                     hist = hist_px
@@ -102,13 +156,21 @@ def build_index_series(
                     if len(available_dates) > 0:
                         caps_series = market_caps.loc[available_dates[-1]]
 
-            w = compute_weights(
+            if method in OPTIMIZER_METHODS and not _has_sufficient_history(
                 hist,
-                method,
-                lookback=lookback,
-                cap=cap,
-                market_caps=caps_series,
-            )
+                min_obs=max(20, min(int(lookback), 60)),
+            ):
+                w = _equal_weights(hist.columns)
+            else:
+                w = compute_weights(
+                    hist,
+                    method,
+                    lookback=lookback,
+                    cap=cap,
+                    market_caps=caps_series,
+                    min_weight=min_weight,
+                    risk_free_rate=risk_free_rate,
+                )
 
             weights_hist[dt] = w
 
@@ -122,14 +184,22 @@ def build_index_series(
             w_eff = w[mask]
             r_eff = r[mask].astype(float)
 
-            w_eff = w_eff / float(w_eff.sum())
-            base_r = float((w_eff * r_eff).sum())
+            w_eff_sum = float(w_eff.sum())
+            if w_eff_sum <= 0:
+                base_r = 0.0
+                w_drift = w
+            else:
+                w_eff = w_eff / w_eff_sum
+                base_r = float((w_eff * r_eff).sum())
 
-            gross = 1.0 + r_eff
-            denom = 1.0 + base_r
+                gross = 1.0 + r_eff
+                denom = 1.0 + base_r
 
-            w_drift = (w_eff * gross) / denom
-            w_drift = w_drift / float(w_drift.sum())
+                if denom == 0:
+                    w_drift = w_eff
+                else:
+                    w_drift = (w_eff * gross) / denom
+                    w_drift = w_drift / float(w_drift.sum())
 
         base_ret_list.append((dt, base_r))
 

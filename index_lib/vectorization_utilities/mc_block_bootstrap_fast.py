@@ -108,7 +108,7 @@ def run_monte_carlo_block_bootstrap_fast(
     min_leverage: float,
     cash_paths: Optional[np.ndarray] = None,
     borrow_paths: Optional[np.ndarray] = None,
-    market_caps: Optional[np.ndarray] = None,  # ADD THIS
+    market_caps: Optional[np.ndarray | pd.DataFrame] = None,
     seed: int = 42,
     dtype=np.float32,
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -136,7 +136,32 @@ def run_monte_carlo_block_bootstrap_fast(
         raise ValueError("Not enough non-NaN historical returns.")
 
     R_hist = np.ascontiguousarray(rets_hist.to_numpy(dtype=dtype))  # (T,N)
+
+    caps_hist = None
+    caps_static = None
+
+    if method == "cap_weight" and market_caps is not None:
+        if isinstance(market_caps, pd.DataFrame):
+            caps_df = (
+                market_caps.reindex(index=rets_hist.index, columns=px.columns)
+                .ffill()
+                .fillna(0.0)
+            )
+            caps_hist = np.ascontiguousarray(caps_df.to_numpy(dtype=dtype))
+        else:
+            caps_arr = np.asarray(market_caps, dtype=dtype)
+
+            if caps_arr.ndim == 2:
+                caps_static = caps_arr
+            elif caps_arr.ndim == 3:
+                caps_hist = caps_arr
+            else:
+                raise ValueError(
+                    "market_caps must be a DataFrame, a 2D static array, or a 3D path array."
+                )
+
     T, N = R_hist.shape
+
     S, H = int(num_simulations), int(horizon_days)
     if cash_paths is None or borrow_paths is None:
         cash_paths_arr = np.zeros((S, H), dtype=dtype)
@@ -205,15 +230,36 @@ def run_monte_carlo_block_bootstrap_fast(
             elif method == "price_weight":
                 ssum = px_rel.sum(axis=1, keepdims=True)
                 w = np.divide(px_rel, ssum, out=np.zeros_like(px_rel), where=ssum > eps)
-            elif method == "cap_weight" and market_caps is not None:
-                if market_caps.ndim == 3:
-                    caps_t = market_caps[:, t, :]
+            elif method == "cap_weight":
+                if caps_hist is not None:
+                    if caps_hist.ndim == 2:
+                        # Use the same sampled historical row as the sampled return row.
+                        caps_t = caps_hist[idx[:, t], :]
+                    elif caps_hist.ndim == 3:
+                        caps_t = caps_hist[:, t, :]
+                    else:
+                        raise ValueError("Invalid caps_hist dimensions.")
+                elif caps_static is not None:
+                    caps_t = caps_static
                 else:
-                    caps_t = market_caps
+                    caps_t = np.full((S, N), dtype(1.0 / N), dtype=dtype)
+
+                caps_t = np.nan_to_num(caps_t, nan=0.0, posinf=0.0, neginf=0.0)
+                caps_t = np.maximum(caps_t, dtype(0.0))
+
                 caps_sum = caps_t.sum(axis=1, keepdims=True)
+
                 w = np.divide(
-                    caps_t, caps_sum, out=np.zeros_like(caps_t), where=caps_sum > eps
+                    caps_t,
+                    caps_sum,
+                    out=np.zeros_like(caps_t),
+                    where=caps_sum > eps,
                 )
+
+                missing_rows = caps_sum[:, 0] <= eps
+                if np.any(missing_rows):
+                    w[missing_rows, :] = dtype(1.0 / N)
+
             elif method == "inv_vol":
                 if ring_count < max(10, lb // 3):
                     w[:] = dtype(1.0 / N)
