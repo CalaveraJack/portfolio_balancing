@@ -1129,7 +1129,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                 src="/assets/logo.svg",
                                 className="app-logo",
                             ),
-                            html.Div("v0.1", className="app-badge"),
+                            html.Div("v0.2", className="app-badge"),
                         ],
                     ),
                 ],
