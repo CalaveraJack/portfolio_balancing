@@ -5,6 +5,7 @@ from .optimization import (
     calc_risk_parity_weights,
     solve_optimizer_weights,
 )
+from .covariance import estimate_covariance
 
 __all__ = [
     "calc_max_diversification_weights",
@@ -12,4 +13,5 @@ __all__ = [
     "calc_min_var_weights",
     "calc_risk_parity_weights",
     "solve_optimizer_weights",
+    "estimate_covariance",
 ]

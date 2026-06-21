@@ -16,6 +16,7 @@ dependencies = [
     "plotly",
     "dash",
     "requests>=2.31",
+    "scikit-learn>=1.4",
     "python-dotenv>=1.0",
 ]
 

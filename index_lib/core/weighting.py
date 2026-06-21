@@ -82,6 +82,7 @@ def compute_weights(
     max_gross_exposure: float = 1.0,
     short_borrow_cost: float = 0.0,
     risk_free_rate: float = 0.0,
+    cov_estimator: str = "sample",
     return_diagnostics: bool = False,
 ):
     """
@@ -104,6 +105,7 @@ def compute_weights(
             method=method,
             lookback=lookback,
             optimizer_form=optimizer_form,
+            cov_estimator=cov_estimator,
             max_weight=effective_max_weight,
             min_weight=min_weight,
             net_exposure=net_exposure,

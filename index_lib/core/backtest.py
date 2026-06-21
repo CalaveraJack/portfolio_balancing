@@ -67,6 +67,7 @@ def build_index_series(
     max_gross_exposure: float = 1.0,
     short_borrow_cost: float = 0.0,
     risk_free_rate: float = 0.0,
+    cov_estimator: str = "sample",
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Backtest a long-only strategy with periodic rebalancing and daily weight drift.
@@ -138,6 +139,7 @@ def build_index_series(
             max_gross_exposure=max_gross_exposure,
             short_borrow_cost=short_borrow_cost,
             risk_free_rate=risk_free_rate,
+            cov_estimator=cov_estimator,
         )
 
     level = float(base_level)
@@ -187,6 +189,7 @@ def build_index_series(
                     max_gross_exposure=max_gross_exposure,
                     short_borrow_cost=short_borrow_cost,
                     risk_free_rate=risk_free_rate,
+                    cov_estimator=cov_estimator,
                 )
 
             weights_hist[dt] = w

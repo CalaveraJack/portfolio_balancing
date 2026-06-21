@@ -660,10 +660,22 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                                                     "label": "Sample covariance",
                                                                     "value": "sample",
                                                                 },
+                                                                {
+                                                                    "label": "EWMA covariance",
+                                                                    "value": "ewma",
+                                                                },
+                                                                {
+                                                                    "label": "Ledoit-Wolf shrinkage",
+                                                                    "value": "ledoit_wolf",
+                                                                },
+                                                                {
+                                                                    "label": "OAS shrinkage",
+                                                                    "value": "oas",
+                                                                },
                                                             ],
                                                             value="sample",
                                                             clearable=False,
-                                                            style={"width": "210px"},
+                                                            style={"width": "240px"},
                                                         ),
                                                     ]
                                                 ),
@@ -1224,7 +1236,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                                 src="/assets/logo.svg",
                                 className="app-logo",
                             ),
-                            html.Div("v0.2", className="app-badge"),
+                            html.Div("v0.3", className="app-badge"),
                         ],
                     ),
                 ],
@@ -1705,7 +1717,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
 
         cov_estimator = cov_estimator or "sample"
-        if cov_estimator != "sample":
+        if cov_estimator not in {"sample", "ewma", "ledoit_wolf", "oas"}:
             cov_estimator = "sample"
 
         effective_lookback = int(lookback) if lookback else 126
@@ -1737,6 +1749,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
             max_gross_exposure=max_gross_exposure,
             short_borrow_cost=short_borrow_cost,
             risk_free_rate=risk_free_rate,
+            cov_estimator=cov_estimator,
         )
 
         lev_fig = empty_fig(title="Overlay Exposure", height=320)
@@ -2060,7 +2073,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
         risk_free_rate = float(rf_rate_pct) / 100.0 if rf_rate_pct is not None else 0.0
 
         cov_estimator = cov_estimator or "sample"
-        if cov_estimator != "sample":
+        if cov_estimator not in {"sample", "ewma", "ledoit_wolf", "oas"}:
             cov_estimator = "sample"
 
         effective_lookback = lookback
@@ -2151,6 +2164,7 @@ def build_app(data: UniverseData, rates_data: RatesInspectorData) -> Dash:
                 max_gross_exposure=max_gross_exposure,
                 short_borrow_cost=short_borrow_cost,
                 risk_free_rate=risk_free_rate,
+                cov_estimator=cov_estimator,
             )
 
             if mc_base_returns.empty:

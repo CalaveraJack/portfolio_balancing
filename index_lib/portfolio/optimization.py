@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
+from index_lib.portfolio.covariance import estimate_covariance
+
 
 EPS = 1e-12
 
@@ -26,6 +28,7 @@ def _annualized_inputs(
     prices: pd.DataFrame,
     *,
     lookback: int,
+    cov_estimator: str = "sample",
 ) -> Tuple[pd.Series, pd.DataFrame, pd.DataFrame]:
     px = prices.dropna(axis=1, how="all").copy()
     returns = px.pct_change().dropna(how="all")
@@ -39,7 +42,11 @@ def _annualized_inputs(
         return pd.Series(dtype=float), pd.DataFrame(), returns
 
     mu = returns.mean() * 252.0
-    cov = returns.cov() * 252.0
+    cov = estimate_covariance(
+        returns,
+        method=cov_estimator,
+        annualize=True,
+    )
 
     cov = cov.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
@@ -303,6 +310,7 @@ def calc_min_var_weights(
     *,
     lookback: int,
     optimizer_form: str = "long_only",
+    cov_estimator: str = "sample",
     max_weight: Optional[float] = None,
     min_weight: float = 0.0,
     net_exposure: float = 1.0,
@@ -310,7 +318,11 @@ def calc_min_var_weights(
     short_borrow_cost: float = 0.0,
 ) -> Tuple[pd.Series, Dict[str, object]]:
     method = "min_var"
-    mu, cov, _ = _annualized_inputs(prices, lookback=lookback)
+    mu, cov, _ = _annualized_inputs(
+        prices,
+        lookback=lookback,
+        cov_estimator=cov_estimator,
+    )
     tickers = list(cov.columns)
 
     if len(tickers) == 0:
@@ -368,6 +380,7 @@ def calc_min_var_weights(
         net_exposure=net_exposure,
         max_gross_exposure=max_gross_exposure,
         short_borrow_cost=short_borrow_cost,
+        extra={"cov_estimator": cov_estimator},
     )
 
     return weights, diag
@@ -377,6 +390,7 @@ def calc_max_sharpe_weights(
     prices: pd.DataFrame,
     *,
     lookback: int,
+    cov_estimator: str = "sample",
     optimizer_form: str = "long_only",
     max_weight: Optional[float] = None,
     min_weight: float = 0.0,
@@ -386,7 +400,11 @@ def calc_max_sharpe_weights(
     risk_free_rate: float = 0.0,
 ) -> Tuple[pd.Series, Dict[str, object]]:
     method = "max_sharpe"
-    mu, cov, _ = _annualized_inputs(prices, lookback=lookback)
+    mu, cov, _ = _annualized_inputs(
+        prices,
+        lookback=lookback,
+        cov_estimator=cov_estimator,
+    )
     tickers = list(cov.columns)
 
     if len(tickers) == 0:
@@ -450,6 +468,7 @@ def calc_max_sharpe_weights(
         net_exposure=net_exposure,
         max_gross_exposure=max_gross_exposure,
         short_borrow_cost=short_borrow_cost,
+        extra={"cov_estimator": cov_estimator},
     )
 
     return weights, diag
@@ -459,6 +478,7 @@ def calc_max_diversification_weights(
     prices: pd.DataFrame,
     *,
     lookback: int,
+    cov_estimator: str = "sample",
     optimizer_form: str = "long_only",
     max_weight: Optional[float] = None,
     min_weight: float = 0.0,
@@ -467,7 +487,11 @@ def calc_max_diversification_weights(
     short_borrow_cost: float = 0.0,
 ) -> Tuple[pd.Series, Dict[str, object]]:
     method = "max_diversification"
-    mu, cov, _ = _annualized_inputs(prices, lookback=lookback)
+    mu, cov, _ = _annualized_inputs(
+        prices,
+        lookback=lookback,
+        cov_estimator=cov_estimator,
+    )
     tickers = list(cov.columns)
 
     if len(tickers) == 0:
@@ -532,7 +556,10 @@ def calc_max_diversification_weights(
         net_exposure=net_exposure,
         max_gross_exposure=max_gross_exposure,
         short_borrow_cost=short_borrow_cost,
-        extra={"diversification_ratio": div_ratio},
+        extra={
+            "diversification_ratio": div_ratio,
+            "cov_estimator": cov_estimator,
+        },
     )
 
     return weights, diag
@@ -542,6 +569,7 @@ def calc_risk_parity_weights(
     prices: pd.DataFrame,
     *,
     lookback: int,
+    cov_estimator: str = "sample",
     optimizer_form: str = "long_only",
     max_weight: Optional[float] = None,
     min_weight: float = 0.0,
@@ -550,7 +578,11 @@ def calc_risk_parity_weights(
     short_borrow_cost: float = 0.0,
 ) -> Tuple[pd.Series, Dict[str, object]]:
     method = "risk_parity"
-    mu, cov, _ = _annualized_inputs(prices, lookback=lookback)
+    mu, cov, _ = _annualized_inputs(
+        prices,
+        lookback=lookback,
+        cov_estimator=cov_estimator,
+    )
     tickers = list(cov.columns)
 
     if len(tickers) == 0:
@@ -621,6 +653,7 @@ def calc_risk_parity_weights(
         extra={
             "risk_contributions": dict(zip(tickers, contribution.tolist())),
             "risk_contribution_share": dict(zip(tickers, contribution_share.tolist())),
+            "cov_estimator": cov_estimator,
         },
     )
 
@@ -632,6 +665,7 @@ def solve_optimizer_weights(
     *,
     method: str,
     lookback: int,
+    cov_estimator: str = "sample",
     optimizer_form: str = "long_only",
     max_weight: Optional[float] = None,
     min_weight: float = 0.0,
@@ -642,7 +676,12 @@ def solve_optimizer_weights(
 ) -> Tuple[pd.Series, Dict[str, object]]:
     if optimizer_form not in {"long_only", "long_short"}:
         raise ValueError("optimizer_form must be 'long_only' or 'long_short'.")
+    cov_estimator = cov_estimator or "sample"
 
+    valid_cov_estimators = {"sample", "ewma", "ledoit_wolf", "oas"}
+    if cov_estimator not in valid_cov_estimators:
+        raise ValueError(f"Unknown covariance estimator: {cov_estimator}")
+    
     if optimizer_form == "long_only":
         min_weight = max(0.0, float(min_weight))
         net_exposure = 1.0
@@ -656,6 +695,7 @@ def solve_optimizer_weights(
         return calc_min_var_weights(
             prices,
             lookback=lookback,
+            cov_estimator=cov_estimator,
             optimizer_form=optimizer_form,
             max_weight=max_weight,
             min_weight=min_weight,
@@ -668,6 +708,7 @@ def solve_optimizer_weights(
         return calc_risk_parity_weights(
             prices,
             lookback=lookback,
+            cov_estimator=cov_estimator,
             optimizer_form=optimizer_form,
             max_weight=max_weight,
             min_weight=min_weight,
@@ -680,6 +721,7 @@ def solve_optimizer_weights(
         return calc_max_sharpe_weights(
             prices,
             lookback=lookback,
+            cov_estimator=cov_estimator,
             optimizer_form=optimizer_form,
             max_weight=max_weight,
             min_weight=min_weight,
@@ -693,6 +735,7 @@ def solve_optimizer_weights(
         return calc_max_diversification_weights(
             prices,
             lookback=lookback,
+            cov_estimator=cov_estimator,
             optimizer_form=optimizer_form,
             max_weight=max_weight,
             min_weight=min_weight,
