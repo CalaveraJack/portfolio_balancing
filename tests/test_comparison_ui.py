@@ -74,13 +74,35 @@ def test_a_stock_can_stand_in_as_a_benchmark(app: AppTest, tmp_path):
     assert set(kinds[0]["Kind"]) == {"run", "stock"}
 
 
+def _an_uncached_benchmark() -> str:
+    """
+    Find a benchmark the local cache does not hold.
+
+    Chosen at run time rather than hardcoded: the cache is shared, mutable, and
+    the app writes to it, so naming a specific ticker makes the test fail the
+    moment someone downloads that ticker.
+    """
+    import pandas as pd
+
+    from index_lib.config import BENCHMARK_TICKERS
+
+    cached = set(pd.read_parquet("data/yahoo_close.parquet").columns)
+    missing = [t for t in BENCHMARK_TICKERS if t not in cached]
+
+    if not missing:
+        pytest.skip("every benchmark is cached, so none can be reported missing")
+
+    return missing[0]
+
+
 def test_an_uncached_benchmark_says_how_to_get_it(app: AppTest):
-    # SPY is not in the local cache, and the app runs in cache mode.
-    app.session_state["cmp_benchmarks"] = ["SPY"]
+    ticker = _an_uncached_benchmark()
+
+    app.session_state["cmp_benchmarks"] = [ticker]
     app.run()
 
     assert not app.exception, [e.value for e in app.exception]
-    assert any("SPY" in w.value for w in app.warning)
+    assert any(ticker in w.value for w in app.warning)
     assert any("refresh" in w.value for w in app.warning)
 
 
