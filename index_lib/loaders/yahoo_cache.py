@@ -9,7 +9,6 @@ from typing import Iterable, List, Optional, Tuple
 import pandas as pd  # type: ignore
 import yfinance as yf  # type: ignore
 
-
 DEFAULT_TICKERS_10 = [
     "AAPL",
     "MSFT",

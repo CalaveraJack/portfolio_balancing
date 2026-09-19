@@ -233,3 +233,9 @@ exports/
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Local planning notes (not for the repo)
+docs/ROADMAP.md
+
+# Saved strategies stay on this machine
+saved_strategies/

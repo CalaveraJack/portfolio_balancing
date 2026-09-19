@@ -75,8 +75,14 @@ def compute_weights(
     lookback: int = 126,
     cap: Optional[float] = None,
     market_caps: Optional[pd.Series] = None,
+    optimizer_form: str = "long_only",
     min_weight: float = 0.0,
+    max_weight: Optional[float] = None,
+    net_exposure: float = 1.0,
+    max_gross_exposure: float = 1.0,
+    short_borrow_cost: float = 0.0,
     risk_free_rate: float = 0.0,
+    cov_estimator: str = "sample",
     return_diagnostics: bool = False,
 ):
     """
@@ -89,16 +95,30 @@ def compute_weights(
         return pd.Series(dtype=float)
 
     if method in OPTIMIZER_METHODS:
+        upper_bounds = [
+            float(x) for x in [cap, max_weight] if x is not None and float(x) > 0.0
+        ]
+        effective_max_weight = min(upper_bounds) if upper_bounds else None
+
         w, diagnostics = solve_optimizer_weights(
             px,
             method=method,
             lookback=lookback,
-            max_weight=cap,
+            optimizer_form=optimizer_form,
+            cov_estimator=cov_estimator,
+            max_weight=effective_max_weight,
             min_weight=min_weight,
+            net_exposure=net_exposure,
+            max_gross_exposure=max_gross_exposure,
+            short_borrow_cost=short_borrow_cost,
             risk_free_rate=risk_free_rate,
         )
 
-        if cap is not None and not w.empty:
+        diagnostics["construction_weight_cap"] = cap
+        diagnostics["method_max_weight"] = max_weight
+        diagnostics["effective_max_weight"] = effective_max_weight
+
+        if optimizer_form == "long_only" and cap is not None and not w.empty:
             w = apply_weight_cap(w, float(cap))
 
         if return_diagnostics:
@@ -148,14 +168,18 @@ def compute_weights(
 
     w = w.sort_index()
 
+    # The simple rules produce a fully invested book; scaling by the invested
+    # fraction leaves the remainder in cash. At 100% this changes nothing.
+    invested = max(float(net_exposure), 0.0)
+
     if cap is not None:
-        return apply_weight_cap(w, float(cap))
+        return apply_weight_cap(w, float(cap)) * invested
 
     total = float(w.sum())
     if total <= 0:
         return pd.Series(dtype=float)
 
-    w = w.clip(lower=0) / total
+    w = w.clip(lower=0) / total * invested
 
     if return_diagnostics:
         return w, {

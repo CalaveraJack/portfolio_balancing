@@ -7,7 +7,6 @@ import pandas as pd
 from .rebalancing import rebalance_dates
 from .weighting import compute_weights
 
-
 LOOKBACK_METHODS = {
     "inv_vol",
     "min_var",
@@ -23,11 +22,44 @@ OPTIMIZER_METHODS = {
     "max_diversification",
 }
 
+# What the optimizer reports about each solve. The full payload also carries the
+# covariance matrix and the expected-return vector, which are far too large to
+# keep for every rebalance; these are the scalars worth recording.
+OPTIMIZER_DIAGNOSTIC_FIELDS = (
+    "success",
+    "message",
+    "solution_return",
+    "solution_return_after_short_cost",
+    "solution_vol",
+    "solution_sharpe",
+    "objective_value",
+    "net_exposure",
+    "gross_exposure",
+    "short_notional",
+    "construction_weight_cap",
+    "method_max_weight",
+    "effective_max_weight",
+)
 
-def _equal_weights(columns: pd.Index) -> pd.Series:
+
+def _blank_diagnostics(message: str) -> Dict[str, object]:
+    """A diagnostics row for a rebalance where the optimizer never ran."""
+    row: Dict[str, object] = dict.fromkeys(OPTIMIZER_DIAGNOSTIC_FIELDS)
+    row["success"] = False
+    row["message"] = message
+    return row
+
+
+def _equal_weights(columns: pd.Index, invested: float = 1.0) -> pd.Series:
+    """
+    Equal weights across the invested fraction.
+
+    Used before an optimizer has enough history; it has to respect the invested
+    fraction too, or the book starts fully invested whatever was asked for.
+    """
     if len(columns) == 0:
         return pd.Series(dtype=float)
-    return pd.Series(1.0 / len(columns), index=columns, dtype=float)
+    return pd.Series(float(invested) / len(columns), index=columns, dtype=float)
 
 
 def _has_sufficient_history(hist: pd.DataFrame, min_obs: int) -> bool:
@@ -62,7 +94,14 @@ def build_index_series(
     market_caps: Optional[pd.DataFrame] = None,
     optimizer_form: str = "long_only",
     min_weight: float = 0.0,
+    max_weight: Optional[float] = None,
+    net_exposure: float = 1.0,
+    max_gross_exposure: float = 1.0,
+    short_borrow_cost: float = 0.0,
     risk_free_rate: float = 0.0,
+    cov_estimator: str = "sample",
+    cash_rates: Optional[pd.Series] = None,
+    short_rates: Optional[pd.Series] = None,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Backtest a long-only strategy with periodic rebalancing and daily weight drift.
@@ -72,10 +111,14 @@ def build_index_series(
     - Weights used for day t return are start-of-day weights.
     - On a rebalance date t, target weights are computed using data strictly before t.
     - Those target weights are then used for the return on t.
-    - Missing returns are handled by dropping unavailable names and renormalizing weights.
+    - Missing returns are handled by dropping unavailable names and
+      renormalizing weights.
     """
-    if optimizer_form != "long_only":
-        raise ValueError("Only optimizer_form='long_only' is currently supported.")
+    if optimizer_form not in {"long_only", "long_short"}:
+        raise ValueError("optimizer_form must be 'long_only' or 'long_short'.")
+
+    if optimizer_form == "long_short" and net_exposure <= 0:
+        raise ValueError("Long/short currently requires positive net_exposure.")
 
     px = close.reindex(columns=list(constituents)).copy()
     px = px.dropna(axis=1, how="all")
@@ -94,6 +137,7 @@ def build_index_series(
             pd.DataFrame(),
             pd.Series(dtype=float),
             pd.DataFrame(),
+            pd.DataFrame(),
         )
 
     rets = px.pct_change()
@@ -101,6 +145,7 @@ def build_index_series(
 
     weights_hist: Dict[pd.Timestamp, pd.Series] = {}
     daily_weights_records: List[Tuple[pd.Timestamp, pd.Series]] = []
+    optimizer_records: Dict[pd.Timestamp, Dict[str, object]] = {}
 
     caps_series_init = None
 
@@ -116,7 +161,7 @@ def build_index_series(
     # Initial state before the first rebalance.
     # Optimizers require historical returns, so they must not be called on px.iloc[:1].
     if method in OPTIMIZER_METHODS:
-        w = _equal_weights(px.columns)
+        w = _equal_weights(px.columns, net_exposure)
     else:
         w = compute_weights(
             px.iloc[:1],
@@ -124,8 +169,14 @@ def build_index_series(
             lookback=lookback,
             cap=cap,
             market_caps=caps_series_init,
+            optimizer_form=optimizer_form,
             min_weight=min_weight,
+            max_weight=max_weight,
+            net_exposure=net_exposure,
+            max_gross_exposure=max_gross_exposure,
+            short_borrow_cost=short_borrow_cost,
             risk_free_rate=risk_free_rate,
+            cov_estimator=cov_estimator,
         )
 
     level = float(base_level)
@@ -156,21 +207,46 @@ def build_index_series(
                     if len(available_dates) > 0:
                         caps_series = market_caps.loc[available_dates[-1]]
 
+            # Price shorts in the optimizer at the same rate the book pays,
+            # so what it optimizes against matches what it is charged.
+            effective_short_cost = (
+                float(short_rates.get(dt, 0.0)) * 252.0
+                if short_rates is not None
+                else float(short_borrow_cost)
+            )
+
+            weight_kwargs = dict(
+                lookback=lookback,
+                cap=cap,
+                market_caps=caps_series,
+                optimizer_form=optimizer_form,
+                min_weight=min_weight,
+                max_weight=max_weight,
+                net_exposure=net_exposure,
+                max_gross_exposure=max_gross_exposure,
+                short_borrow_cost=effective_short_cost,
+                risk_free_rate=risk_free_rate,
+                cov_estimator=cov_estimator,
+            )
+
             if method in OPTIMIZER_METHODS and not _has_sufficient_history(
                 hist,
                 min_obs=max(20, min(int(lookback), 60)),
             ):
-                w = _equal_weights(hist.columns)
-            else:
-                w = compute_weights(
-                    hist,
-                    method,
-                    lookback=lookback,
-                    cap=cap,
-                    market_caps=caps_series,
-                    min_weight=min_weight,
-                    risk_free_rate=risk_free_rate,
+                w = _equal_weights(hist.columns, net_exposure)
+                optimizer_records[dt] = _blank_diagnostics(
+                    "not enough history yet; fell back to equal weight"
                 )
+            elif method in OPTIMIZER_METHODS:
+                w, solver_report = compute_weights(
+                    hist, method, return_diagnostics=True, **weight_kwargs
+                )
+                optimizer_records[dt] = {
+                    field: solver_report.get(field)
+                    for field in OPTIMIZER_DIAGNOSTIC_FIELDS
+                }
+            else:
+                w = compute_weights(hist, method, **weight_kwargs)
 
             weights_hist[dt] = w
 
@@ -189,17 +265,54 @@ def build_index_series(
                 base_r = 0.0
                 w_drift = w
             else:
-                w_eff = w_eff / w_eff_sum
-                base_r = float((w_eff * r_eff).sum())
+                # Whatever is not invested sits in cash. For a fully invested
+                # book this is zero and the cash leg drops out entirely.
+                invested = float(w.sum())
+                cash_weight = 1.0 - invested
+                cash_return = (
+                    float(cash_rates.get(dt, 0.0)) if cash_rates is not None else 0.0
+                )
 
-                gross = 1.0 + r_eff
-                denom = 1.0 + base_r
+                # The equity leg's return comes only from names that actually
+                # priced, renormalized so a data gap does not dilute it towards
+                # zero, then applied across the whole invested sleeve.
+                equity_r = float((w_eff / w_eff_sum * r_eff).sum())
+                base_r = invested * equity_r + cash_weight * cash_return
 
-                if denom == 0:
-                    w_drift = w_eff
-                else:
-                    w_drift = (w_eff * gross) / denom
-                    w_drift = w_drift / float(w_drift.sum())
+                if optimizer_form == "long_short":
+                    short_notional = float((-w[w < 0.0]).sum())
+
+                    if short_notional > 0.0:
+                        # Shorting is financed at the loaded SOFR plus the
+                        # configured spread, the same way the volatility
+                        # overlay finances leverage. Falling back to the flat
+                        # spread keeps the engine usable without a rates panel.
+                        daily_short_rate = (
+                            float(short_rates.get(dt, 0.0))
+                            if short_rates is not None
+                            else float(short_borrow_cost) / 252.0
+                        )
+                        base_r -= short_notional * daily_short_rate
+
+                # Drift every holding, including the ones that did not price.
+                # A missing price means the position is stale, not sold: it is
+                # carried forward and keeps its place in the book. Dropping it
+                # here would liquidate it for free and hand its weight to the
+                # others until the next rebalance.
+                #
+                # A name without a price is carried at the day's average return
+                # rather than at zero, which is the same assumption the return
+                # above makes when it scales the priced names across the whole
+                # sleeve. Using zero here instead would leave the book quietly
+                # summing to less than the invested fraction.
+                w_drift = w * (1.0 + r.fillna(equity_r).astype(float))
+
+                # Divide by the portfolio's own growth, not by the sum of the
+                # weights. Dividing by the sum would force the book back to
+                # fully invested every day, which is what pinned net exposure
+                # at 100% however it was configured.
+                growth = 1.0 + base_r
+                w_drift = w_drift / growth if growth != 0 else w
 
         base_ret_list.append((dt, base_r))
 
@@ -214,6 +327,11 @@ def build_index_series(
         0.0
     )
     daily_weights.index.name = "date"
+
+    optimizer_diagnostics = pd.DataFrame.from_dict(optimizer_records, orient="index")
+    if not optimizer_diagnostics.empty:
+        optimizer_diagnostics = optimizer_diagnostics.sort_index()
+        optimizer_diagnostics.index.name = "rebalance_date"
 
     index_level = pd.Series(
         [v for _, v in levels],
@@ -230,4 +348,10 @@ def build_index_series(
         name="base_return",
     )
 
-    return index_level, weights_history, base_returns, daily_weights
+    return (
+        index_level,
+        weights_history,
+        base_returns,
+        daily_weights,
+        optimizer_diagnostics,
+    )
