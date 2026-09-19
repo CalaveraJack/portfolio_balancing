@@ -45,10 +45,24 @@ def flash(level: str, message: str) -> None:
 
 
 def show_flash() -> None:
+    """
+    Show whatever the last action queued.
+
+    Confirmations go to a toast, which clears itself after a few seconds, since
+    they only say that something you just did worked. Warnings and errors stay
+    on the page: a message you miss matters more when something went wrong.
+    """
     queued = st.session_state.pop(FLASH_KEY, None)
-    if queued:
-        level, message = queued
-        getattr(st, level)(message)
+    if not queued:
+        return
+
+    level, message = queued
+
+    if level == "success":
+        st.toast(message, icon="✅")
+        return
+
+    getattr(st, level)(message)
 
 
 def loaded_name() -> Optional[str]:

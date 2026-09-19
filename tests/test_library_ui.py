@@ -230,3 +230,28 @@ def test_portfolio_from_a_deleted_stock_set_keeps_the_current_one(
     assert not app.exception, [e.value for e in app.exception]
     assert app.session_state["universe_key"] == "pharma"
     assert any("no longer available" in w.value for w in app.warning)
+
+
+def test_confirmations_clear_themselves(app: AppTest, tmp_path):
+    """Saving and deleting confirm with a toast, not a message that lingers."""
+    _save_as(app, "Toasted")
+
+    assert any("Toasted" in t.value for t in app.toast)
+    assert not app.success, "a confirmation was left on the page"
+
+    app.session_state["lib_selected"] = "Toasted"
+    app.run()
+    app.button(key="lib_delete").click().run()
+
+    assert any("Toasted" in t.value for t in app.toast)
+    assert not app.success
+
+
+def test_problems_stay_on_the_page(app: AppTest, tmp_path):
+    """A warning must not disappear on a timer the way a confirmation does."""
+    app.session_state["lib_name"] = "   "
+    app.run()
+    app.button(key="lib_save").click().run()
+
+    assert any("name" in w.value.lower() for w in app.warning)
+    assert not app.toast
