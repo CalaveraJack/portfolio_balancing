@@ -547,7 +547,7 @@ def _construction_controls(data: UniverseData) -> StrategyConfig:
                 value=150.0,
             )
             short_borrow_cost_pct = borrow_col.number_input(
-                "Short borrow cost (% p.a.)",
+                "Short borrow spread (% over SOFR)",
                 key="forge_short_borrow",
                 min_value=0.0,
                 step=0.25,

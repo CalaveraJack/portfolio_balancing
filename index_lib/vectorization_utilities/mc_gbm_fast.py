@@ -40,6 +40,7 @@ def run_monte_carlo_gbm_fast(
     num_simulations: int,
     horizon_days: int,
     vol_target_on: bool,
+    net_exposure: float = 1.0,
     target_vol_ann: float,
     vol_lookback: int,
     max_leverage: float,
@@ -205,20 +206,26 @@ def run_monte_carlo_gbm_fast(
                     dtype, copy=False
                 )
 
-            cash_w = np.maximum(dtype(1.0) - lev_vec, dtype(0.0))
-            borrow_w = np.maximum(lev_vec - dtype(1.0), dtype(0.0))
-
-            port_used = (
-                lev_vec * port_t
-                + cash_w * cash_paths_arr[:, t]
-                - borrow_w * borrow_paths_arr[:, t]
-            ).astype(dtype, copy=False)
-
             pring[:, pr_pos] = port_t
             pr_pos = (pr_pos + 1) % vlb
             pr_count = min(pr_count + 1, vlb)
         else:
-            port_used = port_t
+            lev_vec = np.ones((S,), dtype=dtype)
+
+        # The invested fraction is a constant leverage, so it composes with the
+        # volatility overlay instead of needing separate machinery. At 100%
+        # invested with no overlay both weights are zero and this reduces to the
+        # strategy return.
+        lev_vec = (lev_vec * dtype(net_exposure)).astype(dtype, copy=False)
+
+        cash_w = np.maximum(dtype(1.0) - lev_vec, dtype(0.0))
+        borrow_w = np.maximum(lev_vec - dtype(1.0), dtype(0.0))
+
+        port_used = (
+            lev_vec * port_t
+            + cash_w * cash_paths_arr[:, t]
+            - borrow_w * borrow_paths_arr[:, t]
+        ).astype(dtype, copy=False)
 
         # update level
         level = level * (dtype(1.0) + port_used)

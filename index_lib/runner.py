@@ -92,6 +92,18 @@ def run_backtest(
         day_count=DAY_COUNT,
     )
 
+    # Shorting is financed at SOFR plus the configured spread, exactly as the
+    # overlay finances leverage. The config holds the spread as a fraction; the
+    # funding loader expects annual percent.
+    short_rates = None
+    if cfg.optimizer_form == "long_short":
+        short_rates = build_daily_funding_series(
+            funding_df=rates.funding,
+            index=data.close.loc[cfg.start : cfg.end].index,
+            borrow_spread_ann=cfg.short_borrow_cost * 100.0,
+            day_count=DAY_COUNT,
+        )["borrow_rate"]
+
     (
         index_level,
         weights_history,
@@ -106,6 +118,7 @@ def run_backtest(
         base_level=BASE_LEVEL,
         market_caps=_market_caps_for(data, cfg, selection),
         cash_rates=funding["cash_rate"],
+        short_rates=short_rates,
         **cfg.index_kwargs(),
     )
 
@@ -161,9 +174,15 @@ def _simulate_funding(
     rates: RatesInspectorData,
     overlay_cfg: OverlayConfig,
     mc: MonteCarloConfig,
+    needs_cash: bool = False,
 ):
-    """Return (rate, cash, borrow) path matrices, or three Nones when unfunded."""
-    if not overlay_cfg.enabled:
+    """
+    Return (rate, cash, borrow) path matrices, or three Nones when unfunded.
+
+    A book that is not fully invested needs cash paths even with the overlay
+    switched off, or its cash sleeve would silently earn nothing.
+    """
+    if not overlay_cfg.enabled and not needs_cash:
         return None, None, None
 
     common = dict(
@@ -207,7 +226,9 @@ def run_monte_carlo(
     Optimizer strategies bootstrap their realized return stream; passive rules
     simulate constituent paths and re-apply the weighting rule inside each path.
     """
-    rate_paths, cash_paths, borrow_paths = _simulate_funding(rates, overlay_cfg, mc)
+    rate_paths, cash_paths, borrow_paths = _simulate_funding(
+        rates, overlay_cfg, mc, needs_cash=cfg.net_exposure != 1.0
+    )
 
     overlay_kwargs = dict(
         vol_target_on=overlay_cfg.enabled,
@@ -283,6 +304,7 @@ def run_monte_carlo(
         cap=cfg.cap,
         num_simulations=mc.num_simulations,
         horizon_days=mc.horizon_days,
+        net_exposure=cfg.net_exposure,
         market_caps=market_caps,
         **overlay_kwargs,
     )

@@ -109,7 +109,11 @@ Definitions live in `index_lib/config/universes.py`.
 - Maximum Diversification
 
 Optimizers run **long-only or long/short**. Long/short exposes net exposure,
-maximum gross exposure and a short-borrow cost. Note that a book with net and
+maximum gross exposure and a short borrow spread. Shorting is financed at the
+loaded SOFR plus that spread, the same way the volatility overlay finances
+leverage — so a zero spread is not free, it is SOFR. The rate reaches the
+optimizer as well as the charge, so a return-seeking method will short less when
+financing is dear. Note that a book with net and
 gross exposure both at 100% cannot short at all: shorting requires gross above
 net.
 

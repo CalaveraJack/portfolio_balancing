@@ -101,6 +101,7 @@ def build_index_series(
     risk_free_rate: float = 0.0,
     cov_estimator: str = "sample",
     cash_rates: Optional[pd.Series] = None,
+    short_rates: Optional[pd.Series] = None,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Backtest a long-only strategy with periodic rebalancing and daily weight drift.
@@ -206,6 +207,14 @@ def build_index_series(
                     if len(available_dates) > 0:
                         caps_series = market_caps.loc[available_dates[-1]]
 
+            # Price shorts in the optimizer at the same rate the book pays,
+            # so what it optimizes against matches what it is charged.
+            effective_short_cost = (
+                float(short_rates.get(dt, 0.0)) * 252.0
+                if short_rates is not None
+                else float(short_borrow_cost)
+            )
+
             weight_kwargs = dict(
                 lookback=lookback,
                 cap=cap,
@@ -215,7 +224,7 @@ def build_index_series(
                 max_weight=max_weight,
                 net_exposure=net_exposure,
                 max_gross_exposure=max_gross_exposure,
-                short_borrow_cost=short_borrow_cost,
+                short_borrow_cost=effective_short_cost,
                 risk_free_rate=risk_free_rate,
                 cov_estimator=cov_estimator,
             )
@@ -270,9 +279,20 @@ def build_index_series(
                 equity_r = float((w_eff / w_eff_sum * r_eff).sum())
                 base_r = invested * equity_r + cash_weight * cash_return
 
-                if optimizer_form == "long_short" and short_borrow_cost > 0.0:
+                if optimizer_form == "long_short":
                     short_notional = float((-w[w < 0.0]).sum())
-                    base_r -= short_notional * float(short_borrow_cost) / 252.0
+
+                    if short_notional > 0.0:
+                        # Shorting is financed at the loaded SOFR plus the
+                        # configured spread, the same way the volatility
+                        # overlay finances leverage. Falling back to the flat
+                        # spread keeps the engine usable without a rates panel.
+                        daily_short_rate = (
+                            float(short_rates.get(dt, 0.0))
+                            if short_rates is not None
+                            else float(short_borrow_cost) / 252.0
+                        )
+                        base_r -= short_notional * daily_short_rate
 
                 # Drift every holding, including the ones that did not price.
                 # A missing price means the position is stale, not sold: it is
