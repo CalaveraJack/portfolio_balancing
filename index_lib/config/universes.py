@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence, Tuple
 
 BASE_10: List[str] = [
     "AAPL",
@@ -93,12 +94,67 @@ PHARMA_48: List[str] = [
 DEFAULT_UNIVERSE: List[str] = PHARMA_48
 
 
-# Selectable stock sets. The label is the name carried on a saved strategy's
-# universe selection, so keep these stable once strategies are being saved.
-UNIVERSES: Dict[str, List[str]] = {
-    "Pharma & Healthcare": PHARMA_48,
-    "Mega-cap Core": BASE_10,
-    "Diversified + ETFs": PLUS_20,
+@dataclass(frozen=True)
+class Universe:
+    """
+    A selectable stock set.
+
+    ``key`` is identity: it is never shown and must never change, because saved
+    portfolios reference it. ``label`` is display only and can be renamed freely.
+    """
+
+    key: str
+    label: str
+    tickers: Tuple[str, ...]
+
+    def __len__(self) -> int:
+        return len(self.tickers)
+
+
+UNIVERSES: Dict[str, Universe] = {
+    universe.key: universe
+    for universe in (
+        Universe("pharma", "Pharma & Healthcare", tuple(PHARMA_48)),
+        Universe("megacap", "Mega-cap Core", tuple(BASE_10)),
+        Universe("diversified", "Diversified + ETFs", tuple(PLUS_20)),
+    )
 }
 
-DEFAULT_UNIVERSE_NAME: str = "Pharma & Healthcare"
+DEFAULT_UNIVERSE_KEY = "pharma"
+
+
+def universe_label(key: str) -> str:
+    universe = UNIVERSES.get(key)
+    return universe.label if universe else key
+
+
+def universe_tickers(key: str) -> Tuple[str, ...]:
+    universe = UNIVERSES.get(key)
+    return universe.tickers if universe else ()
+
+
+def resolve_universe_key(
+    reference: str, constituents: Sequence[str] = ()
+) -> Optional[str]:
+    """
+    Find the stock set a saved portfolio meant.
+
+    Tolerates a stock set that has been renamed, relabelled, or removed since the
+    portfolio was written, so a saved portfolio is not lost to a label change.
+    """
+    if reference in UNIVERSES:
+        return reference
+
+    # Written before stock sets had stable keys, when the label was the identity.
+    for universe in UNIVERSES.values():
+        if universe.label == reference:
+            return universe.key
+
+    # The set is gone: any set that still covers the saved names will serve.
+    if constituents:
+        wanted = set(constituents)
+        for universe in UNIVERSES.values():
+            if wanted <= set(universe.tickers):
+                return universe.key
+
+    return None

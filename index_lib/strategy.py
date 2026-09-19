@@ -74,12 +74,15 @@ class UniverseSelection:
     reusable across different stock sets, so the two are saved and varied separately.
     """
 
-    name: str
+    #: Stable stock-set key, not the display label.
+    universe: str
     constituents: Tuple[str, ...]
 
     @classmethod
-    def from_ui(cls, *, name: str, constituents: Sequence[str]) -> "UniverseSelection":
-        return cls(name=name, constituents=tuple(constituents or ()))
+    def from_ui(
+        cls, *, universe: str, constituents: Sequence[str]
+    ) -> "UniverseSelection":
+        return cls(universe=universe, constituents=tuple(constituents or ()))
 
     @property
     def is_empty(self) -> bool:

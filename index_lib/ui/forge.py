@@ -7,8 +7,8 @@ from typing import Dict, List, Sequence
 import numpy as np
 import streamlit as st
 
-from index_lib import runner
-from index_lib.config import UNIVERSES
+from index_lib import library, runner
+from index_lib.config import universe_label, universe_tickers
 from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.strategy import (
     COV_ESTIMATORS,
@@ -23,7 +23,7 @@ from index_lib.strategy import (
     method_label,
     method_uses_lookback,
 )
-from index_lib.ui import cache, figures, tables
+from index_lib.ui import cache, figures, session, tables
 from index_lib.ui.theme import note, section
 
 DEFAULT_CONSTITUENT_COUNT = 6
@@ -86,37 +86,207 @@ def _mc_note_key(cfg: StrategyConfig) -> str:
     return "passive"
 
 
-def _default_constituents(available: Sequence[str], universe_name: str) -> List[str]:
+def _describe(saved: library.SavedStrategy) -> str:
+    """One line for the dropdown: what it is and what it carries."""
+    label = f"{saved.name} — {method_label(saved.config.method)}"
+    if saved.stocks is not None:
+        origin = universe_label(saved.stocks.universe) or saved.stocks.universe_label
+        label += f" · {len(saved.stocks)} stocks"
+        if origin:
+            label += f" from {origin}"
+    return label
+
+
+def _library_panel(
+    config: StrategyConfig,
+    overlay: OverlayConfig,
+    selection: UniverseSelection,
+) -> None:
+    """
+    Save and reopen work.
+
+    Drawn into a slot reserved at the top of the tab but filled last, so it can
+    see the settings and the stocks the rest of the tab has just produced.
+    """
+    session.show_flash()
+
+    saved = library.list_templates()
+    names = [s.name for s in saved]
+    loaded = session.loaded_name()
+
+    with st.expander("Strategy Library", expanded=bool(loaded) or not saved):
+        save_col, load_col = st.columns(2, gap="large")
+
+        with save_col:
+            st.text_input(
+                "Name",
+                key="lib_name",
+                placeholder="e.g. Healthcare min-var book",
+            )
+            st.text_input(
+                "Description (optional)",
+                key="lib_description",
+                placeholder="What is this for?",
+            )
+
+            keep_stocks = st.toggle(
+                f"Also save the {len(selection)} selected stocks",
+                key="lib_save_stocks",
+                help=(
+                    "Off, this saves a strategy: the settings alone, which you "
+                    "can run on any stock set. On, it saves a portfolio: the "
+                    "settings plus these stocks, and reopening it restores both."
+                ),
+            )
+
+            st.button(
+                "Save portfolio" if keep_stocks else "Save strategy",
+                key="lib_save",
+                width="stretch",
+                type="primary",
+            )
+
+        with load_col:
+            if names:
+                st.selectbox(
+                    "Saved",
+                    key="lib_selected",
+                    options=names,
+                    format_func=lambda n: next(
+                        (_describe(s) for s in saved if s.name == n), n
+                    ),
+                )
+                load_btn, delete_btn = st.columns(2)
+                load_btn.button("Open", key="lib_load", width="stretch")
+                delete_btn.button("Delete", key="lib_delete", width="stretch")
+            else:
+                st.caption(
+                    "Nothing saved yet. A **strategy** keeps the settings only, "
+                    "so it runs on any stock set. A **portfolio** also keeps the "
+                    "stocks you picked. Neither keeps the dates."
+                )
+
+    if loaded:
+        st.caption(f"Open: **{loaded}**")
+
+    _handle_library_actions(config, overlay, selection)
+
+
+def _handle_library_actions(
+    config: StrategyConfig,
+    overlay: OverlayConfig,
+    selection: UniverseSelection,
+) -> None:
+    """Act on the library buttons, now that the current settings are known."""
+    if st.session_state.get("lib_save"):
+        name = (st.session_state.get("lib_name") or "").strip()
+        keep_stocks = bool(st.session_state.get("lib_save_stocks"))
+
+        if not name:
+            session.flash("warning", "Give it a name before saving.")
+        elif keep_stocks and selection.is_empty:
+            session.flash("warning", "Pick at least one stock to save a portfolio.")
+        else:
+            try:
+                library.save_template(
+                    name,
+                    config,
+                    overlay,
+                    stocks=(
+                        library.stocks_from_selection(selection)
+                        if keep_stocks
+                        else None
+                    ),
+                    description=st.session_state.get("lib_description", ""),
+                )
+                st.session_state[session.LOADED_NAME_KEY] = name
+                kind = "portfolio" if keep_stocks else "strategy"
+                session.flash("success", f"Saved **{name}** as a {kind}.")
+            except library.TemplateError as exc:
+                session.flash("error", str(exc))
+
+        st.rerun()
+
+    if st.session_state.get("lib_load"):
+        try:
+            session.queue_load(
+                library.load_template(st.session_state.get("lib_selected"))
+            )
+        except library.TemplateError as exc:
+            session.flash("error", str(exc))
+
+        st.rerun()
+
+    if st.session_state.get("lib_delete"):
+        name = st.session_state.get("lib_selected")
+
+        if library.delete_template(name):
+            session.flash("success", f"Deleted **{name}**.")
+            if session.loaded_name() == name:
+                st.session_state.pop(session.LOADED_NAME_KEY, None)
+
+        # The dropdown options just changed; a stale pick would be invalid.
+        st.session_state.pop("lib_selected", None)
+        st.rerun()
+
+
+def _default_constituents(available: Sequence[str], universe_key: str) -> List[str]:
     """
     Open with the first few names in the stock set's own order.
 
-    Each universe is declared largest/most representative first, so this gives a
-    sensible starting basket whichever set is loaded. Falls back to whatever is
+    Each set is declared largest/most representative first, so this gives a
+    sensible starting basket whichever one is loaded. Falls back to whatever is
     available when the set is unknown.
     """
-    ordered = UNIVERSES.get(universe_name) or []
+    ordered = universe_tickers(universe_key)
     picks = [t for t in ordered if t in available][:DEFAULT_CONSTITUENT_COUNT]
     return picks or list(available[:DEFAULT_CONSTITUENT_COUNT])
 
 
-def _universe_controls(universe_name: str, available: List[str]) -> UniverseSelection:
+def _drop_unavailable_constituents(available: Sequence[str]) -> None:
+    """
+    Keep the stored pick to names the loaded data actually has.
+
+    A restored portfolio can name stocks that have since left the data, or that
+    belong to a stock set this one does not cover. Streamlit rejects a selection
+    that is not among the options, so they are dropped and reported rather than
+    allowed to break the control.
+    """
+    stored = st.session_state.get(session.CONSTITUENTS_KEY)
+    if not stored:
+        return
+
+    missing = [t for t in stored if t not in available]
+    if not missing:
+        return
+
+    st.session_state[session.CONSTITUENTS_KEY] = [t for t in stored if t in available]
+    st.warning(
+        f"Not in the loaded stock set, so left out: {', '.join(missing)}.",
+        icon="⚠️",
+    )
+
+
+def _universe_controls(universe_key: str, available: List[str]) -> UniverseSelection:
     section("Stocks")
+
+    _drop_unavailable_constituents(available)
 
     constituents = st.multiselect(
         "Constituents",
         key="forge_constituents",
         options=available,
-        default=_default_constituents(available, universe_name),
+        default=_default_constituents(available, universe_key),
         help="Which names from the loaded stock set this strategy holds.",
     )
 
-    if universe_name:
+    if universe_key:
         st.caption(
-            f"{len(constituents)} of {len(available)} selected from {universe_name}. "
-            "Change the stock set in the sidebar."
+            f"{len(constituents)} of {len(available)} selected from "
+            f"{universe_label(universe_key)}. Change the stock set in the sidebar."
         )
 
-    return UniverseSelection.from_ui(name=universe_name, constituents=constituents)
+    return UniverseSelection.from_ui(universe=universe_key, constituents=constituents)
 
 
 def _construction_controls(data: UniverseData) -> StrategyConfig:
@@ -492,7 +662,7 @@ def _render_mc_results(mc_cfg: MonteCarloConfig) -> None:
 
 
 def render(
-    data: UniverseData, rates: RatesInspectorData, universe_name: str = ""
+    data: UniverseData, rates: RatesInspectorData, universe_key: str = ""
 ) -> None:
     st.subheader("Strategy Builder")
 
@@ -501,12 +671,19 @@ def render(
         st.error("No tickers loaded. Check the Yahoo download or the local cache.")
         return
 
+    # The library sits at the top of the tab but needs the settings and stocks
+    # that the controls below produce, so its place is reserved and filled last.
+    library_slot = st.container()
+
     controls, weights_panel = st.columns([3, 1], gap="large")
 
     with controls:
-        selection = _universe_controls(universe_name, available)
+        selection = _universe_controls(universe_key, available)
         cfg = _construction_controls(data)
         overlay_cfg = _overlay_controls()
+
+    with library_slot:
+        _library_panel(cfg, overlay_cfg, selection)
 
     if selection.is_empty:
         st.warning("Select at least one constituent.")

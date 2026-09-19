@@ -11,10 +11,15 @@ from typing import Tuple
 import streamlit as st
 from dotenv import load_dotenv
 
-from index_lib.config import DEFAULT_UNIVERSE_NAME, UNIVERSES
+from index_lib.config import (
+    DEFAULT_UNIVERSE_KEY,
+    UNIVERSES,
+    universe_label,
+    universe_tickers,
+)
 from index_lib.datasets import CACHE_MODES
 from index_lib.logging_config import configure_logging
-from index_lib.ui import cache, forge, macro, universe
+from index_lib.ui import cache, forge, macro, session, universe
 from index_lib.ui.theme import configure_page, render_header
 
 DATA_DIR = "data"
@@ -26,45 +31,23 @@ DATA_MODE_HELP = {
     "auto": "Fetch fresh data, fall back to the cache on API errors.",
 }
 
-ACTIVE_UNIVERSE_KEY = "_active_universe"
-
-# Widgets whose valid choices depend on which stock set is loaded. A selection
-# made against one stock set is not valid against another, so these are cleared
-# when the universe changes.
-UNIVERSE_DEPENDENT_KEYS = (
-    "forge_constituents",
-    "forge_start",
-    "forge_end",
-    "univ_ticker",
-    "univ_start",
-    "univ_end",
-)
-
-
-def reset_universe_dependent_widgets(universe_name: str) -> None:
-    if st.session_state.get(ACTIVE_UNIVERSE_KEY) == universe_name:
-        return
-
-    for key in UNIVERSE_DEPENDENT_KEYS:
-        st.session_state.pop(key, None)
-
-    st.session_state[ACTIVE_UNIVERSE_KEY] = universe_name
-
 
 def sidebar() -> Tuple[str, str]:
-    """Universe and data controls. Returns (universe name, cache mode)."""
+    """Universe and data controls. Returns (stock set key, cache mode)."""
     with st.sidebar:
         st.markdown("### Universe")
 
-        universe_name = st.selectbox(
+        universe_key = st.selectbox(
             "Stock set",
-            key="universe_name",
+            key="universe_key",
             options=list(UNIVERSES),
-            index=list(UNIVERSES).index(DEFAULT_UNIVERSE_NAME),
+            index=list(UNIVERSES).index(DEFAULT_UNIVERSE_KEY),
+            format_func=universe_label,
             help="Which set of stocks to load. Switching reloads the data.",
         )
         st.caption(
-            f"{len(UNIVERSES[universe_name])} tickers · history from {HISTORY_START}"
+            f"{len(universe_tickers(universe_key))} tickers · "
+            f"history from {HISTORY_START}"
         )
 
         st.divider()
@@ -83,7 +66,7 @@ def sidebar() -> Tuple[str, str]:
             st.cache_data.clear()
             st.rerun()
 
-    return universe_name, cache_mode
+    return universe_key, cache_mode
 
 
 def main() -> None:
@@ -92,12 +75,16 @@ def main() -> None:
     configure_page()
     render_header()
 
-    universe_name, cache_mode = sidebar()
-    reset_universe_dependent_widgets(universe_name)
+    # A queued portfolio may change the stock set, so it is applied before the
+    # sidebar draws the picker.
+    session.apply_pending_load()
+
+    universe_key, cache_mode = sidebar()
+    session.reset_universe_dependent_widgets(universe_key)
 
     try:
         data = cache.get_universe_data(
-            tuple(UNIVERSES[universe_name]),
+            universe_tickers(universe_key),
             start=HISTORY_START,
             data_dir=DATA_DIR,
             cache_mode=cache_mode,
@@ -122,7 +109,7 @@ def main() -> None:
         universe.render(data)
 
     with forge_tab:
-        forge.render(data, rates, universe_name)
+        forge.render(data, rates, universe_key)
 
 
 main()
