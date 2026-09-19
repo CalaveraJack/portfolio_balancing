@@ -52,16 +52,51 @@ def method_label(method: str) -> str:
     return METHODS.get(method, method)
 
 
+def is_optimizer_method(method: str) -> bool:
+    return method in OPTIMIZER_METHODS
+
+
+def method_uses_lookback(method: str) -> bool:
+    return method in LOOKBACK_METHODS
+
+
 def _pct(value: Optional[float], default: float) -> float:
     """Percent widget value -> fraction."""
     return float(value) / 100.0 if value is not None else default
 
 
 @dataclass(frozen=True)
-class StrategyConfig:
-    """Everything build_index_series needs, already validated."""
+class UniverseSelection:
+    """
+    The stock set a strategy runs on.
 
+    Deliberately kept out of StrategyConfig: the same construction logic has to be
+    reusable across different stock sets, so the two are saved and varied separately.
+    """
+
+    name: str
     constituents: Tuple[str, ...]
+
+    @classmethod
+    def from_ui(cls, *, name: str, constituents: Sequence[str]) -> "UniverseSelection":
+        return cls(name=name, constituents=tuple(constituents or ()))
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.constituents
+
+    def __len__(self) -> int:
+        return len(self.constituents)
+
+
+@dataclass(frozen=True)
+class StrategyConfig:
+    """
+    Construction logic only — the reusable part of a strategy.
+
+    Carries no stock set; pair it with a UniverseSelection to run it.
+    """
+
     method: str
     rebalance: str
     lookback: int
@@ -82,7 +117,6 @@ class StrategyConfig:
     def from_ui(
         cls,
         *,
-        constituents: Sequence[str],
         method: str,
         rebalance: str,
         lookback: Optional[int],
@@ -116,7 +150,6 @@ class StrategyConfig:
             short_borrow_cost = 0.0
 
         return cls(
-            constituents=tuple(constituents or ()),
             method=method,
             rebalance=rebalance,
             lookback=int(lookback) if lookback else 126,
@@ -138,11 +171,11 @@ class StrategyConfig:
 
     @property
     def is_optimizer(self) -> bool:
-        return self.method in OPTIMIZER_METHODS
+        return is_optimizer_method(self.method)
 
     @property
     def uses_lookback(self) -> bool:
-        return self.method in LOOKBACK_METHODS
+        return method_uses_lookback(self.method)
 
     @property
     def effective_lookback(self) -> int:
@@ -150,9 +183,8 @@ class StrategyConfig:
         return self.cov_lookback if self.is_optimizer else self.lookback
 
     def index_kwargs(self) -> Dict[str, object]:
-        """Keyword arguments for build_index_series, minus the date window."""
+        """Construction arguments for build_index_series, minus stocks and dates."""
         return {
-            "constituents": list(self.constituents),
             "method": self.method,
             "rebalance_freq": self.rebalance,
             "lookback": self.effective_lookback,

@@ -7,6 +7,7 @@ from typing import Dict, List, Sequence
 import numpy as np
 import streamlit as st
 
+from index_lib.config import UNIVERSES
 from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.ui import engine, figures, tables
 from index_lib.ui.strategy import (
@@ -17,11 +18,14 @@ from index_lib.ui.strategy import (
     MonteCarloConfig,
     OverlayConfig,
     StrategyConfig,
+    UniverseSelection,
+    is_optimizer_method,
     method_label,
+    method_uses_lookback,
 )
 from index_lib.ui.theme import note, section
 
-PREFERRED_DEFAULTS = ("LLY", "NVO", "JNJ", "PFE", "MRK", "ABBV")
+DEFAULT_CONSTITUENT_COUNT = 6
 
 MC_SESSION_KEY = "mc_result"
 
@@ -81,20 +85,41 @@ def _mc_note_key(cfg: StrategyConfig) -> str:
     return "passive"
 
 
-def _default_constituents(available: Sequence[str]) -> List[str]:
-    picks = [t for t in PREFERRED_DEFAULTS if t in available]
-    return picks or list(available[:6])
+def _default_constituents(available: Sequence[str], universe_name: str) -> List[str]:
+    """
+    Open with the first few names in the stock set's own order.
+
+    Each universe is declared largest/most representative first, so this gives a
+    sensible starting basket whichever set is loaded. Falls back to whatever is
+    available when the set is unknown.
+    """
+    ordered = UNIVERSES.get(universe_name) or []
+    picks = [t for t in ordered if t in available][:DEFAULT_CONSTITUENT_COUNT]
+    return picks or list(available[:DEFAULT_CONSTITUENT_COUNT])
 
 
-def _construction_controls(data: UniverseData, available: List[str]) -> StrategyConfig:
-    section("Construction")
+def _universe_controls(universe_name: str, available: List[str]) -> UniverseSelection:
+    section("Stocks")
 
     constituents = st.multiselect(
         "Constituents",
         key="forge_constituents",
         options=available,
-        default=_default_constituents(available),
+        default=_default_constituents(available, universe_name),
+        help="Which names from the loaded stock set this strategy holds.",
     )
+
+    if universe_name:
+        st.caption(
+            f"{len(constituents)} of {len(available)} selected from {universe_name}. "
+            "Change the stock set in the sidebar."
+        )
+
+    return UniverseSelection.from_ui(name=universe_name, constituents=constituents)
+
+
+def _construction_controls(data: UniverseData) -> StrategyConfig:
+    section("Construction")
 
     method_col, rebalance_col, lookback_col, cap_col = st.columns(4)
 
@@ -113,32 +138,13 @@ def _construction_controls(data: UniverseData, available: List[str]) -> Strategy
         index=0,
     )
 
-    probe = StrategyConfig.from_ui(
-        constituents=constituents,
-        method=method,
-        rebalance=rebalance,
-        lookback=126,
-        cov_lookback=126,
-        cap_pct=None,
-        start=None,
-        end=None,
-        optimizer_form=None,
-        min_weight_pct=None,
-        max_weight_pct=None,
-        net_exposure_pct=None,
-        max_gross_exposure_pct=None,
-        short_borrow_cost_pct=None,
-        rf_rate_pct=None,
-        cov_estimator=None,
-    )
-
     lookback = lookback_col.number_input(
         "Lookback (days)",
         key="forge_lookback",
         min_value=20,
         step=1,
         value=126,
-        disabled=not probe.uses_lookback,
+        disabled=not method_uses_lookback(method),
         help="Estimation window. Optimizers use the covariance lookback instead.",
     )
     cap_pct = cap_col.number_input(
@@ -160,7 +166,7 @@ def _construction_controls(data: UniverseData, available: List[str]) -> Strategy
     rf_rate_pct = 0.0
     cov_estimator = "sample"
 
-    if probe.is_optimizer:
+    if is_optimizer_method(method):
         form_col, cov_lb_col, min_w_col, max_w_col = st.columns(4)
 
         optimizer_form = form_col.selectbox(
@@ -241,7 +247,6 @@ def _construction_controls(data: UniverseData, available: List[str]) -> Strategy
     )
 
     return StrategyConfig.from_ui(
-        constituents=constituents,
         method=method,
         rebalance=rebalance,
         lookback=lookback,
@@ -485,7 +490,9 @@ def _render_mc_results(mc_cfg: MonteCarloConfig) -> None:
         st.caption("Settings changed since this run. Re-run to refresh the results.")
 
 
-def render(data: UniverseData, rates: RatesInspectorData) -> None:
+def render(
+    data: UniverseData, rates: RatesInspectorData, universe_name: str = ""
+) -> None:
     st.subheader("Strategy Builder")
 
     available = [t for t in data.close.columns if isinstance(t, str)]
@@ -496,14 +503,17 @@ def render(data: UniverseData, rates: RatesInspectorData) -> None:
     controls, weights_panel = st.columns([3, 1], gap="large")
 
     with controls:
-        cfg = _construction_controls(data, available)
+        selection = _universe_controls(universe_name, available)
+        cfg = _construction_controls(data)
         overlay_cfg = _overlay_controls()
 
-    if not cfg.constituents:
+    if selection.is_empty:
         st.warning("Select at least one constituent.")
         return
 
-    result = engine.run_backtest(data, rates, cfg, overlay_cfg, engine.data_token(data))
+    result = engine.run_backtest(
+        data, rates, cfg, selection, overlay_cfg, engine.data_token(data)
+    )
 
     with weights_panel:
         section("Latest Weights")
@@ -531,7 +541,7 @@ def render(data: UniverseData, rates: RatesInspectorData) -> None:
             try:
                 st.session_state[MC_SESSION_KEY] = {
                     "result": engine.run_monte_carlo(
-                        data, rates, cfg, overlay_cfg, mc_cfg
+                        data, rates, cfg, selection, overlay_cfg, mc_cfg
                     ),
                     "config": mc_cfg,
                 }

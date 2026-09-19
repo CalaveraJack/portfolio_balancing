@@ -34,7 +34,12 @@ from index_lib.simulation import (
 from index_lib.simulation.strategy_return_bootstrap import (
     run_strategy_return_bootstrap_mc,
 )
-from index_lib.ui.strategy import MonteCarloConfig, OverlayConfig, StrategyConfig
+from index_lib.ui.strategy import (
+    MonteCarloConfig,
+    OverlayConfig,
+    StrategyConfig,
+    UniverseSelection,
+)
 
 DAY_COUNT = 252
 BASE_LEVEL = 100.0
@@ -98,10 +103,12 @@ class BacktestResult:
         return self.index_level.empty
 
 
-def _market_caps_for(data: UniverseData, cfg: StrategyConfig) -> Optional[pd.DataFrame]:
-    if cfg.method != "cap_weight" or not cfg.constituents:
+def _market_caps_for(
+    data: UniverseData, cfg: StrategyConfig, selection: UniverseSelection
+) -> Optional[pd.DataFrame]:
+    if cfg.method != "cap_weight" or selection.is_empty:
         return None
-    return data.market_caps.reindex(columns=list(cfg.constituents))
+    return data.market_caps.reindex(columns=list(selection.constituents))
 
 
 @st.cache_data(show_spinner="Running backtest...")
@@ -109,6 +116,7 @@ def run_backtest(
     _data: UniverseData,
     _rates: RatesInspectorData,
     cfg: StrategyConfig,
+    selection: UniverseSelection,
     overlay_cfg: OverlayConfig,
     token: str,
 ) -> BacktestResult:
@@ -120,10 +128,11 @@ def run_backtest(
     """
     index_level, weights_history, base_returns, daily_weights = build_index_series(
         close=_data.close,
+        constituents=list(selection.constituents),
         start=cfg.start,
         end=cfg.end,
         base_level=BASE_LEVEL,
-        market_caps=_market_caps_for(_data, cfg),
+        market_caps=_market_caps_for(_data, cfg, selection),
         **cfg.index_kwargs(),
     )
 
@@ -214,6 +223,7 @@ def run_monte_carlo(
     data: UniverseData,
     rates: RatesInspectorData,
     cfg: StrategyConfig,
+    selection: UniverseSelection,
     overlay_cfg: OverlayConfig,
     mc: MonteCarloConfig,
 ) -> MonteCarloResult:
@@ -246,6 +256,7 @@ def run_monte_carlo(
         # re-optimize on every simulated constituent path.
         _, _, base_returns, _ = build_index_series(
             close=data.close,
+            constituents=list(selection.constituents),
             start=cfg.start,
             end=cfg.end,
             base_level=BASE_LEVEL,
@@ -280,18 +291,18 @@ def run_monte_carlo(
         px_hist = px_hist.loc[: pd.to_datetime(cfg.end)]
 
     market_caps = None
-    if cfg.method == "cap_weight" and cfg.constituents:
-        caps = data.market_caps.reindex(columns=list(cfg.constituents))
+    if cfg.method == "cap_weight" and not selection.is_empty:
+        caps = data.market_caps.reindex(columns=list(selection.constituents))
         if not caps.empty:
             market_caps = (
-                caps.reindex(index=px_hist.index, columns=list(cfg.constituents))
+                caps.reindex(index=px_hist.index, columns=list(selection.constituents))
                 .ffill()
                 .fillna(0.0)
             )
 
     engine_kwargs = dict(
         close=px_hist,
-        constituents=list(cfg.constituents),
+        constituents=list(selection.constituents),
         method=cfg.method,
         rebalance_freq=cfg.rebalance,
         lookback=cfg.lookback,

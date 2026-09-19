@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, List
 
 BASE_10: List[str] = [
     "AAPL",
@@ -91,3 +91,14 @@ PHARMA_48: List[str] = [
 
 
 DEFAULT_UNIVERSE: List[str] = PHARMA_48
+
+
+# Selectable stock sets. The label is the name carried on a saved strategy's
+# universe selection, so keep these stable once strategies are being saved.
+UNIVERSES: Dict[str, List[str]] = {
+    "Pharma & Healthcare": PHARMA_48,
+    "Mega-cap Core": BASE_10,
+    "Diversified + ETFs": PLUS_20,
+}
+
+DEFAULT_UNIVERSE_NAME: str = "Pharma & Healthcare"

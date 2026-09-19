@@ -124,8 +124,12 @@ def load_data(
     if data is None or getattr(data, "close", None) is None or data.close.empty:
         raise ValueError("Loaded Yahoo data is empty or invalid.")
 
-    close = normalize_index_timezone(data.close)
-    volume = normalize_index_timezone(data.volume)
+    # The cache file spans every ticker ever downloaded, so a universe that was
+    # refreshed less recently carries a tail of empty rows. Trim dates where none
+    # of these names priced, otherwise the app offers a date range it cannot
+    # actually backtest.
+    close = normalize_index_timezone(data.close).dropna(how="all")
+    volume = normalize_index_timezone(data.volume).reindex(close.index)
 
     def _fetch_caps(mode: str) -> pd.DataFrame:
         return load_market_caps(

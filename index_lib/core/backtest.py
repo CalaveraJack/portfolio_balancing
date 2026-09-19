@@ -209,6 +209,8 @@ def build_index_series(
                 base_r = 0.0
                 w_drift = w
             else:
+                # The day's return comes only from names that actually priced,
+                # renormalized so a data gap does not dilute it towards zero.
                 w_eff = w_eff / w_eff_sum
                 base_r = float((w_eff * r_eff).sum())
 
@@ -216,14 +218,15 @@ def build_index_series(
                     short_notional = float((-w_eff[w_eff < 0.0]).sum())
                     base_r -= short_notional * float(short_borrow_cost) / 252.0
 
-                gross = 1.0 + r_eff
-                denom = 1.0 + base_r
+                # Drift every holding, including the ones that did not price.
+                # A missing price means the position is stale, not sold: it is
+                # carried forward unchanged and keeps its place in the book.
+                # Dropping it here would liquidate it for free and hand its
+                # weight to the others until the next rebalance.
+                w_drift = w * (1.0 + r.fillna(0.0).astype(float))
 
-                if denom == 0:
-                    w_drift = w_eff
-                else:
-                    w_drift = (w_eff * gross) / denom
-                    w_drift = w_drift / float(w_drift.sum())
+                drift_sum = float(w_drift.sum())
+                w_drift = w_drift / drift_sum if drift_sum != 0 else w
 
         base_ret_list.append((dt, base_r))
 
