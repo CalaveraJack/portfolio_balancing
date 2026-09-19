@@ -1,30 +1,25 @@
 """
-Cached data access and the backtest / Monte Carlo runners.
+Runs a strategy configuration against loaded data.
 
-Streamlit re-runs the script on every interaction, so anything expensive is
-cached here: the loaded panels as resources, the backtest keyed on its config.
+Deliberately free of any UI framework. The caching the Streamlit app needs lives
+in index_lib/ui/cache.py, so this module can equally be driven from a notebook,
+a script, or a different front end.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import pandas as pd
-import streamlit as st
 
 from index_lib.core import (
     apply_vol_target_overlay,
     build_index_series,
     compute_stats_from_price_series,
 )
-from index_lib.datasets import (
-    RatesInspectorData,
-    UniverseData,
-    load_data,
-    load_rates_data,
-)
+from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.loaders import build_daily_funding_series
 from index_lib.simulation import (
     build_mc_funding_fixed_last_matrix,
@@ -34,7 +29,7 @@ from index_lib.simulation import (
 from index_lib.simulation.strategy_return_bootstrap import (
     run_strategy_return_bootstrap_mc,
 )
-from index_lib.ui.strategy import (
+from index_lib.strategy import (
     MonteCarloConfig,
     OverlayConfig,
     StrategyConfig,
@@ -49,39 +44,6 @@ MC_ENGINE_LABELS = {
     "gbm": "Constituent GBM",
     "bootstrap": "Constituent Block Bootstrap",
 }
-
-
-# ---------------------------------------------------------------------------
-# Data
-# ---------------------------------------------------------------------------
-
-
-@st.cache_resource(show_spinner="Loading universe data...")
-def get_universe_data(
-    tickers: Tuple[str, ...],
-    *,
-    start: str,
-    data_dir: str,
-    cache_mode: str,
-) -> UniverseData:
-    return load_data(tickers, start=start, data_dir=data_dir, cache_mode=cache_mode)
-
-
-@st.cache_resource(show_spinner="Loading rates data...")
-def get_rates_data(
-    *,
-    start: str,
-    data_dir: str,
-    cache_mode: str,
-) -> RatesInspectorData:
-    return load_rates_data(start=start, data_dir=data_dir, cache_mode=cache_mode)
-
-
-def data_token(data: UniverseData) -> str:
-    """Cheap identity for a loaded panel, used as a cache key component."""
-    if data.close.empty:
-        return "empty"
-    return f"{data.close.shape}|{data.close.index.max()}"
 
 
 # ---------------------------------------------------------------------------
@@ -111,28 +73,21 @@ def _market_caps_for(
     return data.market_caps.reindex(columns=list(selection.constituents))
 
 
-@st.cache_data(show_spinner="Running backtest...")
 def run_backtest(
-    _data: UniverseData,
-    _rates: RatesInspectorData,
+    data: UniverseData,
+    rates: RatesInspectorData,
     cfg: StrategyConfig,
     selection: UniverseSelection,
     overlay_cfg: OverlayConfig,
-    token: str,
 ) -> BacktestResult:
-    """
-    Build the index series and, when enabled, apply the vol-target overlay.
-
-    ``_data``/``_rates`` are excluded from the cache key by Streamlit's
-    underscore convention; ``token`` stands in for them.
-    """
+    """Build the index series and, when enabled, apply the vol-target overlay."""
     index_level, weights_history, base_returns, daily_weights = build_index_series(
-        close=_data.close,
+        close=data.close,
         constituents=list(selection.constituents),
         start=cfg.start,
         end=cfg.end,
         base_level=BASE_LEVEL,
-        market_caps=_market_caps_for(_data, cfg, selection),
+        market_caps=_market_caps_for(data, cfg, selection),
         **cfg.index_kwargs(),
     )
 
@@ -140,7 +95,7 @@ def run_backtest(
 
     if not index_level.empty and overlay_cfg.enabled:
         funding_daily = build_daily_funding_series(
-            funding_df=_rates.funding,
+            funding_df=rates.funding,
             index=base_returns.index,
             borrow_spread_ann=overlay_cfg.borrow_spread_ann,
             day_count=DAY_COUNT,

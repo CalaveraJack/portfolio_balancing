@@ -7,10 +7,10 @@ from typing import Dict, List, Sequence
 import numpy as np
 import streamlit as st
 
+from index_lib import runner
 from index_lib.config import UNIVERSES
 from index_lib.datasets import RatesInspectorData, UniverseData
-from index_lib.ui import engine, figures, tables
-from index_lib.ui.strategy import (
+from index_lib.strategy import (
     COV_ESTIMATORS,
     METHODS,
     OPTIMIZER_FORMS,
@@ -23,6 +23,7 @@ from index_lib.ui.strategy import (
     method_label,
     method_uses_lookback,
 )
+from index_lib.ui import cache, figures, tables
 from index_lib.ui.theme import note, section
 
 DEFAULT_CONSTITUENT_COUNT = 6
@@ -366,7 +367,7 @@ def _mc_controls(cfg: StrategyConfig) -> MonteCarloConfig:
     )
 
 
-def _render_backtest(result: engine.BacktestResult, overlay_cfg: OverlayConfig) -> None:
+def _render_backtest(result: runner.BacktestResult, overlay_cfg: OverlayConfig) -> None:
     section("Backtest Output")
 
     stats_col, chart_col = st.columns([1, 3], gap="large")
@@ -416,8 +417,8 @@ def _render_backtest(result: engine.BacktestResult, overlay_cfg: OverlayConfig) 
 
         with right:
             annualized = result.overlay.assign(
-                cash_rate_ann=result.overlay["cash_rate"] * engine.DAY_COUNT,
-                borrow_rate_ann=result.overlay["borrow_rate"] * engine.DAY_COUNT,
+                cash_rate_ann=result.overlay["cash_rate"] * runner.DAY_COUNT,
+                borrow_rate_ann=result.overlay["borrow_rate"] * runner.DAY_COUNT,
             )
             st.plotly_chart(
                 figures.make_multi_line_fig(
@@ -437,7 +438,7 @@ def _render_mc_results(mc_cfg: MonteCarloConfig) -> None:
         st.info("Configure the simulation above, then run it.")
         return
 
-    result: engine.MonteCarloResult = stored["result"]
+    result: runner.MonteCarloResult = stored["result"]
     ran_with: MonteCarloConfig = stored["config"]
     final_values = result.final_values
 
@@ -511,8 +512,8 @@ def render(
         st.warning("Select at least one constituent.")
         return
 
-    result = engine.run_backtest(
-        data, rates, cfg, selection, overlay_cfg, engine.data_token(data)
+    result = cache.run_backtest(
+        data, rates, cfg, selection, overlay_cfg, cache.data_token(data)
     )
 
     with weights_panel:
@@ -540,7 +541,7 @@ def render(
         with st.spinner("Simulating..."):
             try:
                 st.session_state[MC_SESSION_KEY] = {
-                    "result": engine.run_monte_carlo(
+                    "result": runner.run_monte_carlo(
                         data, rates, cfg, selection, overlay_cfg, mc_cfg
                     ),
                     "config": mc_cfg,

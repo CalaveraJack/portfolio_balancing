@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from index_lib.config import DEFAULT_UNIVERSE_NAME, UNIVERSES
 from index_lib.datasets import CACHE_MODES
 from index_lib.logging_config import configure_logging
-from index_lib.ui import engine, forge, macro, universe
+from index_lib.ui import cache, forge, macro, universe
 from index_lib.ui.theme import configure_page, render_header
 
 DATA_DIR = "data"
@@ -96,13 +96,13 @@ def main() -> None:
     reset_universe_dependent_widgets(universe_name)
 
     try:
-        data = engine.get_universe_data(
+        data = cache.get_universe_data(
             tuple(UNIVERSES[universe_name]),
             start=HISTORY_START,
             data_dir=DATA_DIR,
             cache_mode=cache_mode,
         )
-        rates = engine.get_rates_data(
+        rates = cache.get_rates_data(
             start=HISTORY_START,
             data_dir=DATA_DIR,
             cache_mode=cache_mode,
