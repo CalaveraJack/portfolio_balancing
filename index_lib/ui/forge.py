@@ -87,13 +87,17 @@ def _mc_note_key(cfg: StrategyConfig) -> str:
 
 
 def _describe(saved: library.SavedStrategy) -> str:
-    """One line for the dropdown: what it is and what it carries."""
+    """
+    One line for the dropdown.
+
+    A portfolio says how many constituents it carries; a strategy says nothing
+    extra, because it carries none.
+    """
     label = f"{saved.name} — {method_label(saved.config.method)}"
+
     if saved.stocks is not None:
-        origin = universe_label(saved.stocks.universe) or saved.stocks.universe_label
-        label += f" · {len(saved.stocks)} stocks"
-        if origin:
-            label += f" from {origin}"
+        label += f" · constituents saved: {len(saved.stocks)}"
+
     return label
 
 
