@@ -22,7 +22,13 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from index_lib import __version__
 from index_lib.config import universe_label
-from index_lib.strategy import OverlayConfig, StrategyConfig, UniverseSelection
+from index_lib.strategy import (
+    CONFIG_FIELDS,
+    OVERLAY_FIELDS,
+    OverlayConfig,
+    StrategyConfig,
+    UniverseSelection,
+)
 
 SCHEMA_VERSION = 2
 
@@ -30,34 +36,6 @@ SCHEMA_VERSION = 2
 SUPPORTED_SCHEMAS = (1, 2)
 
 TEMPLATES_DIR = Path("saved_strategies") / "templates"
-
-# Values are stored the way the engine holds them, not the way the UI shows
-# them: weights and rates are fractions (0.05 = 5%). The exception is the
-# overlay borrow spread, which the funding loader expects in annual percent.
-_CONFIG_FIELDS = (
-    "method",
-    "rebalance",
-    "lookback",
-    "cov_lookback",
-    "cap",
-    "optimizer_form",
-    "min_weight",
-    "max_weight",
-    "net_exposure",
-    "max_gross_exposure",
-    "short_borrow_cost",
-    "risk_free_rate",
-    "cov_estimator",
-)
-
-_OVERLAY_FIELDS = (
-    "enabled",
-    "target_vol",
-    "vol_lookback",
-    "max_leverage",
-    "min_leverage",
-    "borrow_spread_ann",
-)
 
 
 def _resolve(directory: Optional[Path]) -> Path:
@@ -137,8 +115,8 @@ def to_dict(saved: SavedStrategy) -> Dict[str, object]:
         "app_version": saved.app_version,
         "created_at": saved.created_at,
         "updated_at": saved.updated_at,
-        "config": {f: getattr(saved.config, f) for f in _CONFIG_FIELDS},
-        "overlay": {f: getattr(saved.overlay, f) for f in _OVERLAY_FIELDS},
+        "config": {f: getattr(saved.config, f) for f in CONFIG_FIELDS},
+        "overlay": {f: getattr(saved.overlay, f) for f in OVERLAY_FIELDS},
         "stocks": None,
     }
 
@@ -163,7 +141,7 @@ def from_dict(payload: Dict[str, object]) -> SavedStrategy:
     config_fields = payload.get("config") or {}
     overlay_fields = payload.get("overlay") or {}
 
-    missing = [f for f in _CONFIG_FIELDS if f not in config_fields]
+    missing = [f for f in CONFIG_FIELDS if f not in config_fields]
     if missing:
         raise TemplateError(f"Saved file is missing settings: {', '.join(missing)}.")
 

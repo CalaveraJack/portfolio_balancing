@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import streamlit as st
 
-from index_lib import library, runner
+from index_lib import diagnostics, library, runner, runs
 from index_lib.config import universe_label, universe_tickers
 from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.strategy import (
@@ -29,6 +29,7 @@ from index_lib.ui.theme import note, section
 DEFAULT_CONSTITUENT_COUNT = 6
 
 MC_SESSION_KEY = "mc_result"
+OPEN_RUN_KEY = "_open_run"
 
 BACKTEST_ASSUMPTIONS = (
     "Backtest assumptions: trading costs, slippage, taxes, and short-borrow costs "
@@ -99,6 +100,156 @@ def _describe(saved: library.SavedStrategy) -> str:
         label += f" · constituents saved: {len(saved.stocks)}"
 
     return label
+
+
+def _runs_panel(
+    config: StrategyConfig,
+    overlay: OverlayConfig,
+    selection: UniverseSelection,
+    result: runner.BacktestResult,
+    data_mode: str,
+    data_vintage: str,
+) -> None:
+    """Record this backtest, or reopen one taken earlier."""
+    saved = runs.list_runs()
+    open_run = st.session_state.get(OPEN_RUN_KEY)
+
+    with st.expander("Saved Runs", expanded=bool(open_run)):
+        record_col, reopen_col = st.columns(2, gap="large")
+
+        with record_col:
+            st.text_input(
+                "Name this run",
+                key="run_name",
+                placeholder="e.g. Min-var through June",
+            )
+            st.caption(
+                "A run keeps the numbers as they are now, together with the "
+                "stocks, the dates and which data produced them."
+            )
+            st.button("Record this run", key="run_save", width="stretch")
+
+        with reopen_col:
+            if saved:
+                st.selectbox(
+                    "Recorded runs",
+                    key="run_selected",
+                    options=[r.run_id for r in saved],
+                    format_func=lambda rid: _describe_run(saved, rid),
+                )
+                open_btn, drop_btn = st.columns(2)
+                open_btn.button("Open", key="run_open", width="stretch")
+                drop_btn.button("Delete", key="run_delete", width="stretch")
+            else:
+                st.caption("No runs recorded yet.")
+
+    _handle_run_actions(config, overlay, selection, result, data_mode, data_vintage)
+
+
+def _describe_run(saved: Sequence[runs.RunRecord], run_id: str) -> str:
+    for record in saved:
+        if record.run_id == run_id:
+            taken = record.created_at[:16].replace("T", " ")
+            return f"{record.name} — {record.period} · taken {taken}"
+    return run_id
+
+
+def _handle_run_actions(
+    config: StrategyConfig,
+    overlay: OverlayConfig,
+    selection: UniverseSelection,
+    result: runner.BacktestResult,
+    data_mode: str,
+    data_vintage: str,
+) -> None:
+    if st.session_state.get("run_save"):
+        name = (st.session_state.get("run_name") or "").strip()
+
+        if not name:
+            session.flash("warning", "Name the run before recording it.")
+        else:
+            try:
+                runs.save_run(
+                    name,
+                    result,
+                    config,
+                    overlay,
+                    selection,
+                    data_mode=data_mode,
+                    data_vintage=data_vintage,
+                )
+                session.flash("success", f"Recorded **{name}**.")
+            except (runs.RunError, library.TemplateError) as exc:
+                session.flash("error", str(exc))
+
+        st.rerun()
+
+    if st.session_state.get("run_open"):
+        st.session_state[OPEN_RUN_KEY] = st.session_state.get("run_selected")
+        st.rerun()
+
+    if st.session_state.get("run_delete"):
+        run_id = st.session_state.get("run_selected")
+
+        if runs.delete_run(run_id):
+            session.flash("success", "Deleted that run.")
+            if st.session_state.get(OPEN_RUN_KEY) == run_id:
+                st.session_state.pop(OPEN_RUN_KEY, None)
+
+        st.session_state.pop("run_selected", None)
+        st.rerun()
+
+
+def _resolve_open_run(
+    live: runner.BacktestResult, data_vintage: str
+) -> Tuple[runner.BacktestResult, Optional[runs.RunRecord]]:
+    """
+    Decide what the page shows: the live backtest, or a recorded one.
+
+    When the prices have moved since a run was taken, the two differ and the
+    choice is the user's, so both options are offered with their consequences.
+    """
+    run_id = st.session_state.get(OPEN_RUN_KEY)
+    if not run_id:
+        return live, None
+
+    try:
+        record, stored = runs.load_run(run_id)
+    except runs.RunError as exc:
+        st.session_state.pop(OPEN_RUN_KEY, None)
+        st.error(str(exc))
+        return live, None
+
+    header, close_col = st.columns([4, 1])
+    header.info(f"Showing the recorded run **{record.name}** ({record.period}).")
+    if close_col.button("Back to live", key="run_close", width="stretch"):
+        st.session_state.pop(OPEN_RUN_KEY, None)
+        st.rerun()
+
+    if not record.is_stale(data_vintage):
+        return stored, record
+
+    st.warning(
+        "The price data has been refreshed since this run was recorded.",
+        icon="⚠️",
+    )
+    keep_col, rerun_col = st.columns(2)
+
+    keep_col.caption(
+        "**Keeping it** leaves the numbers exactly as recorded, so it stays "
+        "comparable with other runs of the same vintage. They may rest on data "
+        "that has since been corrected, and they stop at the older end date."
+    )
+    rerun_col.caption(
+        "**Re-running** picks up corrections and any history added since. The "
+        "figures will move, so anything you concluded from this run may change."
+    )
+
+    if rerun_col.button("Re-run on current data", key="run_rerun", width="stretch"):
+        st.session_state.pop(OPEN_RUN_KEY, None)
+        st.rerun()
+
+    return stored, record
 
 
 def _library_panel(
@@ -665,8 +816,102 @@ def _render_mc_results(mc_cfg: MonteCarloConfig) -> None:
         st.caption("Settings changed since this run. Re-run to refresh the results.")
 
 
+def _render_diagnostics(result: runner.BacktestResult) -> None:
+    """Is it concentrated, is it shorting, is exposure stable, what hurt it."""
+    section("Diagnostics")
+
+    summary = diagnostics.summary(result.daily_weights, result.index_level)
+    if not summary:
+        note("No weights to inspect.")
+        return
+
+    headline, charts = st.columns([1, 3], gap="large")
+
+    with headline:
+        st.dataframe(
+            tables.diagnostics_frame(summary), hide_index=True, width="stretch"
+        )
+
+    with charts:
+        exposure_tab, concentration_tab, turnover_tab, drawdown_tab = st.tabs(
+            ["Exposure", "Concentration", "Turnover", "Drawdowns"]
+        )
+
+        with exposure_tab:
+            st.plotly_chart(
+                figures.make_multi_line_fig(
+                    "Exposure",
+                    diagnostics.exposure_history(result.daily_weights),
+                    ["net", "gross", "long", "short"],
+                    "Weight",
+                ),
+                width="stretch",
+            )
+
+        with concentration_tab:
+            st.plotly_chart(
+                figures.make_multi_line_fig(
+                    "Concentration",
+                    diagnostics.concentration_history(result.daily_weights),
+                    ["top_5", "hhi"],
+                    "Share of book",
+                ),
+                width="stretch",
+            )
+            note(
+                "top_5 is the weight in the five largest positions; hhi is the "
+                "Herfindahl index, whose reciprocal is the effective number of "
+                "equally weighted holdings."
+            )
+
+        with turnover_tab:
+            st.plotly_chart(
+                figures.make_line_fig(
+                    "One-way turnover",
+                    diagnostics.turnover_history(result.daily_weights),
+                    "Fraction traded",
+                ),
+                width="stretch",
+            )
+
+        with drawdown_tab:
+            st.plotly_chart(
+                figures.make_line_fig(
+                    "Drawdown",
+                    diagnostics.drawdown_series(result.index_level),
+                    "Drawdown",
+                ),
+                width="stretch",
+            )
+            st.dataframe(
+                tables.drawdown_periods_frame(
+                    diagnostics.drawdown_periods(result.index_level)
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+
+    if not result.optimizer.empty:
+        section("What the optimizer did")
+        note(
+            "Reported by the solver at each rebalance: the return and volatility "
+            "it expected from the weights it chose, and whether it solved at all. "
+            "Expected figures come from the estimates it optimized against, not "
+            "from what was realized."
+        )
+        st.dataframe(
+            tables.optimizer_frame(result.optimizer),
+            hide_index=True,
+            width="stretch",
+            height=320,
+        )
+
+
 def render(
-    data: UniverseData, rates: RatesInspectorData, universe_key: str = ""
+    data: UniverseData,
+    rates: RatesInspectorData,
+    universe_key: str = "",
+    data_mode: str = "",
 ) -> None:
     st.subheader("Strategy Builder")
 
@@ -678,6 +923,7 @@ def render(
     # The library sits at the top of the tab but needs the settings and stocks
     # that the controls below produce, so its place is reserved and filled last.
     library_slot = st.container()
+    runs_slot = st.container()
 
     controls, weights_panel = st.columns([3, 1], gap="large")
 
@@ -693,9 +939,13 @@ def render(
         st.warning("Select at least one constituent.")
         return
 
-    result = cache.run_backtest(
+    live = cache.run_backtest(
         data, rates, cfg, selection, overlay_cfg, cache.data_token(data)
     )
+
+    with runs_slot:
+        _runs_panel(cfg, overlay_cfg, selection, live, data_mode, data.vintage)
+        result, opened = _resolve_open_run(live, data.vintage)
 
     with weights_panel:
         section("Latest Weights")
@@ -713,6 +963,17 @@ def render(
     _render_backtest(result, overlay_cfg)
 
     st.divider()
+    _render_diagnostics(result)
+
+    st.divider()
+
+    if opened is not None:
+        note(
+            "Monte Carlo runs against the live settings, not a recorded run. "
+            "Close the run above to simulate."
+        )
+        return
+
     section("Monte Carlo Simulation")
 
     mc_cfg = _mc_controls(cfg)

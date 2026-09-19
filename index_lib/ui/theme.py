@@ -4,6 +4,7 @@ Page chrome: Streamlit page config, the dark stylesheet, and the Plotly template
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import plotly.graph_objects as go
@@ -108,5 +109,11 @@ def section(title: str) -> None:
 
 
 def note(text: str) -> None:
-    """Muted explanatory copy."""
-    st.markdown(f'<div class="note">{text}</div>', unsafe_allow_html=True)
+    """
+    Muted explanatory copy.
+
+    Streamlit does not parse Markdown inside a raw HTML block, so emphasis is
+    converted here; otherwise the asterisks show up verbatim.
+    """
+    html = re.sub(r"\*\*(.+?)\*\*", lambda m: f"<strong>{m.group(1)}</strong>", text)
+    st.markdown(f'<div class="note">{html}</div>', unsafe_allow_html=True)

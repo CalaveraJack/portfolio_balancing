@@ -158,3 +158,37 @@ def resolve_universe_key(
                 return universe.key
 
     return None
+
+
+# Things worth comparing a strategy against. Grouped for the picker; the flat
+# tuple is what gets loaded. These are not a stock set: they are never used to
+# build a strategy, only to measure one.
+BENCHMARKS: Dict[str, Tuple[str, ...]] = {
+    "Broad market": ("SPY", "QQQ", "IWM", "ACWI"),
+    "Sectors": (
+        "XLK",
+        "XLV",
+        "XLF",
+        "XLY",
+        "XLP",
+        "XLE",
+        "XLI",
+        "XLB",
+        "XLU",
+        "XLRE",
+        "XLC",
+    ),
+    "Factor & style": ("MTUM", "QUAL", "USMV", "VLUE", "SIZE"),
+    "Other assets": ("TLT", "IEF", "GLD", "DBC"),
+}
+
+BENCHMARK_TICKERS: Tuple[str, ...] = tuple(
+    ticker for group in BENCHMARKS.values() for ticker in group
+)
+
+
+def benchmark_group(ticker: str) -> str:
+    for name, tickers in BENCHMARKS.items():
+        if ticker in tickers:
+            return name
+    return ""

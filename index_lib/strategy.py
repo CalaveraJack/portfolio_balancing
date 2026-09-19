@@ -47,6 +47,35 @@ METHODS: Dict[str, str] = {
 
 DEFAULT_METHOD = "equal"
 
+# The settings that get written when a strategy or a run is saved. Stored the
+# way the engine holds them, not the way the controls show them: weights and
+# rates are fractions (0.05 = 5%). The exception is the overlay borrow spread,
+# which the funding loader expects in annual percent.
+CONFIG_FIELDS = (
+    "method",
+    "rebalance",
+    "lookback",
+    "cov_lookback",
+    "cap",
+    "optimizer_form",
+    "min_weight",
+    "max_weight",
+    "net_exposure",
+    "max_gross_exposure",
+    "short_borrow_cost",
+    "risk_free_rate",
+    "cov_estimator",
+)
+
+OVERLAY_FIELDS = (
+    "enabled",
+    "target_vol",
+    "vol_lookback",
+    "max_leverage",
+    "min_leverage",
+    "borrow_spread_ann",
+)
+
 
 def method_label(method: str) -> str:
     return METHODS.get(method, method)

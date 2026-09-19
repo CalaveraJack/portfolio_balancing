@@ -22,6 +22,33 @@ OPTIMIZER_METHODS = {
     "max_diversification",
 }
 
+# What the optimizer reports about each solve. The full payload also carries the
+# covariance matrix and the expected-return vector, which are far too large to
+# keep for every rebalance; these are the scalars worth recording.
+OPTIMIZER_DIAGNOSTIC_FIELDS = (
+    "success",
+    "message",
+    "solution_return",
+    "solution_return_after_short_cost",
+    "solution_vol",
+    "solution_sharpe",
+    "objective_value",
+    "net_exposure",
+    "gross_exposure",
+    "short_notional",
+    "construction_weight_cap",
+    "method_max_weight",
+    "effective_max_weight",
+)
+
+
+def _blank_diagnostics(message: str) -> Dict[str, object]:
+    """A diagnostics row for a rebalance where the optimizer never ran."""
+    row: Dict[str, object] = dict.fromkeys(OPTIMIZER_DIAGNOSTIC_FIELDS)
+    row["success"] = False
+    row["message"] = message
+    return row
+
 
 def _equal_weights(columns: pd.Index) -> pd.Series:
     if len(columns) == 0:
@@ -102,6 +129,7 @@ def build_index_series(
             pd.DataFrame(),
             pd.Series(dtype=float),
             pd.DataFrame(),
+            pd.DataFrame(),
         )
 
     rets = px.pct_change()
@@ -109,6 +137,7 @@ def build_index_series(
 
     weights_hist: Dict[pd.Timestamp, pd.Series] = {}
     daily_weights_records: List[Tuple[pd.Timestamp, pd.Series]] = []
+    optimizer_records: Dict[pd.Timestamp, Dict[str, object]] = {}
 
     caps_series_init = None
 
@@ -170,27 +199,38 @@ def build_index_series(
                     if len(available_dates) > 0:
                         caps_series = market_caps.loc[available_dates[-1]]
 
+            weight_kwargs = dict(
+                lookback=lookback,
+                cap=cap,
+                market_caps=caps_series,
+                optimizer_form=optimizer_form,
+                min_weight=min_weight,
+                max_weight=max_weight,
+                net_exposure=net_exposure,
+                max_gross_exposure=max_gross_exposure,
+                short_borrow_cost=short_borrow_cost,
+                risk_free_rate=risk_free_rate,
+                cov_estimator=cov_estimator,
+            )
+
             if method in OPTIMIZER_METHODS and not _has_sufficient_history(
                 hist,
                 min_obs=max(20, min(int(lookback), 60)),
             ):
                 w = _equal_weights(hist.columns)
-            else:
-                w = compute_weights(
-                    hist,
-                    method,
-                    lookback=lookback,
-                    cap=cap,
-                    market_caps=caps_series,
-                    optimizer_form=optimizer_form,
-                    min_weight=min_weight,
-                    max_weight=max_weight,
-                    net_exposure=net_exposure,
-                    max_gross_exposure=max_gross_exposure,
-                    short_borrow_cost=short_borrow_cost,
-                    risk_free_rate=risk_free_rate,
-                    cov_estimator=cov_estimator,
+                optimizer_records[dt] = _blank_diagnostics(
+                    "not enough history yet; fell back to equal weight"
                 )
+            elif method in OPTIMIZER_METHODS:
+                w, solver_report = compute_weights(
+                    hist, method, return_diagnostics=True, **weight_kwargs
+                )
+                optimizer_records[dt] = {
+                    field: solver_report.get(field)
+                    for field in OPTIMIZER_DIAGNOSTIC_FIELDS
+                }
+            else:
+                w = compute_weights(hist, method, **weight_kwargs)
 
             weights_hist[dt] = w
 
@@ -242,6 +282,11 @@ def build_index_series(
     )
     daily_weights.index.name = "date"
 
+    optimizer_diagnostics = pd.DataFrame.from_dict(optimizer_records, orient="index")
+    if not optimizer_diagnostics.empty:
+        optimizer_diagnostics = optimizer_diagnostics.sort_index()
+        optimizer_diagnostics.index.name = "rebalance_date"
+
     index_level = pd.Series(
         [v for _, v in levels],
         index=[d for d, _ in levels],
@@ -257,4 +302,10 @@ def build_index_series(
         name="base_return",
     )
 
-    return index_level, weights_history, base_returns, daily_weights
+    return (
+        index_level,
+        weights_history,
+        base_returns,
+        daily_weights,
+        optimizer_diagnostics,
+    )

@@ -30,6 +30,18 @@ class UniverseData:
     volume: pd.DataFrame
     market_caps: pd.DataFrame
 
+    @property
+    def vintage(self) -> str:
+        """
+        Cheap marker for which data this is.
+
+        Used to key caches, and to tell whether the prices underneath a saved
+        run have moved since it was recorded.
+        """
+        if self.close.empty:
+            return "empty"
+        return f"{self.close.shape}|{self.close.index.max()}"
+
 
 @dataclass(frozen=True)
 class RatesInspectorData:

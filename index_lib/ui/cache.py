@@ -46,15 +46,12 @@ def get_rates_data(
 
 def data_token(data: UniverseData) -> str:
     """
-    Cheap identity for a loaded panel.
+    Cache-key stand-in for the loaded panels.
 
-    The panels are passed to the cached backtest under leading-underscore names,
-    which Streamlit leaves out of the cache key, so this stands in for them and
-    makes the cache notice when the data underneath has changed.
+    They are passed to the cached backtest under leading-underscore names, which
+    Streamlit leaves out of the key, so their vintage stands in for them.
     """
-    if data.close.empty:
-        return "empty"
-    return f"{data.close.shape}|{data.close.index.max()}"
+    return data.vintage
 
 
 @st.cache_data(show_spinner="Running backtest...")
@@ -67,3 +64,20 @@ def run_backtest(
     token: str,
 ) -> runner.BacktestResult:
     return runner.run_backtest(_data, _rates, cfg, selection, overlay_cfg)
+
+
+@st.cache_resource(show_spinner="Loading benchmarks...")
+def get_benchmark_data(
+    tickers: Tuple[str, ...],
+    *,
+    start: str,
+    data_dir: str,
+    cache_mode: str,
+) -> UniverseData:
+    """
+    Benchmarks load exactly like a stock set, because that is all they are.
+
+    Kept separate so choosing a benchmark never disturbs the panel the strategy
+    is built on.
+    """
+    return load_data(tickers, start=start, data_dir=data_dir, cache_mode=cache_mode)

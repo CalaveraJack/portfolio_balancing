@@ -47,10 +47,10 @@ def test_round_trip_preserves_every_setting(tmp_path):
     library.save_template("Min-var L/S", config, overlay, directory=tmp_path)
     loaded = library.load_template("Min-var L/S", directory=tmp_path)
 
-    for field in library._CONFIG_FIELDS:
+    for field in library.CONFIG_FIELDS:
         assert getattr(loaded.config, field) == getattr(config, field), field
 
-    for field in library._OVERLAY_FIELDS:
+    for field in library.OVERLAY_FIELDS:
         assert getattr(loaded.overlay, field) == getattr(overlay, field), field
 
 

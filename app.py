@@ -19,7 +19,7 @@ from index_lib.config import (
 )
 from index_lib.datasets import CACHE_MODES
 from index_lib.logging_config import configure_logging
-from index_lib.ui import cache, forge, macro, session, universe
+from index_lib.ui import cache, comparison, forge, macro, session, universe
 from index_lib.ui.theme import configure_page, render_header
 
 DATA_DIR = "data"
@@ -98,8 +98,8 @@ def main() -> None:
         st.error(f"Could not load data: {exc}")
         st.stop()
 
-    macro_tab, universe_tab, forge_tab = st.tabs(
-        ["Macro & Funding", "Universe Diagnostics", "Strategy Forge"]
+    macro_tab, universe_tab, forge_tab, compare_tab = st.tabs(
+        ["Macro & Funding", "Universe Diagnostics", "Strategy Forge", "Compare"]
     )
 
     with macro_tab:
@@ -109,7 +109,16 @@ def main() -> None:
         universe.render(data)
 
     with forge_tab:
-        forge.render(data, rates, universe_key)
+        forge.render(data, rates, universe_key, cache_mode)
+
+    with compare_tab:
+        comparison.render(
+            data,
+            universe_key=universe_key,
+            cache_mode=cache_mode,
+            history_start=HISTORY_START,
+            data_dir=DATA_DIR,
+        )
 
 
 main()

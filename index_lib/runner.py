@@ -8,7 +8,7 @@ a script, or a different front end.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -59,6 +59,8 @@ class BacktestResult:
     base_returns: pd.Series
     overlay: Optional[pd.DataFrame]
     stats: dict
+    #: One row per rebalance when an optimizer ran; empty otherwise.
+    optimizer: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     @property
     def is_empty(self) -> bool:
@@ -81,7 +83,13 @@ def run_backtest(
     overlay_cfg: OverlayConfig,
 ) -> BacktestResult:
     """Build the index series and, when enabled, apply the vol-target overlay."""
-    index_level, weights_history, base_returns, daily_weights = build_index_series(
+    (
+        index_level,
+        weights_history,
+        base_returns,
+        daily_weights,
+        optimizer_diagnostics,
+    ) = build_index_series(
         close=data.close,
         constituents=list(selection.constituents),
         start=cfg.start,
@@ -121,6 +129,7 @@ def run_backtest(
         base_returns=base_returns,
         overlay=overlay_df,
         stats=compute_stats_from_price_series(index_level),
+        optimizer=optimizer_diagnostics,
     )
 
 
@@ -209,7 +218,7 @@ def run_monte_carlo(
     if cfg.is_optimizer:
         # Bootstrap the realized strategy returns rather than pretending we
         # re-optimize on every simulated constituent path.
-        _, _, base_returns, _ = build_index_series(
+        _, _, base_returns, _, _ = build_index_series(
             close=data.close,
             constituents=list(selection.constituents),
             start=cfg.start,

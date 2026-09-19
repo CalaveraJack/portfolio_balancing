@@ -50,7 +50,7 @@ def _run(close: pd.DataFrame):
 def test_gap_does_not_zero_the_weight():
     close, gap_day = _panel_with_gap()
 
-    _, _, _, daily_weights = _run(close)
+    _, _, _, daily_weights, _ = _run(close)
     after_gap = daily_weights.loc[gap_day:, "BBB"]
 
     assert (after_gap > 0).all(), "BBB was liquidated by a one-day price gap"
@@ -59,7 +59,7 @@ def test_gap_does_not_zero_the_weight():
 def test_gap_does_not_hand_weight_to_the_others():
     close, gap_day = _panel_with_gap()
 
-    _, _, _, daily_weights = _run(close)
+    _, _, _, daily_weights, _ = _run(close)
     row = daily_weights.loc[gap_day]
 
     assert row.sum() == pytest.approx(1.0)
@@ -72,7 +72,7 @@ def test_gap_does_not_hand_weight_to_the_others():
 def test_complete_data_is_unaffected():
     close = _panel()
 
-    level, _, _, daily_weights = _run(close)
+    level, _, _, daily_weights, _ = _run(close)
 
     assert daily_weights.notna().all().all()
     assert daily_weights.iloc[-1].sum() == pytest.approx(1.0)

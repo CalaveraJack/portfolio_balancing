@@ -174,3 +174,102 @@ def rates_summary_frame(
     rows += [(label, _rate_pct(curve_row.get(col))) for col, label in CURVE_TENORS]
 
     return _metric_frame(rows)
+
+
+DIAGNOSTIC_ROWS = (
+    ("avg_net_exposure", "Avg net exposure", fmt_pct),
+    ("avg_gross_exposure", "Avg gross exposure", fmt_pct),
+    ("max_gross_exposure", "Peak gross exposure", fmt_pct),
+    ("avg_short_notional", "Avg short notional", fmt_pct),
+    ("avg_top_5", "Avg top-5 weight", fmt_pct),
+    ("avg_effective_names", "Avg effective names", fmt_num),
+    ("annual_turnover", "Turnover p.a. (one-way)", fmt_pct),
+    ("max_daily_turnover", "Busiest day", fmt_pct),
+)
+
+
+def diagnostics_frame(summary: Dict[str, object]) -> pd.DataFrame:
+    """Headline diagnostics for a finished run."""
+    if not summary:
+        return _metric_frame([])
+
+    rows: List[Tuple[str, str]] = [
+        ("Shorting", "yes" if summary.get("is_shorting") else "no"),
+    ]
+    rows += [
+        (label, formatter(summary.get(key)))
+        for key, label, formatter in DIAGNOSTIC_ROWS
+    ]
+    rows.append(("Drawdown episodes", str(summary.get("n_drawdowns", "-"))))
+
+    return _metric_frame(rows)
+
+
+def drawdown_periods_frame(periods: pd.DataFrame) -> pd.DataFrame:
+    """The deepest drawdowns, formatted for display."""
+    if periods is None or periods.empty:
+        return pd.DataFrame(columns=["Start", "Trough", "Recovered", "Depth", "Days"])
+
+    return pd.DataFrame(
+        {
+            "Start": periods["start"].astype(str),
+            "Trough": periods["trough"].astype(str),
+            "Recovered": [
+                str(end) if recovered else "ongoing"
+                for end, recovered in zip(periods["end"], periods["recovered"])
+            ],
+            "Depth": [fmt_pct(d) for d in periods["depth"]],
+            "Days": periods["days"],
+        }
+    )
+
+
+def optimizer_frame(diagnostics: pd.DataFrame) -> pd.DataFrame:
+    """What the optimizer reported at each rebalance."""
+    if diagnostics is None or diagnostics.empty:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(index=diagnostics.index)
+    out["Solved"] = diagnostics.get("success", pd.Series(dtype=object)).map(
+        lambda ok: "yes" if ok else "no"
+    )
+    out["Exp. return"] = diagnostics.get("solution_return").map(fmt_pct)
+    out["Exp. vol"] = diagnostics.get("solution_vol").map(fmt_pct)
+    out["Exp. Sharpe"] = diagnostics.get("solution_sharpe").map(fmt_num)
+    out["Gross"] = diagnostics.get("gross_exposure").map(fmt_pct)
+    out["Max weight"] = diagnostics.get("effective_max_weight").map(fmt_pct)
+    out["Note"] = diagnostics.get("message", pd.Series(dtype=object)).fillna("")
+
+    out.index = [str(d.date()) if hasattr(d, "date") else str(d) for d in out.index]
+    out.index.name = "Rebalance"
+
+    return out.reset_index()
+
+
+COMPARISON_FORMATS = {
+    "Total return": fmt_pct,
+    "CAGR": fmt_pct,
+    "Ann. vol": fmt_pct,
+    "Sharpe": fmt_num,
+    "Max drawdown": fmt_pct,
+    "Hit rate": fmt_pct,
+}
+
+
+def comparison_stats_frame(stats: pd.DataFrame) -> pd.DataFrame:
+    """Format the comparison table for display, leaving the numbers intact."""
+    if stats is None or stats.empty:
+        return pd.DataFrame()
+
+    out = stats.copy()
+    for column, formatter in COMPARISON_FORMATS.items():
+        if column in out.columns:
+            out[column] = out[column].map(formatter)
+
+    return out
+
+
+def correlation_frame(matrix: pd.DataFrame) -> pd.DataFrame:
+    if matrix is None or matrix.empty:
+        return pd.DataFrame()
+    return matrix.round(2)

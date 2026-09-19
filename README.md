@@ -1,342 +1,295 @@
 # Strategy Forge
 
-A Streamlit-based research prototype for **strategy construction, passive index logic, PM-classic portfolio methods, funding-aware overlays, and forward simulation**.
+A Streamlit research terminal for building systematic equity strategies, saving
+them, re-running them, comparing them, and working out why they behaved the way
+they did.
 
-The current version supports universe inspection, strategy construction, local data caching, cap-weighted balancing, PM-classic optimizers, funding-aware volatility targeting, and method-aware Monte Carlo simulation.
+It covers passive construction rules and the PM classics, funding-aware
+volatility targeting, forward simulation, and a persistence layer that separates
+the logic of a strategy from any one execution of it.
 
-Repository: https://github.com/CalaveraJack/portfolio_balancing
+Repository: <https://github.com/CalaveraJack/portfolio_balancing>
 
 ---
 
-# 🚀 Quick Start
+## 🚀 Quick start
 
-## 1) FRED API setup (Rates module)
+### 1) FRED API key
 
-The **Rates Inspector** and **funding-aware overlay** require data from FRED.
+The rates data and the funding-aware overlay come from FRED.
 
-### Get API key
-- https://fred.stlouisfed.org/
-- Create account
-- Generate key
+- Create an account at <https://fred.stlouisfed.org/> and generate a key
+- Put it in a `.env` file:
 
-### Create `.env`
 ```bash
 FRED_API_KEY=your_api_key_here
 ```
 
-⚠️ **Security**
-- `.env` is ignored via `.gitignore`
-- Never commit API keys
-- Treat it like a password
+`.env` is gitignored. Treat the key like a password and never commit it.
 
----
-
-## 2) Install
+### 2) Install
 
 ```bash
 uv venv
 uv sync
 ```
 
----
-
-## 3) Run
+### 3) Run
 
 ```bash
 uv run streamlit run app.py
 ```
 
-Open the URL Streamlit prints (by default http://localhost:8501).
+Open the URL Streamlit prints (by default <http://localhost:8501>).
 
 ### Data mode
 
-The data mode is a sidebar control rather than a command-line flag:
+A sidebar control, not a command-line flag:
 
-- `refresh` — fetch fresh Yahoo/FRED data, update the local cache, and fail
-  loudly if an API is unavailable (the error tells you when a usable cache exists)
-- `cache` — never call external APIs, read the local cache only
-- `auto` — fetch fresh data first, fall back to the cache if the fresh load fails
+| Mode | Behaviour |
+| --- | --- |
+| `refresh` | Fetch fresh data, update the cache, fail loudly on API errors. The error says when a usable cache exists. |
+| `cache` | Never call external APIs; read the local cache only. |
+| `auto` | Fetch fresh data, fall back to the cache if that fails. |
 
-**Reload data** in the sidebar clears the caches and reloads under the selected mode.
-
----
-
-# 🧭 What the App Does
-
-The application consists of four tightly connected layers:
-
-1. **Rates Inspector** — macro + funding layer  
-2. **Universe Inspector** — single-asset diagnostics  
-3. **Strategy Forge** — passive and PM-classic strategy construction  
-4. **Monte Carlo Engine** — method-aware forward simulation  
+**Reload data** clears the caches and reloads under the selected mode.
 
 ---
 
-# 📊 Rates Inspector
+## 🧭 The four tabs
 
-![Rates Inspector](docs/screenshots/rates_inspector.png)
+| Tab | What it is for |
+| --- | --- |
+| **Macro & Funding** | SOFR history, the USD Treasury curve, curve snapshots and spreads |
+| **Universe Diagnostics** | One stock at a time: price, return distribution, drawdown, statistics |
+| **Strategy Forge** | Build, save, backtest, diagnose and simulate a strategy |
+| **Compare** | Recorded runs, single stocks and benchmarks side by side |
 
-## Functionality
+![Macro & Funding](docs/screenshots/macro_funding.png)
 
-- SOFR funding rate history  
-- Full US Treasury curve (1M → 30Y)  
-- Curve snapshots  
-- Curve spread analysis  
+![Universe Diagnostics](docs/screenshots/universe_diagnostics.png)
 
-## Analytical use cases
+### Stock sets
 
-- Monetary policy regime detection  
-- Curve inversion / steepening  
-- Funding environment analysis  
-- Macro overlay intuition  
+The sidebar picks which stocks are loaded. Three ship with the app:
 
----
+| Set | Names |
+| --- | --- |
+| Pharma & Healthcare | 45 |
+| Mega-cap Core | 10 |
+| Diversified + ETFs | 21 |
 
-## ⚠️ Integration into Strategy Mechanics
+Switching reloads the data and clears selections made against the previous set,
+since they are not valid against the new one.
 
-Rates are directly integrated into strategy mechanics.
-
-### Historical backtests
-- Cash sleeve earns SOFR  
-- Leveraged sleeve pays SOFR + user-defined borrow spread  
-
-### Monte Carlo simulation
-- Same funding logic applied per simulated path  
-- Optional stochastic funding-rate generation  
+Stock sets are identified internally by a stable key, never by the name on
+screen, so a label can be reworded without orphaning anything saved against it.
+Definitions live in `index_lib/config/universes.py`.
 
 ---
 
-# 📈 Universe Inspector
+## 🧩 Building a strategy
 
-![Universe Inspector](docs/screenshots/universe_inspector.png)
+![Strategy Forge](docs/screenshots/strategy_forge.png)
 
-## Features
+### Construction methods
 
-- Price time series  
-- Return distribution  
-- Drawdown profile  
-- Performance statistics  
+#### Passive rules
 
-## Statistics computed
+- Equal Weight
+- Cap Weight
+- Price Weight
+- Inverse Volatility
 
-- Total return  
-- CAGR  
-- Annualized volatility  
-- Sharpe ratio  
-- Max drawdown  
+#### PM classics
 
----
+- Minimum Variance
+- Risk Parity / ERC
+- Maximum Sharpe
+- Maximum Diversification
 
-# 🧩 Strategy Forge
+Optimizers run **long-only or long/short**. Long/short exposes net exposure,
+maximum gross exposure and a short-borrow cost. Note that a book with net and
+gross exposure both at 100% cannot short at all: shorting requires gross above
+net.
 
-![Vol Off](docs/screenshots/index_composer_vol_off.png)  
-![Vol On](docs/screenshots/index_composer_vol_on.png)
+Covariance estimators: **sample**, **EWMA**, **Ledoit-Wolf**, **OAS**.
 
-## Core functionality
+### Rebalancing and constraints
 
-### Strategy construction
-- Multi-asset selection  
-- Passive construction methods  
-- PM-classic optimizer methods  
-- Periodic rebalancing  
-- Daily weight drift  
-- Weight caps  
-- Funding-aware overlays  
+Rebalance daily, weekly, monthly or quarterly. Weights drift between rebalances.
 
-### Passive methods
-- Equal Weight  
-- Price Weight  
-- Inverse Volatility  
-- Cap Weight  
+Constraints available: a construction-level weight cap with automatic
+redistribution, a per-method maximum weight, a minimum weight, and the
+exposure limits above. Where the construction cap and the method maximum
+disagree, the stricter of the two binds.
 
-### PM Classics
-Available now:
-- Minimum Variance  
-- Risk Parity / ERC  
-- Maximum Sharpe  
-- Maximum Diversification  
+Not yet available: per-name short-side caps.
 
-Current implementation status:
-- Both **long-only** and **long/short** optimizer forms are available.  
-- Long/short exposes net exposure, maximum gross exposure, and a short-borrow-cost input.  
-- Covariance estimators: **sample**, **EWMA**, **Ledoit-Wolf**, and **OAS**. Eigenvalue-based cleaning is still planned.  
+### Funding-aware volatility targeting
 
-### Rebalancing
-- Daily  
-- Weekly  
-- Monthly  
-- Quarterly  
+An optional overlay that scales the whole strategy return stream without
+touching the construction weights:
 
-### Constraints
-Available now:
-- Weight caps  
-- Automatic redistribution  
-- Long-only and long/short optimizer constraints for PM Classics  
-- Net exposure targets and gross exposure limits (long/short form)  
-- Short-borrow-cost input (long/short form)  
+- λ < 1 — the uninvested part earns the cash rate
+- λ > 1 — the borrowed part pays SOFR plus your borrow spread
 
-Not available yet:
-- Per-name short-side position caps  
+You set the target volatility, the volatility lookback, minimum and maximum
+leverage, and the borrow spread.
 
 ---
 
-## 💰 Funding-aware Volatility Targeting
+## 💾 Saving your work
 
-When enabled, the overlay scales the full strategy return stream.
+Three different things can be kept, and the difference between them is the point.
 
-### Mechanics
+### Strategy
 
-- λ < 1 → residual capital earns cash carry  
-- λ > 1 → leveraged capital pays funding cost  
+Construction logic only — method, rebalance, constraints, covariance estimator,
+overlay settings. It carries **no stocks and no dates**, so the same logic can be
+re-run on any stock set over any period.
 
-### User input
-- Target volatility  
-- Volatility lookback  
-- Minimum leverage  
-- Maximum leverage  
-- Borrow spread  
+### Portfolio
 
-The volatility-targeting overlay does not change the underlying construction weights. It scales the strategy exposure after the base strategy return has been generated.
+The same logic **plus the stocks you picked**. Reopening one restores the stock
+set as well, switching the sidebar if needed.
 
----
+Saving with or without the stocks is a toggle beside the Save button, and the
+button says which one you are about to do. A portfolio naming a stock that has
+since left the data loads the rest and tells you which one it dropped.
 
-# ⚖️ Visual Inspection
+### Run
 
-![Weights](docs/screenshots/weight_inspector.png)
+One historical execution: the logic, the stocks, the dates, **the results**, and
+which data produced them. A run is a record rather than a definition — it is
+never edited, and reopening it shows the numbers exactly as they were.
 
-## Purpose
+If the price data has been refreshed since a run was recorded, the app says so
+and offers a choice with the cost of each stated:
 
-Explicit validation of strategy mechanics:
+- **Re-run** picks up corrections and any history added since, but the figures
+  move, so anything you concluded from that run may change.
+- **Keep it** preserves the record and keeps it comparable with other runs of the
+  same vintage, but it may rest on data that has since been corrected and it
+  stops at the older end date.
 
-- Rebalance correctness  
-- Daily drift  
-- Cap enforcement  
-- Method consistency  
-- Latest weights  
-- Historical weight evolution  
-
-Current visual inspection starts with weight history. Planned extensions include cap-weight diagnostics, covariance inspection, risk contributions, optimizer diagnostics, and rebalance-date-specific PM-classic visuals.
-
----
-
-# 🎲 Monte Carlo Simulation
-
-![MC](docs/screenshots/mc_simulation.png)
-
-## Purpose
-
-Forward simulation with method-aware strategy mechanics.
+Everything is written under `saved_strategies/` as JSON and parquet, on your
+machine only — the folder is gitignored.
 
 ---
 
-## What is simulated
+## 🔬 Diagnostics
 
-- Asset returns  
-- Rebalancing  
-- Weight drift  
-- Volatility targeting  
-- Funding overlay  
+Alongside the performance statistics, every backtest reports:
 
----
+- **Exposure** — net, gross, long and short over time. Net and gross coincide for
+  a long-only book and separate as soon as it shorts.
+- **Concentration** — weight in the top five positions, the Herfindahl index, and
+  the effective number of equally weighted holdings (its reciprocal).
+- **Turnover** — one-way, halved because every sale funds a purchase.
+- **Drawdowns** — the deepest episodes with start, trough, recovery and depth.
+- **What the optimizer did** — for the PM classics, what the solver reported at
+  each rebalance: the return and volatility it expected from the weights it
+  chose, its gross exposure, the maximum weight that bound, and whether it solved
+  at all.
 
-## Engines
+Those expected figures come from the estimates the optimizer worked with, not
+from what was realized. They say what it was aiming at, not what it achieved.
 
-Monte Carlo engines are selected by construction method.
-
-### Passive/simple methods
-
-For Equal Weight, Price Weight, and Inverse Volatility:
-
-- Constituent Block Bootstrap  
-- Correlated GBM  
-
-### Cap Weight
-
-For Cap Weight:
-
-- Constituent Block Bootstrap with historical market-cap states  
-
-GBM is disabled for cap-weighting because the current GBM engine does not simulate shares outstanding, market-cap paths, corporate actions, or cap-rank dynamics.
-
-In bootstrap mode, cap-weight simulation samples historical constituent-return rows and uses aligned historical market-cap rows at simulated rebalance dates. This keeps the cap-weight state tied to historically observed market structure rather than using a static latest-cap vector.
-
-### PM Classics
-
-For PM-classic optimizers:
-
-- Strategy Return Bootstrap  
-
-PM-classic strategies currently bootstrap the realized strategy return stream after historical construction. Constituent-path re-optimization inside each simulation is not implemented yet.
+![Diagnostics](docs/screenshots/strategy_diagnostics.png)
 
 ---
 
-# 💸 Funding Modelling
+## ⚖️ Comparison
 
-Two independent stochastic layers:
+A benchmark is a role, not a type. A recorded run, a single stock and an index
+ETF are all a named series of levels, so any of them can sit on either side of a
+comparison.
 
-## Asset process
-- Constituent block bootstrap  
-- Correlated GBM  
-- Strategy return bootstrap for PM Classics  
+Align over the **shared period**, which is like for like, or **since each start**,
+which shows full track records but over different market environments.
 
-## Funding process
-- Fixed to latest observed SOFR  
-- OU-inspired mean-reverting process  
-- Bootstrap  
+Outputs: rebased growth, drawdowns, a performance table (CAGR, volatility,
+Sharpe, maximum drawdown, hit rate), relative performance against a baseline you
+choose, and the correlation of daily returns.
 
----
+The built-in benchmarks:
 
-## OU-Inspired Model
+| Group | Tickers |
+| --- | --- |
+| Broad market | SPY, QQQ, IWM, ACWI |
+| Sectors | XLK, XLV, XLF, XLY, XLP, XLE, XLI, XLB, XLU, XLRE, XLC |
+| Factor & style | MTUM, QUAL, USMV, VLUE, SIZE |
+| Other assets | TLT, IEF, GLD, DBC |
 
-Mean-reverting short-rate process estimated from SOFR.
+These are downloaded on demand. In `cache` mode only those already cached are
+available, and the app names the ones that need a refresh.
 
----
+Comparison works on **recorded runs**, so record a run before comparing it.
 
-## Bootstrap Rates
-
-Empirical rate shocks preserved.
-
----
-
-# 🔍 Funding Path Inspector
-
-![Funding](docs/screenshots/mc_funding_inspector.png)
-
-## Capabilities
-
-- Inspect simulated funding paths  
-- Compare a selected path to the mean  
-- Validate process behaviour  
+![Compare](docs/screenshots/compare.png)
 
 ---
 
-# ⚙️ Methodology
+## 🎲 Monte Carlo simulation
 
-## Portfolio return
+Forward simulation that respects the construction method, simulating asset
+returns, rebalancing, weight drift, volatility targeting and the funding overlay.
+
+![Monte Carlo](docs/screenshots/monte_carlo.png)
+
+### Engines, by construction method
+
+**Passive rules** (Equal, Price, Inverse Volatility) — constituent block
+bootstrap, or correlated GBM.
+
+**Cap Weight** — constituent block bootstrap only. It samples historical
+constituent-return rows together with the aligned historical market-cap rows at
+simulated rebalance dates, which keeps the cap state tied to observed market
+structure rather than a static latest-cap vector. GBM is disabled here because
+the engine does not simulate shares outstanding, corporate actions or cap-rank
+dynamics.
+
+**PM classics** — strategy return bootstrap. These resample the realized strategy
+return stream produced by the historical backtest, rather than re-optimizing
+inside every simulated constituent path. Pathwise re-optimization is not
+implemented.
+
+### Funding
+
+Two independent stochastic layers. The asset process is one of the engines above;
+the funding process is fixed at the last observed SOFR, an OU-inspired
+mean-reverting process estimated from SOFR, or a bootstrap that preserves
+empirical rate shocks. Simulated funding paths can be inspected individually
+against the mean.
+
+---
+
+## ⚙️ Methodology
+
+### Portfolio return
 
 $$
 R_t^{port} = w_t^T r_t
 $$
 
----
+Names without a price on a given day are treated as **stale, not sold**: the
+position is carried forward at unchanged value and keeps its place in the book,
+while the day's return comes only from the names that actually priced.
 
-## Volatility targeting
+### Volatility targeting
 
 $$
 \lambda_t = \frac{\sigma_{target}}{\hat{\sigma}_{t-1}}
 $$
 
----
-
-## Funding-aware overlay
+### Funding-aware overlay
 
 $$
 R_t^{VC} = \lambda_t R_t^{port} + \max(1-\lambda_t,0) \cdot r_t^{cash} - \max(\lambda_t-1,0) \cdot r_t^{borrow}
 $$
 
----
-
-## GBM
+### GBM
 
 $$
 x_t = \log(1 + r_t)
@@ -350,9 +303,7 @@ $$
 r_t^{sim} = e^{x_t^{sim}} - 1
 $$
 
----
-
-## Bootstrap
+### Bootstrap
 
 Block sampling:
 
@@ -360,11 +311,7 @@ $$
 r_{t_1}, \ldots, r_{t_1+L-1}, r_{t_2}, \ldots
 $$
 
----
-
-## Cap-weight bootstrap
-
-Cap-weighted Monte Carlo uses sampled historical return rows together with aligned historical market-cap rows.
+### Cap-weight bootstrap
 
 At simulated rebalance dates:
 
@@ -372,64 +319,120 @@ $$
 w_{i,t}^{cap} = \frac{MCAP_{i,t}}{\sum_j MCAP_{j,t}}
 $$
 
-If all sampled market caps are unavailable for a simulation row, the engine falls back to equal weight for that row.
+If every sampled market cap is unavailable for a simulation row, that row falls
+back to equal weight.
 
----
-
-## PM-classic return bootstrap
-
-PM-classic Monte Carlo currently simulates from the realized base strategy return stream:
+### Diagnostics
 
 $$
-R_t^{strategy} = f(w_t, r_t)
+\text{net} = \sum_i w_i \qquad \text{gross} = \sum_i |w_i| \qquad \text{HHI} = \sum_i w_i^2
 $$
 
-The bootstrap samples from historical strategy returns after optimizer construction. It does not yet re-optimize portfolios inside every simulated constituent path.
-
-Current PM-classic limits:
-- Strategy-return bootstrap is used for PM-classic Monte Carlo until pathwise re-optimization is implemented.  
-
----
-
-# 📦 Data & Caching
-
-## Stocks
-- Yahoo Finance  
-- Local parquet cache  
-
-## Market caps
-- Yahoo Finance  
-- Local parquet cache  
-- Approximation: historical close × current shares outstanding  
-- Used for cap-weighted construction and cap-weighted bootstrap simulation  
-
-Market-cap data is cached separately from close/volume data. In refresh mode, the loader should update the configured universe and repair missing requested market-cap columns where possible. In cache mode, no external calls are made; any still-missing market-cap values are treated as unavailable data and can become zero in cap-weight calculations.
-
-## Rates
-- FRED  
-- Local parquet cache  
-
-## Data modes
-
-- `refresh`: fetch fresh data, update cache, fail loudly on API/data errors  
-- `cache`: use local cache only  
-- `auto`: fetch fresh data first, fall back to cache if fresh loading fails  
+$$
+\text{turnover}_t = \tfrac{1}{2} \sum_i |w_{i,t} - w_{i,t-1}|
+$$
 
 ---
 
-# Tests
+## 📦 Data and caching
 
-Smoke tests cover the engine layer and run the Streamlit app end to end
-(`tests/test_app_smoke.py` uses Streamlit's `AppTest`, cache mode only, so it
-needs no network access).
+| Source | What | Cache |
+| --- | --- | --- |
+| Yahoo Finance | Close and volume | `data/*.parquet` |
+| Yahoo Finance | Market caps, sector metadata | `data/*.parquet` |
+| FRED | SOFR and the Treasury curve | `data/*.parquet` |
 
-Run:
+### Known approximations
+
+**Market caps are approximate.** They are historical close × *current* shares
+outstanding, which ignores issuance and buybacks. Cap-weighted backtests inherit
+that.
+
+**Fundamentals are not point-in-time.** Sector metadata is fetched but not yet
+surfaced; no other fundamentals are used.
+
+In `cache` mode nothing is fetched, and any missing market-cap values are treated
+as unavailable, which can become zero in cap-weight calculations. The loaded
+panel is trimmed to dates where at least one of the selected names actually
+priced, so a stock set refreshed less recently reports its true range rather than
+the range of the whole cache file.
+
+---
+
+## 🗂 Project layout
+
+### Engine
+
+Framework-free, so it can be driven from a notebook or a script:
+
+```text
+index_lib/strategy.py      validated strategy / overlay / MC configuration
+index_lib/runner.py        backtest and Monte Carlo runners
+index_lib/datasets.py      data loading and the loaded panels
+index_lib/library.py       saved strategies and portfolios
+index_lib/runs.py          saved runs
+index_lib/diagnostics.py   exposure, concentration, turnover, drawdowns
+index_lib/compare.py       comparables and comparison statistics
+```
+
+Nothing here imports Streamlit, and a test enforces it.
+
+### Core mechanics
+
+```text
+index_lib/core/backtest.py                      index construction loop
+index_lib/core/weighting.py                     weighting rules and caps
+index_lib/core/rebalancing.py                   rebalance calendars
+index_lib/core/overlays.py                      volatility targeting
+index_lib/portfolio/optimization.py             PM-classic optimizers
+index_lib/portfolio/covariance.py               covariance estimators
+index_lib/simulation/                           funding paths, strategy bootstrap
+index_lib/vectorization_utilities/              vectorized MC engines
+index_lib/config/universes.py                   stock sets and benchmarks
+```
+
+### Interface
+
+`app.py` is the entry point. The UI layer only renders:
+
+```text
+index_lib/ui/cache.py       Streamlit caching in front of the runner
+index_lib/ui/session.py     session state and how it maps onto the controls
+index_lib/ui/macro.py       Macro & Funding tab
+index_lib/ui/universe.py    Universe Diagnostics tab
+index_lib/ui/forge.py       Strategy Forge tab
+index_lib/ui/comparison.py  Compare tab
+index_lib/ui/figures.py     Plotly figure builders
+index_lib/ui/tables.py      summary tables
+index_lib/ui/theme.py       page chrome, stylesheet, Plotly template
+```
+
+---
+
+## ✅ Tests
+
+90 tests, none of which need network access — they run against the local cache.
 
 ```bash
 uv run pytest
 ```
 
-Recommended local release checks:
+They cover the storage layers, the diagnostics and comparison maths, and the app
+itself end to end through Streamlit's `AppTest`: saving and reopening strategies,
+portfolios and runs, switching stock sets, and the comparison tab.
+
+Screenshots are generated from the running app, so they cannot drift from it:
+
+```bash
+uv run python -m playwright install chromium   # once
+uv run python scripts/screenshots.py
+```
+
+It starts the app on its own port, seeds a couple of saved strategies and runs so
+the library and comparison views have something to show, captures each view, and
+removes the demo work afterwards.
+
+Before a release:
 
 ```bash
 uv run ruff check index_lib app.py tests
@@ -438,120 +441,55 @@ uv run pytest
 uv run streamlit run app.py
 ```
 
-Expected behavior per data mode:
-
-- `cache`: loads from the local cache
-- `auto`: loads fresh data or falls back to the cache
-- `refresh`: refreshes and fails loudly if API/data access fails
-
 ---
 
-# Configuration
+## 📜 Version log
 
-## Universe
+### 2026-09-19 — v0.3
 
-Universe definitions are in:
+Streamlit interface replacing Dash; selectable stock sets; saved strategies,
+portfolios and runs; strategy diagnostics and optimizer reporting; comparison
+against runs, stocks and benchmarks.
 
-```text
-index_lib/config/universes.py
-```
+Also fixed: a one-day gap in a stock's prices was liquidating that holding and
+sharing its weight among the others until the next rebalance.
 
-Default universe:
+### 2026-05-26
 
-```text
-DEFAULT_UNIVERSE = PHARMA_48
-```
+PM classics and method-aware Monte Carlo
 
-## Strategy construction
+### 2026-05-17
 
-Core strategy mechanics are in:
+Release cleanup: core / app / data separation
 
-```text
-index_lib/core/backtest.py
-index_lib/core/weighting.py
-index_lib/core/rebalancing.py
-```
+### 2026-05-16
 
-## PM-classic optimization
+Caching modes and cap-weighted balancing
 
-Optimizer logic is in:
+### 2026-03-28
 
-```text
-index_lib/portfolio/optimization.py
-```
+Funding-aware overlay and Monte Carlo funding
 
-Covariance estimators live in:
+### 2026-03-18
 
-```text
-index_lib/portfolio/covariance.py
-```
+Rates inspector
 
-## Overlay
+### 2026-03-01
 
-Volatility targeting logic is in:
-
-```text
-index_lib/core/overlays.py
-```
-
-## Monte Carlo simulation
-
-Simulation logic is in:
-
-```text
-index_lib/vectorization_utilities/mc_block_bootstrap_fast.py
-index_lib/vectorization_utilities/mc_gbm_fast.py
-index_lib/simulation/strategy_return_bootstrap.py
-index_lib/simulation/funding.py
-```
-
-## User interface
-
-The Streamlit entry point is `app.py`. The UI layer is in:
-
-```text
-index_lib/ui/strategy.py   validated strategy / overlay / MC configuration
-index_lib/ui/engine.py     cached data access, backtest and MC runners
-index_lib/ui/macro.py      Macro & Funding tab
-index_lib/ui/universe.py   Universe Diagnostics tab
-index_lib/ui/forge.py      Strategy Forge tab
-index_lib/ui/figures.py    Plotly figure builders
-index_lib/ui/tables.py     summary tables
-index_lib/ui/theme.py      page chrome, stylesheet, Plotly template
-```
-
-Data loading and the loaded-panel containers live in `index_lib/datasets.py`.
-
----
-
-# Version Log
-
-## 2026-09-19
-Migrated the interface from Dash to Streamlit; UI layer restructured under `index_lib/ui`
-
-## 2026-05-26
-PM Classics + method-aware MC
-
-## 2026-05-17
-Release cleanup: core/app/data separation
-
-## 2026-05-16
-Caching modes + cap-weighted index balancing
-
-## 2026-03-28
-Funding-aware overlay + MC funding
-
-## 2026-03-18
-Rates Inspector
-
-## 2026-03-01
 Vectorized Monte Carlo
 
-## 2026-02-20
+### 2026-02-20
+
 Equal-weight correction
 
 ---
 
-# Notes
+## 📌 Status
 
-This is a research prototype. The current release prepares the application for the next stage: strategy persistence, strategy comparison, long/short PM Classics, robust covariance estimators, cap-weight diagnostics, visual inspection modules, and broader systematic portfolio management functionality.
+A research prototype. Backtests assume no trading costs, no slippage, no taxes
+and no market impact; short-borrow cost is modelled only where noted.
+
+v0.3 set out to make the object model solid — what a strategy *is*, how it is
+stored, how one execution is compared with another — before adding more on top.
+What comes next builds on it: company fundamentals, market regimes, factor
+strategies, trend following, and sector and factor attribution.

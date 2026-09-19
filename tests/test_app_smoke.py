@@ -40,3 +40,18 @@ def test_monte_carlo_button_runs(app: AppTest):
 
     assert not app.exception, [e.value for e in app.exception]
     assert not app.error, [e.value for e in app.error]
+
+
+def test_notes_render_emphasis_rather_than_asterisks(app: AppTest):
+    """
+    Markdown is not parsed inside a raw HTML block.
+
+    The explanatory notes are wrapped in a styled div, so bold markers have to be
+    converted or they show up as literal asterisks on the page.
+    """
+    markdown_blocks = [m.value for m in app.markdown]
+    notes = [m for m in markdown_blocks if 'class="note"' in m]
+
+    assert notes, "no notes rendered"
+    for block in notes:
+        assert "**" not in block, f"unconverted bold markers: {block[:120]}"
