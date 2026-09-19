@@ -4,8 +4,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from sklearn.covariance import LedoitWolf, OAS
-
+from sklearn.covariance import OAS, LedoitWolf
 
 CovarianceMethod = Literal[
     "sample",

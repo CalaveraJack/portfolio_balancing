@@ -2,12 +2,10 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Optional
 
 import pandas as pd  # type: ignore
-import plotly.graph_objects as go  # type: ignore
 import requests
-
 
 FRED_API_KEY_ENV = "FRED_API_KEY"
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
@@ -140,7 +138,8 @@ def _fred_fetch_series(
     api_key = api_key or os.environ.get(FRED_API_KEY_ENV)
     if not api_key:
         raise ValueError(
-            f"Missing {FRED_API_KEY_ENV}. Put it in your .env and load it before calling the loader."
+            f"Missing {FRED_API_KEY_ENV}. Put it in your .env and load it "
+            "before calling the loader."
         )
 
     params = {
@@ -314,7 +313,9 @@ def load_rates_cached(
 
         recommendation = ""
         if has_valid_cache:
-            recommendation = " Local rates cache exists; rerun with --data-mode cache or --data-mode auto."
+            recommendation = (
+                " A local rates cache exists; rerun in 'cache' or 'auto' mode."
+            )
         raise RuntimeError(
             f"Failed to refresh FRED rates data: {e}.{recommendation}"
         ) from e
@@ -373,107 +374,3 @@ def build_daily_funding_series(
     ).rename("borrow_rate")
 
     return pd.concat([cash_rate, borrow_rate], axis=1)
-
-
-def make_funding_history_figure(
-    funding_df: pd.DataFrame,
-    *,
-    columns: Optional[Sequence[str]] = None,
-    title: str = "Funding Rates History",
-) -> go.Figure:
-    cols = list(columns) if columns is not None else ["USD_SOFR"]
-
-    fig = go.Figure()
-    for c in cols:
-        if c in funding_df.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=funding_df.index,
-                    y=funding_df[c],
-                    mode="lines",
-                    name=c,
-                    line_shape="hv",
-                )
-            )
-    fig.update_layout(
-        title=title,
-        xaxis_title="Date",
-        yaxis_title="Rate (% p.a.)",
-        height=420,
-        margin=dict(l=40, r=20, t=60, b=40),
-    )
-    return fig
-
-
-def make_curve_history_figure(
-    curve_df: pd.DataFrame,
-    *,
-    columns: Sequence[str],
-    title: str = "Curve History",
-) -> go.Figure:
-    fig = go.Figure()
-    for c in columns:
-        if c in curve_df.columns:
-            fig.add_trace(
-                go.Scatter(x=curve_df.index, y=curve_df[c], mode="lines", name=c)
-            )
-
-    fig.update_layout(
-        title=title,
-        xaxis_title="Date",
-        yaxis_title="Yield (% p.a.)",
-        height=420,
-        margin=dict(l=40, r=20, t=60, b=40),
-    )
-    return fig
-
-
-def make_curve_snapshot_figure(
-    curve_df: pd.DataFrame,
-    *,
-    date: Optional[str] = None,
-    title: Optional[str] = None,
-) -> go.Figure:
-    def _tenor_sort_key(col: str):
-        tenor = col.split("_", 1)[1]
-        if tenor.endswith("M"):
-            return (0, float(tenor[:-1]))
-        if tenor.endswith("Y"):
-            return (1, float(tenor[:-1]))
-        return (99, 999.0)
-
-    cols = sorted(
-        [c for c in curve_df.columns if c.startswith("USD_")],
-        key=_tenor_sort_key,
-    )
-    if not cols:
-        raise ValueError("No USD curve columns found")
-
-    if date is None:
-        row = curve_df[cols].dropna(how="all").iloc[-1]
-        dt = curve_df[cols].dropna(how="all").index[-1]
-    else:
-        dt = pd.to_datetime(date)
-        row = (
-            curve_df[cols]
-            .reindex(curve_df.index.union([dt]))
-            .sort_index()
-            .ffill()
-            .loc[dt]
-        )
-
-    tenors = [c.split("_", 1)[1] for c in cols]
-    values = [row[c] for c in cols]
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(x=tenors, y=values, mode="lines+markers", name="USD curve")
-    )
-    fig.update_layout(
-        title=title or f"USD Curve Snapshot ({pd.to_datetime(dt).date()})",
-        xaxis_title="Maturity",
-        yaxis_title="Yield (% p.a.)",
-        height=420,
-        margin=dict(l=40, r=20, t=60, b=40),
-    )
-    return fig

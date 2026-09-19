@@ -5,7 +5,7 @@ from typing import Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from .mc_block_bootstrap_fast import rebalance_mask, cap_weights_rows
+from .mc_block_bootstrap_fast import cap_weights_rows, rebalance_mask
 
 
 def _safe_cholesky(

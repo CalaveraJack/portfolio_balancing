@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import List
 
-
 BASE_10: List[str] = [
     "AAPL",
     "MSFT",

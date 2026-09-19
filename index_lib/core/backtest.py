@@ -7,7 +7,6 @@ import pandas as pd
 from .rebalancing import rebalance_dates
 from .weighting import compute_weights
 
-
 LOOKBACK_METHODS = {
     "inv_vol",
     "min_var",
@@ -77,7 +76,8 @@ def build_index_series(
     - Weights used for day t return are start-of-day weights.
     - On a rebalance date t, target weights are computed using data strictly before t.
     - Those target weights are then used for the return on t.
-    - Missing returns are handled by dropping unavailable names and renormalizing weights.
+    - Missing returns are handled by dropping unavailable names and
+      renormalizing weights.
     """
     if optimizer_form not in {"long_only", "long_short"}:
         raise ValueError("optimizer_form must be 'long_only' or 'long_short'.")

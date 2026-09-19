@@ -157,7 +157,8 @@ def run_monte_carlo_block_bootstrap_fast(
                 caps_hist = caps_arr
             else:
                 raise ValueError(
-                    "market_caps must be a DataFrame, a 2D static array, or a 3D path array."
+                    "market_caps must be a DataFrame, a 2D static array, "
+                    "or a 3D path array."
                 )
 
     T, N = R_hist.shape

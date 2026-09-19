@@ -8,7 +8,6 @@ from scipy.optimize import minimize
 
 from index_lib.portfolio.covariance import estimate_covariance
 
-
 EPS = 1e-12
 
 
@@ -681,7 +680,7 @@ def solve_optimizer_weights(
     valid_cov_estimators = {"sample", "ewma", "ledoit_wolf", "oas"}
     if cov_estimator not in valid_cov_estimators:
         raise ValueError(f"Unknown covariance estimator: {cov_estimator}")
-    
+
     if optimizer_form == "long_only":
         min_weight = max(0.0, float(min_weight))
         net_exposure = 1.0

@@ -1,6 +1,6 @@
 # Strategy Forge
 
-A Dash-based research prototype for **strategy construction, passive index logic, PM-classic portfolio methods, funding-aware overlays, and forward simulation**.
+A Streamlit-based research prototype for **strategy construction, passive index logic, PM-classic portfolio methods, funding-aware overlays, and forward simulation**.
 
 The current version supports universe inspection, strategy construction, local data caching, cap-weighted balancing, PM-classic optimizers, funding-aware volatility targeting, and method-aware Monte Carlo simulation.
 
@@ -42,44 +42,22 @@ uv sync
 
 ## 3) Run
 
-Default mode refreshes Yahoo/FRED data and updates the local cache. If an API is unavailable, the app fails and tells you to rerun from cache if cache is present.
-
 ```bash
-uv run index_builder
+uv run streamlit run app.py
 ```
 
-Cache-only mode never calls external APIs:
+Open the URL Streamlit prints (by default http://localhost:8501).
 
-```bash
-uv run index_builder --data-mode cache
-```
+### Data mode
 
-Auto mode refreshes data first and falls back to cache only if the fresh load fails:
+The data mode is a sidebar control rather than a command-line flag:
 
-```bash
-uv run index_builder --data-mode auto
-```
+- `refresh` — fetch fresh Yahoo/FRED data, update the local cache, and fail
+  loudly if an API is unavailable (the error tells you when a usable cache exists)
+- `cache` — never call external APIs, read the local cache only
+- `auto` — fetch fresh data first, fall back to the cache if the fresh load fails
 
-Backward-compatible alias:
-
-```bash
-uv run index_builder --cache-only
-```
-
-Dash debug mode is disabled by default. Enable it explicitly:
-
-```bash
-uv run index_builder --debug
-```
-
-Write logs to a file while still keeping console output:
-
-```bash
-uv run index_builder --log-file logs/index_builder.log
-```
-
-Open:
-http://127.0.0.1:8050
+**Reload data** in the sidebar clears the caches and reloads under the selected mode.
 
 ---
 
@@ -179,10 +157,9 @@ Available now:
 - Maximum Diversification  
 
 Current implementation status:
-- PM-classic methods are implemented as **long-only optimizers**.  
-- The optimizer form selector is present, but **long/short is not enabled yet**.  
-- Long/short constraints, gross exposure controls, short-side caps, and short-borrow-cost handling are planned for the next development stage.  
-- The covariance estimator selector is currently limited to **sample covariance**. Additional estimators such as EWMA, Ledoit-Wolf, OAS, and eigenvalue-based cleaning are planned.  
+- Both **long-only** and **long/short** optimizer forms are available.  
+- Long/short exposes net exposure, maximum gross exposure, and a short-borrow-cost input.  
+- Covariance estimators: **sample**, **EWMA**, **Ledoit-Wolf**, and **OAS**. Eigenvalue-based cleaning is still planned.  
 
 ### Rebalancing
 - Daily  
@@ -194,14 +171,12 @@ Current implementation status:
 Available now:
 - Weight caps  
 - Automatic redistribution  
-- Long-only optimizer constraints for PM Classics  
+- Long-only and long/short optimizer constraints for PM Classics  
+- Net exposure targets and gross exposure limits (long/short form)  
+- Short-borrow-cost input (long/short form)  
 
 Not available yet:
-- Long/short optimizer form  
-- Short-side position caps  
-- Net exposure targets  
-- Gross exposure limits  
-- Non-zero short-borrow-cost modelling inside PM-classic construction  
+- Per-name short-side position caps  
 
 ---
 
@@ -412,9 +387,6 @@ $$
 The bootstrap samples from historical strategy returns after optimizer construction. It does not yet re-optimize portfolios inside every simulated constituent path.
 
 Current PM-classic limits:
-- Optimizers are long-only.  
-- The covariance estimator is sample covariance only.  
-- Long/short form is visible in the interface but disabled.  
 - Strategy-return bootstrap is used for PM-classic Monte Carlo until pathwise re-optimization is implemented.  
 
 ---
@@ -447,7 +419,9 @@ Market-cap data is cached separately from close/volume data. In refresh mode, th
 
 # Tests
 
-Basic smoke tests are used to protect the refactor.
+Smoke tests cover the engine layer and run the Streamlit app end to end
+(`tests/test_app_smoke.py` uses Streamlit's `AppTest`, cache mode only, so it
+needs no network access).
 
 Run:
 
@@ -458,23 +432,17 @@ uv run pytest
 Recommended local release checks:
 
 ```bash
-uv run python -m compileall index_lib main.py
+uv run ruff check index_lib app.py tests
+uv run ruff format --check index_lib app.py tests
 uv run pytest
-uv run index_builder --data-mode cache
+uv run streamlit run app.py
 ```
 
-Optional data-mode checks:
+Expected behavior per data mode:
 
-```bash
-uv run index_builder --data-mode auto
-uv run index_builder --data-mode refresh
-```
-
-Expected behavior:
-
-- `cache`: should launch from local cache
-- `auto`: should launch from fresh data or fall back to cache
-- `refresh`: should refresh and fail loudly if API/data access fails
+- `cache`: loads from the local cache
+- `auto`: loads fresh data or falls back to the cache
+- `refresh`: refreshes and fails loudly if API/data access fails
 
 ---
 
@@ -512,10 +480,11 @@ Optimizer logic is in:
 index_lib/portfolio/optimization.py
 ```
 
-Current optimizer scope:
-- Long-only PM Classics are available.  
-- Long/short is not available yet.  
-- The covariance selector is currently limited to sample covariance.  
+Covariance estimators live in:
+
+```text
+index_lib/portfolio/covariance.py
+```
 
 ## Overlay
 
@@ -536,9 +505,29 @@ index_lib/simulation/strategy_return_bootstrap.py
 index_lib/simulation/funding.py
 ```
 
+## User interface
+
+The Streamlit entry point is `app.py`. The UI layer is in:
+
+```text
+index_lib/ui/strategy.py   validated strategy / overlay / MC configuration
+index_lib/ui/engine.py     cached data access, backtest and MC runners
+index_lib/ui/macro.py      Macro & Funding tab
+index_lib/ui/universe.py   Universe Diagnostics tab
+index_lib/ui/forge.py      Strategy Forge tab
+index_lib/ui/figures.py    Plotly figure builders
+index_lib/ui/tables.py     summary tables
+index_lib/ui/theme.py      page chrome, stylesheet, Plotly template
+```
+
+Data loading and the loaded-panel containers live in `index_lib/datasets.py`.
+
 ---
 
 # Version Log
+
+## 2026-09-19
+Migrated the interface from Dash to Streamlit; UI layer restructured under `index_lib/ui`
 
 ## 2026-05-26
 PM Classics + method-aware MC

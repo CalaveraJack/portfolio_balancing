@@ -1,5 +1,5 @@
-from index_lib.app.data import load_data, load_rates_data
 from index_lib.config import DEFAULT_UNIVERSE
+from index_lib.datasets import load_data, load_rates_data
 
 
 def test_cache_mode_loads_data():
