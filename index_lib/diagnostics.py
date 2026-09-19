@@ -11,7 +11,7 @@ and everything here is recomputable from the stored weights and index level.
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -19,19 +19,26 @@ import pandas as pd
 TOP_N_CONCENTRATION = 5
 
 
-def exposure_history(daily_weights: pd.DataFrame) -> pd.DataFrame:
+def exposure_history(
+    daily_weights: pd.DataFrame, leverage: Optional[pd.Series] = None
+) -> pd.DataFrame:
     """
     Net, gross, long and short exposure over time.
 
     Net is the sum of weights, gross the sum of their absolute values. They
-    coincide for a long-only book, and separate as soon as it shorts.
+    coincide for a long-only book, and separate as soon as it shorts. Anything
+    short of 100% net is cash.
+
+    A volatility-target overlay scales the whole book, so its leverage is folded
+    in when given: without it the chart would report a book running at a third
+    of full exposure as fully invested.
     """
     if daily_weights is None or daily_weights.empty:
         return pd.DataFrame()
 
     weights = daily_weights.fillna(0.0)
 
-    return pd.DataFrame(
+    exposure = pd.DataFrame(
         {
             "net": weights.sum(axis=1),
             "gross": weights.abs().sum(axis=1),
@@ -39,6 +46,13 @@ def exposure_history(daily_weights: pd.DataFrame) -> pd.DataFrame:
             "short": weights.clip(upper=0.0).sum(axis=1).abs(),
         }
     )
+
+    if leverage is not None and not leverage.empty:
+        exposure = exposure.mul(
+            leverage.reindex(exposure.index).ffill().fillna(1.0), axis=0
+        )
+
+    return exposure
 
 
 def concentration_history(daily_weights: pd.DataFrame) -> pd.DataFrame:
@@ -134,9 +148,13 @@ def drawdown_periods(index_level: pd.Series, *, top: int = 5) -> pd.DataFrame:
     return frame.reset_index(drop=True)
 
 
-def summary(daily_weights: pd.DataFrame, index_level: pd.Series) -> Dict[str, object]:
+def summary(
+    daily_weights: pd.DataFrame,
+    index_level: pd.Series,
+    leverage: Optional[pd.Series] = None,
+) -> Dict[str, object]:
     """Headline diagnostics, for a compact table."""
-    exposure = exposure_history(daily_weights)
+    exposure = exposure_history(daily_weights, leverage)
     concentration = concentration_history(daily_weights)
     turnover = turnover_history(daily_weights)
 

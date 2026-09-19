@@ -115,6 +115,15 @@ net.
 
 Covariance estimators: **sample**, **EWMA**, **Ledoit-Wolf**, **OAS**.
 
+### How much is invested
+
+**Invested %** decides how much of the book is in the strategy; the rest sits in
+cash earning SOFR. At 100% there is no cash leg and nothing changes. Long-only
+means no shorting, not fully invested, so a long-only book may hold cash.
+
+Exposure is reported as it actually is, including the volatility overlay: a book
+running at 0.34x shows as 34% exposed, not 100%.
+
 ### Rebalancing and constraints
 
 Rebalance daily, weekly, monthly or quarterly. Weights drift between rebalances.

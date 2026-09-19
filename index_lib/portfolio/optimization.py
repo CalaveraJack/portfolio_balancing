@@ -682,9 +682,12 @@ def solve_optimizer_weights(
         raise ValueError(f"Unknown covariance estimator: {cov_estimator}")
 
     if optimizer_form == "long_only":
+        # Long-only means no short positions and no borrow cost. It does not
+        # mean fully invested: the caller decides the invested fraction, and
+        # gross then equals net because every weight is non-negative.
         min_weight = max(0.0, float(min_weight))
-        net_exposure = 1.0
-        max_gross_exposure = 1.0
+        net_exposure = max(float(net_exposure), 0.0)
+        max_gross_exposure = net_exposure
         short_borrow_cost = 0.0
 
     if optimizer_form == "long_short":

@@ -83,6 +83,15 @@ def run_backtest(
     overlay_cfg: OverlayConfig,
 ) -> BacktestResult:
     """Build the index series and, when enabled, apply the vol-target overlay."""
+    # The uninvested part of the book earns the cash rate, so the backtest needs
+    # it even when the volatility overlay is switched off.
+    funding = build_daily_funding_series(
+        funding_df=rates.funding,
+        index=data.close.loc[cfg.start : cfg.end].index,
+        borrow_spread_ann=overlay_cfg.borrow_spread_ann,
+        day_count=DAY_COUNT,
+    )
+
     (
         index_level,
         weights_history,
@@ -96,6 +105,7 @@ def run_backtest(
         end=cfg.end,
         base_level=BASE_LEVEL,
         market_caps=_market_caps_for(data, cfg, selection),
+        cash_rates=funding["cash_rate"],
         **cfg.index_kwargs(),
     )
 

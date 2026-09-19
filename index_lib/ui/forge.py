@@ -464,6 +464,20 @@ def _construction_controls(data: UniverseData) -> StrategyConfig:
         index=0,
     )
 
+    invested_pct = st.number_input(
+        "Invested (%)",
+        key="forge_invested",
+        min_value=0.0,
+        max_value=100.0,
+        step=5.0,
+        value=100.0,
+        help=(
+            "How much of the book is in the strategy. The rest sits in cash "
+            "earning the SOFR rate. Volatility targeting can lever this up or "
+            "down on top."
+        ),
+    )
+
     lookback = lookback_col.number_input(
         "Lookback (days)",
         key="forge_lookback",
@@ -486,7 +500,7 @@ def _construction_controls(data: UniverseData) -> StrategyConfig:
     optimizer_form = "long_only"
     min_weight_pct = 0.0
     max_weight_pct = 100.0
-    net_exposure_pct = 100.0
+    net_exposure_pct = invested_pct
     max_gross_exposure_pct = 150.0
     short_borrow_cost_pct = 0.0
     rf_rate_pct = 0.0
@@ -820,7 +834,12 @@ def _render_diagnostics(result: runner.BacktestResult) -> None:
     """Is it concentrated, is it shorting, is exposure stable, what hurt it."""
     section("Diagnostics")
 
-    summary = diagnostics.summary(result.daily_weights, result.index_level)
+    leverage = (
+        result.overlay["leverage"]
+        if result.overlay is not None and "leverage" in result.overlay
+        else None
+    )
+    summary = diagnostics.summary(result.daily_weights, result.index_level, leverage)
     if not summary:
         note("No weights to inspect.")
         return
@@ -841,7 +860,7 @@ def _render_diagnostics(result: runner.BacktestResult) -> None:
             st.plotly_chart(
                 figures.make_multi_line_fig(
                     "Exposure",
-                    diagnostics.exposure_history(result.daily_weights),
+                    diagnostics.exposure_history(result.daily_weights, leverage),
                     ["net", "gross", "long", "short"],
                     "Weight",
                 ),

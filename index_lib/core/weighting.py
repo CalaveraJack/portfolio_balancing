@@ -168,14 +168,18 @@ def compute_weights(
 
     w = w.sort_index()
 
+    # The simple rules produce a fully invested book; scaling by the invested
+    # fraction leaves the remainder in cash. At 100% this changes nothing.
+    invested = max(float(net_exposure), 0.0)
+
     if cap is not None:
-        return apply_weight_cap(w, float(cap))
+        return apply_weight_cap(w, float(cap)) * invested
 
     total = float(w.sum())
     if total <= 0:
         return pd.Series(dtype=float)
 
-    w = w.clip(lower=0) / total
+    w = w.clip(lower=0) / total * invested
 
     if return_diagnostics:
         return w, {

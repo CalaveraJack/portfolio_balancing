@@ -50,10 +50,16 @@ def _blank_diagnostics(message: str) -> Dict[str, object]:
     return row
 
 
-def _equal_weights(columns: pd.Index) -> pd.Series:
+def _equal_weights(columns: pd.Index, invested: float = 1.0) -> pd.Series:
+    """
+    Equal weights across the invested fraction.
+
+    Used before an optimizer has enough history; it has to respect the invested
+    fraction too, or the book starts fully invested whatever was asked for.
+    """
     if len(columns) == 0:
         return pd.Series(dtype=float)
-    return pd.Series(1.0 / len(columns), index=columns, dtype=float)
+    return pd.Series(float(invested) / len(columns), index=columns, dtype=float)
 
 
 def _has_sufficient_history(hist: pd.DataFrame, min_obs: int) -> bool:
@@ -94,6 +100,7 @@ def build_index_series(
     short_borrow_cost: float = 0.0,
     risk_free_rate: float = 0.0,
     cov_estimator: str = "sample",
+    cash_rates: Optional[pd.Series] = None,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Backtest a long-only strategy with periodic rebalancing and daily weight drift.
@@ -153,7 +160,7 @@ def build_index_series(
     # Initial state before the first rebalance.
     # Optimizers require historical returns, so they must not be called on px.iloc[:1].
     if method in OPTIMIZER_METHODS:
-        w = _equal_weights(px.columns)
+        w = _equal_weights(px.columns, net_exposure)
     else:
         w = compute_weights(
             px.iloc[:1],
@@ -217,7 +224,7 @@ def build_index_series(
                 hist,
                 min_obs=max(20, min(int(lookback), 60)),
             ):
-                w = _equal_weights(hist.columns)
+                w = _equal_weights(hist.columns, net_exposure)
                 optimizer_records[dt] = _blank_diagnostics(
                     "not enough history yet; fell back to equal weight"
                 )
@@ -249,24 +256,43 @@ def build_index_series(
                 base_r = 0.0
                 w_drift = w
             else:
-                # The day's return comes only from names that actually priced,
-                # renormalized so a data gap does not dilute it towards zero.
-                w_eff = w_eff / w_eff_sum
-                base_r = float((w_eff * r_eff).sum())
+                # Whatever is not invested sits in cash. For a fully invested
+                # book this is zero and the cash leg drops out entirely.
+                invested = float(w.sum())
+                cash_weight = 1.0 - invested
+                cash_return = (
+                    float(cash_rates.get(dt, 0.0)) if cash_rates is not None else 0.0
+                )
+
+                # The equity leg's return comes only from names that actually
+                # priced, renormalized so a data gap does not dilute it towards
+                # zero, then applied across the whole invested sleeve.
+                equity_r = float((w_eff / w_eff_sum * r_eff).sum())
+                base_r = invested * equity_r + cash_weight * cash_return
 
                 if optimizer_form == "long_short" and short_borrow_cost > 0.0:
-                    short_notional = float((-w_eff[w_eff < 0.0]).sum())
+                    short_notional = float((-w[w < 0.0]).sum())
                     base_r -= short_notional * float(short_borrow_cost) / 252.0
 
                 # Drift every holding, including the ones that did not price.
                 # A missing price means the position is stale, not sold: it is
-                # carried forward unchanged and keeps its place in the book.
-                # Dropping it here would liquidate it for free and hand its
-                # weight to the others until the next rebalance.
-                w_drift = w * (1.0 + r.fillna(0.0).astype(float))
+                # carried forward and keeps its place in the book. Dropping it
+                # here would liquidate it for free and hand its weight to the
+                # others until the next rebalance.
+                #
+                # A name without a price is carried at the day's average return
+                # rather than at zero, which is the same assumption the return
+                # above makes when it scales the priced names across the whole
+                # sleeve. Using zero here instead would leave the book quietly
+                # summing to less than the invested fraction.
+                w_drift = w * (1.0 + r.fillna(equity_r).astype(float))
 
-                drift_sum = float(w_drift.sum())
-                w_drift = w_drift / drift_sum if drift_sum != 0 else w
+                # Divide by the portfolio's own growth, not by the sum of the
+                # weights. Dividing by the sum would force the book back to
+                # fully invested every day, which is what pinned net exposure
+                # at 100% however it was configured.
+                growth = 1.0 + base_r
+                w_drift = w_drift / growth if growth != 0 else w
 
         base_ret_list.append((dt, base_r))
 

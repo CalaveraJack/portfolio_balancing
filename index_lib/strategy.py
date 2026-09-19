@@ -174,11 +174,12 @@ class StrategyConfig:
         max_gross_exposure = _pct(max_gross_exposure_pct, 1.0)
         short_borrow_cost = _pct(short_borrow_cost_pct, 0.0)
 
-        # A long-only book cannot short, lever up, or pay a borrow fee.
+        # A long-only book cannot short or pay a borrow fee, but it may hold
+        # cash: gross then equals net, whatever the invested fraction is.
         if form == "long_only":
             min_weight = max(min_weight, 0.0)
-            net_exposure = 1.0
-            max_gross_exposure = 1.0
+            net_exposure = max(net_exposure, 0.0)
+            max_gross_exposure = net_exposure
             short_borrow_cost = 0.0
 
         return cls(
