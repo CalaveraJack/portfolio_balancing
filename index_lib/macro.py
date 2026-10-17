@@ -181,3 +181,80 @@ def catalogue_status(
         )
 
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Comparison
+# ---------------------------------------------------------------------------
+
+MAX_COMPARED = 4
+
+COMPARE_BASES: Dict[str, str] = {
+    "standardised": "Standardised",
+    "change_year": "Change on a year earlier",
+}
+
+
+def standardise(series: pd.Series, start: Optional[pd.Timestamp] = None) -> pd.Series:
+    """
+    The series in standard deviations from its own average over the window.
+
+    Unit-free, so indicators measured in different units share one axis: 0 is
+    the window's average, +1 one standard deviation above it.
+    """
+    window = series.dropna()
+    if start is not None:
+        window = window.loc[start:]
+    spread = window.std()
+    if window.empty or not spread or pd.isna(spread):
+        return pd.Series(dtype=float)
+    return (window - window.mean()) / spread
+
+
+def shared_change_unit(indicators: Sequence[Indicator]) -> Optional[str]:
+    """The unit their changes share (% or pp), or None when it is mixed."""
+    units = {"pp" if i.is_rate else "%" for i in indicators}
+    return units.pop() if len(units) == 1 else None
+
+
+def compare_bases(indicators: Sequence[Indicator]) -> Dict[str, str]:
+    """Standardised always; change on the year only when the units agree."""
+    if shared_change_unit(indicators) is None:
+        return {"standardised": COMPARE_BASES["standardised"]}
+    return dict(COMPARE_BASES)
+
+
+#: How a comparison is drawn. Two axes and scatter take exactly two indicators.
+COMPARE_VIEWS: Dict[str, str] = {
+    "one_scale": "One scale",
+    "own_scales": "Own scales",
+    "two_axes": "Two axes",
+    "scatter": "Scatter",
+}
+PAIR_ONLY_VIEWS = ("two_axes", "scatter")
+
+#: What the own-scales, two-axes and scatter views show of each indicator.
+MEASURES: Dict[str, str] = {
+    "level": "Actual values",
+    "change_year": "Change on a year earlier",
+}
+
+
+def compare_views(count: int) -> Dict[str, str]:
+    if count == 2:
+        return dict(COMPARE_VIEWS)
+    return {k: v for k, v in COMPARE_VIEWS.items() if k not in PAIR_ONLY_VIEWS}
+
+
+def monthly_pairs(first: pd.Series, second: pd.Series) -> pd.DataFrame:
+    """
+    Two series on one monthly calendar, months where both have a value only.
+
+    Monthly averages, so a daily yield can be set against a monthly index.
+    """
+    if first.empty or second.empty:
+        return pd.DataFrame()
+    frame = pd.concat(
+        [first.resample("MS").mean(), second.resample("MS").mean()], axis=1
+    )
+    return frame.dropna()

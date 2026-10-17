@@ -239,3 +239,37 @@ def test_key_figures_place_the_latest_value_in_its_range():
     assert figures["latest"] == 5
     assert figures["range_low"] == 1 and figures["range_high"] == 10
     assert figures["range_percentile"] == pytest.approx(6 / 11 * 100)
+
+
+# ---------------------------------------------------------------------------
+# Comparison
+# ---------------------------------------------------------------------------
+
+
+def test_standardised_series_has_zero_mean_and_unit_spread():
+    z = macro.standardise(_monthly([1, 2, 3, 4, 5, 6]))
+
+    assert z.mean() == pytest.approx(0.0)
+    assert z.std() == pytest.approx(1.0)
+
+
+def test_standardise_uses_the_window_only():
+    series = _monthly([100] * 12 + [1, 2, 3])
+    z = macro.standardise(series, start=series.index[12])
+
+    assert len(z) == 3
+    assert z.iloc[0] < 0 < z.iloc[-1]
+
+
+def test_a_flat_series_cannot_be_standardised():
+    assert macro.standardise(_monthly([5, 5, 5])).empty
+
+
+def test_change_on_the_year_is_offered_only_when_units_agree():
+    levels = [_indicator("a", kind="level"), _indicator("b", kind="level")]
+    mixed = [_indicator("a", kind="level"), _indicator("b", kind="rate")]
+
+    assert "change_year" in macro.compare_bases(levels)
+    assert macro.shared_change_unit(levels) == "%"
+    assert list(macro.compare_bases(mixed)) == ["standardised"]
+    assert macro.shared_change_unit(mixed) is None

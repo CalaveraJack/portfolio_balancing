@@ -1,5 +1,7 @@
 """
-Macro view: the indicator catalogue, then one indicator at a time.
+Macro view: the indicator catalogue, a comparison, then one indicator at a time.
+
+Tick one row to open it below; tick two to four to compare them on one axis.
 
 What is on screen is what the providers published; nothing is seasonally
 adjusted or revised here. Where every source stands lives in Settings → Data
@@ -8,7 +10,7 @@ status; this view only speaks up when something failed.
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -19,7 +21,30 @@ from index_lib.loaders.macro_cache import STATUS_MISSING, MacroData
 from index_lib.ui import figures, tables
 from index_lib.ui.window import window_start
 
-ROW_APPLIED_KEY = "_macro_row_applied"
+#: The rows ticked on the previous run, so a newly ticked one can be told apart.
+ROWS_BEFORE_KEY = "_macro_rows_before"
+#: Bumped by Clear: a fresh table key is the only way to untick every row.
+TABLE_VERSION_KEY = "_macro_table_version"
+
+VIEW_HELP_COMPARE = (
+    "**One scale**: every line on one axis, standardised or as change on a "
+    "year earlier.\n\n"
+    "**Own scales**: one panel per indicator, each in its own units, on a "
+    "shared time axis.\n\n"
+    "**Two axes** (two indicators): left and right axis, each coloured like its "
+    "line. Where the lines cross depends on how each axis is scaled, so read "
+    "levels and turns, not crossings.\n\n"
+    "**Scatter** (two indicators): one against the other, a point per month, "
+    "coloured from oldest to latest, with the correlation."
+)
+
+BASIS_HELP = (
+    "**Standardised**: each indicator against its own average over the window, "
+    "in standard deviations; 0 is average, +1 one standard deviation above. "
+    "Puts different units on one scale. **Change on a year earlier** is offered "
+    "when every indicator changes in the same unit. Hover a line for the actual "
+    "value."
+)
 
 VIEW_HELP = (
     "Changes are computed on the full history, then cut to the window. A level "
@@ -68,27 +93,177 @@ def _filtered(catalogue: List[Indicator]) -> List[Indicator]:
     ]
 
 
-def _catalogue(data: MacroData, shown: List[Indicator]) -> None:
-    """The catalogue table; selecting a row opens that indicator below."""
+def _catalogue(data: MacroData, shown: List[Indicator]) -> List[Indicator]:
+    """The catalogue table. Returns the ticked indicators that have data."""
+    st.caption("Tick one row to open it below, or two to four to compare them.")
+
+    version = st.session_state.get(TABLE_VERSION_KEY, 0)
     event = st.dataframe(
         tables.macro_status_frame(macro.catalogue_status(data, shown)),
         hide_index=True,
         width="stretch",
         height=min(38 + 35 * len(shown), 420),
         on_select="rerun",
-        selection_mode="single-row",
-        key="macro_table",
+        selection_mode="multi-row",
+        key=f"macro_table_{version}",
     )
 
     rows = list(getattr(getattr(event, "selection", None), "rows", []) or [])
-    if not rows:
+    ticked = [
+        shown[r] for r in rows if r < len(shown) and not data.get(shown[r].id).empty
+    ]
+
+    # The inspector follows the row ticked last; the dropdown stays usable.
+    before = st.session_state.get(ROWS_BEFORE_KEY, [])
+    added = [i.id for i in ticked if i.id not in before]
+    if added:
+        st.session_state["macro_indicator"] = added[-1]
+    st.session_state[ROWS_BEFORE_KEY] = [i.id for i in ticked]
+
+    return ticked
+
+
+def _clear_selection() -> None:
+    st.session_state[TABLE_VERSION_KEY] = st.session_state.get(TABLE_VERSION_KEY, 0) + 1
+    st.session_state[ROWS_BEFORE_KEY] = []
+
+
+def _measured(
+    data: MacroData, indicator: Indicator, measure: str, window: str
+) -> Tuple[pd.Series, str]:
+    """An indicator as actual values or as change on a year, with its unit."""
+    series = data.get(indicator.id)
+    start = window_start(series.index, window)
+    return (
+        macro.transform(series, indicator, measure, start=start),
+        macro.view_unit(indicator, measure),
+    )
+
+
+def _one_scale(data: MacroData, ticked: List[Indicator], window: str, col) -> None:
+    bases = macro.compare_bases(ticked)
+    if st.session_state.get("macro_compare_basis") not in bases:
+        st.session_state.pop("macro_compare_basis", None)
+
+    basis = (
+        col.segmented_control(
+            "Scale",
+            options=list(bases),
+            format_func=bases.get,
+            default="standardised",
+            key="macro_compare_basis",
+            help=BASIS_HELP,
+        )
+        or "standardised"
+    )
+
+    lines = []
+    for indicator in ticked:
+        series = data.get(indicator.id)
+        start = window_start(series.index, window)
+        plotted = (
+            macro.standardise(series, start)
+            if basis == "standardised"
+            else macro.transform(series, indicator, "change_year", start=start)
+        )
+        lines.append((indicator.label, plotted, series, indicator.unit))
+
+    st.plotly_chart(
+        figures.make_indicator_compare_figure(
+            lines,
+            title=bases[basis],
+            y_title=(
+                "standard deviations from average"
+                if basis == "standardised"
+                else macro.shared_change_unit(ticked)
+            ),
+        ),
+        width="stretch",
+    )
+
+
+def _comparison(data: MacroData, ticked: List[Indicator], window: str) -> None:
+    if len(ticked) < 2:
         return
 
-    picked = shown[rows[0]].id
-    # Apply a row once, so the dropdown stays usable after the row was clicked.
-    if st.session_state.get(ROW_APPLIED_KEY) != picked and not data.get(picked).empty:
-        st.session_state["macro_indicator"] = picked
-        st.session_state[ROW_APPLIED_KEY] = picked
+    if len(ticked) > macro.MAX_COMPARED:
+        st.warning(
+            f"{len(ticked)} ticked; comparing the first {macro.MAX_COMPARED}. "
+            "More lines than that stop being readable."
+        )
+        ticked = ticked[: macro.MAX_COMPARED]
+
+    views = macro.compare_views(len(ticked))
+    if st.session_state.get("macro_compare_view") not in views:
+        st.session_state.pop("macro_compare_view", None)
+
+    title_col, view_col, option_col, clear_col = st.columns(
+        [2, 4, 3, 1], vertical_alignment="bottom"
+    )
+    title_col.markdown(f"**Comparing {len(ticked)} indicators**")
+    view = (
+        view_col.segmented_control(
+            "Draw as",
+            options=list(views),
+            format_func=views.get,
+            default="one_scale",
+            key="macro_compare_view",
+            help=VIEW_HELP_COMPARE,
+        )
+        or "one_scale"
+    )
+    clear_col.button(
+        "Clear", key="macro_clear", on_click=_clear_selection, width="stretch"
+    )
+
+    if view == "one_scale":
+        _one_scale(data, ticked, window, option_col)
+        return
+
+    measure = (
+        option_col.segmented_control(
+            "Show",
+            options=list(macro.MEASURES),
+            format_func=macro.MEASURES.get,
+            default="level",
+            key="macro_compare_measure",
+        )
+        or "level"
+    )
+    measured = [(i.label, *_measured(data, i, measure, window)) for i in ticked]
+
+    if view == "own_scales":
+        st.plotly_chart(
+            figures.make_indicator_panels_figure(
+                measured, title=macro.MEASURES[measure]
+            ),
+            width="stretch",
+        )
+    elif view == "two_axes":
+        st.plotly_chart(
+            figures.make_indicator_two_axes_figure(
+                measured, title=macro.MEASURES[measure]
+            ),
+            width="stretch",
+        )
+    else:
+        (x_label, x, x_unit), (y_label, y, y_unit) = measured
+        pairs = macro.monthly_pairs(x, y)
+        correlation = (
+            pairs.iloc[:, 0].corr(pairs.iloc[:, 1]) if len(pairs) > 2 else None
+        )
+        heading = f"{macro.MEASURES[measure]}, monthly"
+        if correlation is not None:
+            heading += f" · correlation {correlation:+.2f} over {len(pairs)} months"
+        st.plotly_chart(
+            figures.make_indicator_scatter_figure(
+                pairs,
+                x_label=f"{x_label} ({x_unit})",
+                y_label=f"{y_label} ({y_unit})",
+                title=heading,
+            ),
+            width="stretch",
+        )
 
 
 def _inspector(data: MacroData, shown: List[Indicator], window: str) -> None:
@@ -207,5 +382,6 @@ def render(data: MacroData, cache_mode: str, window: str) -> None:
         st.info("No indicators match these filters.")
         return
 
-    _catalogue(data, shown)
+    ticked = _catalogue(data, shown)
+    _comparison(data, ticked, window)
     _inspector(data, shown, window)

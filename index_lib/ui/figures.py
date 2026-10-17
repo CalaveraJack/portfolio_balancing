@@ -10,8 +10,16 @@ from typing import Optional, Sequence
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from index_lib.core.rates import tenor_label, tenor_sort_key, tenor_years
+from index_lib.ui.theme import (
+    DOWN_COLOR,
+    NEUTRAL,
+    PANEL,
+    SERIES_COLORS,
+    UP_COLOR,
+)
 
 
 def _layout(fig: go.Figure, title: str, x_title: str, y_title: str, height: int):
@@ -336,29 +344,36 @@ def make_mc_funding_fig(
 # ---------------------------------------------------------------------------
 
 #: Magnitude: one hue, dark to light on the dark panel.
-SEQUENTIAL_SCALE = [[0.0, "#14223a"], [0.5, "#2f6db5"], [1.0, "#cfe5ff"]]
+SEQUENTIAL_SCALE = [[0.0, "#2a1d0b"], [0.5, "#b07a22"], [1.0, "#f3dfae"]]
 
 #: Polarity: blue for falling, orange for rising, grey at zero.
-DIVERGING_SCALE = [[0.0, "#4c9be8"], [0.5, "#3a3f4b"], [1.0, "#d9822b"]]
+DIVERGING_SCALE = [[0.0, DOWN_COLOR], [0.5, "#3b352b"], [1.0, UP_COLOR]]
 
-UP_COLOR = "#d9822b"
-DOWN_COLOR = "#4c9be8"
-ZERO_LINE = dict(color="#5f6875", width=1)
+ZERO_LINE = dict(color=NEUTRAL, width=1)
+
+#: 3D scenes do not take the 2D template's grid, so they are warmed here.
+SCENE_AXIS = dict(
+    gridcolor="#3a3020", zerolinecolor="#3a3020", backgroundcolor="rgba(0,0,0,0)"
+)
 
 #: Factors keep their colour whichever method produced them.
-FACTOR_COLORS = {"Level": "#d9822b", "Slope": "#4c9be8", "Curvature": "#59c9a5"}
+FACTOR_COLORS = {
+    "Level": SERIES_COLORS[0],
+    "Slope": SERIES_COLORS[1],
+    "Curvature": SERIES_COLORS[3],
+}
 
 #: Colour follows the kind of move, so a filter never repaints the others.
 #: Bull moves are blues, bear moves oranges, twists and parallels set apart.
 MOVE_COLORS = {
-    "Bull steepener": "#4c9be8",
-    "Bull flattener": "#9cc8f2",
-    "Bear steepener": "#d9822b",
-    "Bear flattener": "#f0b77a",
-    "Steepening twist": "#59c9a5",
-    "Flattening twist": "#c77dff",
-    "Parallel up": "#9aa5b1",
-    "Parallel down": "#5f6875",
+    "Bull steepener": DOWN_COLOR,
+    "Bull flattener": "#86B4E6",
+    "Bear steepener": UP_COLOR,
+    "Bear flattener": "#E3B062",
+    "Steepening twist": SERIES_COLORS[3],
+    "Flattening twist": SERIES_COLORS[4],
+    "Parallel up": "#9A8F7A",
+    "Parallel down": NEUTRAL,
 }
 
 
@@ -393,7 +408,7 @@ def make_curve_compare_figure(
                 y=previous.reindex(current.index).values,
                 mode="lines+markers",
                 name=previous_label,
-                line=dict(width=2, dash="dot", color="#9aa5b1"),
+                line=dict(width=2, dash="dot", color="#9A8F7A"),
                 marker=dict(size=8),
                 text=labels,
                 hovertemplate="%{text}: %{y:.3f}%<extra>" + previous_label + "</extra>",
@@ -472,9 +487,11 @@ def make_curve_surface_figure(
         title=title,
         height=height,
         scene=dict(
-            xaxis=dict(title="Maturity", tickvals=positions, ticktext=labels),
-            yaxis=dict(title="Date"),
-            zaxis=dict(title="Yield (%)"),
+            xaxis=dict(
+                title="Maturity", tickvals=positions, ticktext=labels, **SCENE_AXIS
+            ),
+            yaxis=dict(title="Date", **SCENE_AXIS),
+            zaxis=dict(title="Yield (%)", **SCENE_AXIS),
             aspectmode="manual",
             aspectratio=dict(x=1.1, y=2.0, z=0.8),
             camera=dict(eye=dict(x=1.9, y=-1.3, z=0.9)),
@@ -621,7 +638,7 @@ def make_move_scatter_figure(
                 y=subset["d_slope"],
                 mode="markers",
                 name=move,
-                marker=dict(size=8, color=color, line=dict(width=1, color="#171a21")),
+                marker=dict(size=8, color=color, line=dict(width=1, color=PANEL)),
                 customdata=np.stack(
                     [
                         subset.index.strftime("%Y-%m-%d"),
@@ -673,6 +690,228 @@ def make_move_timeline_figure(
 # ---------------------------------------------------------------------------
 # Macro indicators
 # ---------------------------------------------------------------------------
+
+#: Comparison lines, in fixed order (never cycled); four at most are compared.
+COMPARE_COLORS = SERIES_COLORS[:4]
+
+
+def make_indicator_compare_figure(
+    lines: Sequence[tuple],
+    *,
+    title: str,
+    y_title: str,
+    height: int = 380,
+) -> go.Figure:
+    """
+    Several indicators on one axis.
+
+    ``lines`` holds (label, plotted series, raw series, raw unit). The hover
+    shows the raw value and its unit beside the plotted one, so a standardised
+    line can still be read in the indicator's own terms.
+    """
+    if not lines or all(plotted.empty for _, plotted, _, _ in lines):
+        return empty_fig(title=title, height=height)
+
+    fig = go.Figure()
+    for (label, plotted, raw, unit), color in zip(lines, COMPARE_COLORS):
+        if plotted.empty:
+            continue
+        raw_values = raw.reindex(plotted.index).values
+        fig.add_trace(
+            go.Scatter(
+                x=plotted.index,
+                y=plotted.values,
+                mode="lines",
+                name=label,
+                line=dict(width=2, color=color),
+                customdata=raw_values,
+                hovertemplate=(
+                    "%{x|%Y-%m-%d}: %{y:+.2f} · value %{customdata:,.3f} "
+                    + unit
+                    + "<extra>"
+                    + label
+                    + "</extra>"
+                ),
+            )
+        )
+    fig.add_hline(y=0.0, line=ZERO_LINE)
+    fig.update_layout(hovermode="x unified", legend=dict(orientation="h", y=-0.2))
+    return _layout(fig, title, "Period", y_title, height)
+
+
+def make_indicator_panels_figure(
+    lines: Sequence[tuple],
+    *,
+    title: str,
+    height_per_panel: int = 170,
+) -> go.Figure:
+    """
+    One panel per indicator on a shared time axis, each with its own scale.
+
+    ``lines`` holds (label, series, unit). Hovering one panel shows the date
+    across all of them.
+    """
+    lines = [line for line in lines if not line[1].empty]
+    if not lines:
+        return empty_fig(title=title)
+
+    fig = make_subplots(
+        rows=len(lines),
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.04,
+        subplot_titles=[label for label, _, _ in lines],
+    )
+    for row, ((label, series, unit), color) in enumerate(
+        zip(lines, COMPARE_COLORS), start=1
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=series.index,
+                y=series.values,
+                mode="lines",
+                name=label,
+                line=dict(width=2, color=color),
+                hovertemplate="%{x|%Y-%m-%d}: %{y:,.3f} " + unit + "<extra></extra>",
+            ),
+            row=row,
+            col=1,
+        )
+        fig.update_yaxes(title_text=unit, row=row, col=1)
+
+    fig.update_layout(
+        title=title,
+        height=height_per_panel * len(lines) + 90,
+        showlegend=False,
+        hovermode="x unified",
+    )
+    fig.update_annotations(font=dict(size=12))
+    return fig
+
+
+def make_indicator_two_axes_figure(
+    lines: Sequence[tuple],
+    *,
+    title: str,
+    height: int = 400,
+) -> go.Figure:
+    """
+    Two indicators, the first on the left axis, the second on the right.
+
+    Each axis is coloured like its line so the pairing is never in doubt.
+    """
+    if len(lines) != 2 or any(series.empty for _, series, _ in lines):
+        return empty_fig(title=title, height=height)
+
+    (left_label, left, left_unit), (right_label, right, right_unit) = lines
+    left_color, right_color = COMPARE_COLORS[0], COMPARE_COLORS[1]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=left.index,
+            y=left.values,
+            name=left_label,
+            line=dict(width=2, color=left_color),
+            hovertemplate="%{y:,.3f} "
+            + left_unit
+            + "<extra>"
+            + left_label
+            + "</extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=right.index,
+            y=right.values,
+            name=right_label,
+            yaxis="y2",
+            line=dict(width=2, color=right_color),
+            hovertemplate="%{y:,.3f} "
+            + right_unit
+            + "<extra>"
+            + right_label
+            + "</extra>",
+        )
+    )
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x unified",
+        legend=dict(orientation="h", y=-0.2),
+        yaxis=dict(
+            title=dict(text=f"{left_label} ({left_unit})", font=dict(color=left_color)),
+            tickfont=dict(color=left_color),
+        ),
+        yaxis2=dict(
+            title=dict(
+                text=f"{right_label} ({right_unit})", font=dict(color=right_color)
+            ),
+            tickfont=dict(color=right_color),
+            overlaying="y",
+            side="right",
+            showgrid=False,
+        ),
+        xaxis=dict(title="Period"),
+    )
+    return fig
+
+
+def make_indicator_scatter_figure(
+    pairs: pd.DataFrame,
+    *,
+    x_label: str,
+    y_label: str,
+    title: str,
+    height: int = 440,
+) -> go.Figure:
+    """
+    One indicator against another, one point per month, coloured by date.
+
+    The latest month is ringed, so the eye finds "where we are now".
+    """
+    if pairs is None or pairs.empty:
+        return empty_fig(title=title, height=height)
+
+    order = np.arange(len(pairs))
+    fig = go.Figure(
+        go.Scatter(
+            x=pairs.iloc[:, 0],
+            y=pairs.iloc[:, 1],
+            mode="markers",
+            marker=dict(
+                size=8,
+                color=order,
+                colorscale=SEQUENTIAL_SCALE,
+                colorbar=dict(
+                    title="Date",
+                    tickvals=[0, len(pairs) - 1],
+                    ticktext=[
+                        str(pairs.index[0].date()),
+                        str(pairs.index[-1].date()),
+                    ],
+                ),
+                line=dict(width=0),
+            ),
+            customdata=pairs.index.strftime("%Y-%m"),
+            hovertemplate="%{customdata}: x %{x:,.3f} · y %{y:,.3f}<extra></extra>",
+            showlegend=False,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[pairs.iloc[-1, 0]],
+            y=[pairs.iloc[-1, 1]],
+            mode="markers",
+            marker=dict(
+                size=16, color="rgba(0,0,0,0)", line=dict(width=2, color=UP_COLOR)
+            ),
+            name=f"Latest ({pairs.index[-1].date()})",
+            hoverinfo="skip",
+        )
+    )
+    fig.update_layout(legend=dict(orientation="h", y=-0.2))
+    return _layout(fig, title, x_label, y_label, height)
 
 
 def make_indicator_figure(
