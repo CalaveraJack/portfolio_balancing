@@ -25,7 +25,6 @@ from index_lib import __version__
 from index_lib.library import slugify
 from index_lib.runner import BacktestResult
 from index_lib.strategy import (
-    CONFIG_FIELDS,
     OVERLAY_FIELDS,
     OverlayConfig,
     StrategyConfig,
@@ -105,7 +104,7 @@ def _record_to_dict(record: RunRecord) -> Dict[str, object]:
         "app_version": record.app_version,
         "data_mode": record.data_mode,
         "data_vintage": record.data_vintage,
-        "config": {f: getattr(record.config, f) for f in CONFIG_FIELDS},
+        "config": record.config.saved_fields(),
         "window": {"start": record.config.start, "end": record.config.end},
         "overlay": {f: getattr(record.overlay, f) for f in OVERLAY_FIELDS},
         "stocks": {

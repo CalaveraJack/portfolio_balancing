@@ -14,6 +14,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from index_lib.allocation import SleevePlan, resolve_sleeves
 from index_lib.core import (
     apply_vol_target_overlay,
     build_index_series,
@@ -75,6 +76,20 @@ def _market_caps_for(
     return data.market_caps.reindex(columns=list(selection.constituents))
 
 
+def sleeve_plan(
+    cfg: StrategyConfig, selection: UniverseSelection
+) -> Optional[SleevePlan]:
+    """The class budgets resolved against the selected holdings, if any are set."""
+    if not cfg.has_class_budgets:
+        return None
+    return resolve_sleeves(cfg.budgets, selection.constituents)
+
+
+def _sleeves_for(cfg: StrategyConfig, selection: UniverseSelection):
+    plan = sleeve_plan(cfg, selection)
+    return plan.sleeves if plan is not None else None
+
+
 def run_backtest(
     data: UniverseData,
     rates: RatesInspectorData,
@@ -119,6 +134,7 @@ def run_backtest(
         market_caps=_market_caps_for(data, cfg, selection),
         cash_rates=funding["cash_rate"],
         short_rates=short_rates,
+        sleeves=_sleeves_for(cfg, selection),
         **cfg.index_kwargs(),
     )
 
@@ -246,16 +262,19 @@ def run_monte_carlo(
         f" / {mc.funding_method}" if mc.funding_model == "mc" else ""
     )
 
-    if cfg.is_optimizer:
+    if cfg.is_optimizer or cfg.has_class_budgets:
         # Bootstrap the realized strategy returns rather than pretending we
-        # re-optimize on every simulated constituent path.
+        # re-optimize on every simulated constituent path. The constituent
+        # engines apply one weighting rule across every name, so a book built
+        # class by class takes this route too.
         _, _, base_returns, _, _ = build_index_series(
             close=data.close,
             constituents=list(selection.constituents),
             start=cfg.start,
             end=cfg.end,
             base_level=BASE_LEVEL,
-            market_caps=None,
+            market_caps=_market_caps_for(data, cfg, selection),
+            sleeves=_sleeves_for(cfg, selection),
             **cfg.index_kwargs(),
         )
 

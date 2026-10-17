@@ -91,6 +91,29 @@ PHARMA_48: List[str] = [
 ]
 
 
+#: One or more proxies per asset class, declared class by class. Classes are
+#: tagged in asset_classes.py.
+MULTI_ASSET: List[str] = [
+    "SPY",
+    "IWM",
+    "VEA",
+    "VGK",
+    "EWJ",
+    "EEM",
+    "SHY",
+    "IEF",
+    "TLT",
+    "BWX",
+    "TIP",
+    "LQD",
+    "HYG",
+    "EMB",
+    "VNQ",
+    "DBC",
+    "GLD",
+]
+
+
 DEFAULT_UNIVERSE: List[str] = PHARMA_48
 
 
@@ -117,6 +140,7 @@ UNIVERSES: Dict[str, Universe] = {
         Universe("pharma", "Pharma & Healthcare", tuple(PHARMA_48)),
         Universe("megacap", "Mega-cap Core", tuple(BASE_10)),
         Universe("diversified", "Diversified + ETFs", tuple(PLUS_20)),
+        Universe("multi_asset", "Multi-asset (ETFs)", tuple(MULTI_ASSET)),
     )
 }
 

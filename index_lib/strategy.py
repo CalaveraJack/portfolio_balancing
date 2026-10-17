@@ -9,8 +9,9 @@ percent-to-fraction conversions or the long-only guard rails.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
 
+from index_lib.config import ASSET_CLASSES
 from index_lib.core.backtest import LOOKBACK_METHODS, OPTIMIZER_METHODS
 
 COV_ESTIMATORS: Dict[str, str] = {
@@ -66,6 +67,38 @@ CONFIG_FIELDS = (
     "risk_free_rate",
     "cov_estimator",
 )
+
+# Settings added after files were first written. Saved like the rest, but a file
+# without them still loads, falling back to the field's default.
+OPTIONAL_CONFIG_FIELDS = ("class_budgets",)
+
+SAVED_CONFIG_FIELDS = CONFIG_FIELDS + OPTIONAL_CONFIG_FIELDS
+
+#: Class key -> share of the invested book, as held on the config: a tuple of
+#: pairs, so the config stays hashable for caching.
+ClassBudgets = Tuple[Tuple[str, float], ...]
+
+
+def normalize_class_budgets(
+    budgets: Union[None, Mapping[str, float], Sequence[Sequence[object]]],
+) -> Optional[ClassBudgets]:
+    """
+    Budgets in a canonical form: known classes, positive shares, menu order.
+
+    Accepts a mapping, or the list of pairs JSON gives back. Shares are kept as
+    given; resolving them against the selected holdings rescales them.
+    """
+    if not budgets:
+        return None
+
+    pairs = budgets.items() if isinstance(budgets, Mapping) else budgets
+    shares = {str(k): float(v) for k, v in pairs}
+
+    ordered = tuple(
+        (k, shares[k]) for k in ASSET_CLASSES if k in shares and shares[k] > 0.0
+    )
+    return ordered or None
+
 
 OVERLAY_FIELDS = (
     "enabled",
@@ -144,6 +177,16 @@ class StrategyConfig:
     short_borrow_cost: float
     risk_free_rate: float
     cov_estimator: str
+    #: Optional share of the invested book per asset class. None runs the method
+    #: across every holding at once, as before class budgets existed.
+    class_budgets: Optional[ClassBudgets] = None
+
+    def __post_init__(self) -> None:
+        # JSON hands budgets back as lists; held canonical so equal configs hash
+        # equal and the backtest cache recognises them.
+        object.__setattr__(
+            self, "class_budgets", normalize_class_budgets(self.class_budgets)
+        )
 
     @classmethod
     def from_ui(
@@ -164,6 +207,7 @@ class StrategyConfig:
         short_borrow_cost_pct: Optional[float],
         rf_rate_pct: Optional[float],
         cov_estimator: Optional[str],
+        class_budgets_pct: Optional[Mapping[str, float]] = None,
     ) -> "StrategyConfig":
         method = method if method in METHODS else DEFAULT_METHOD
         form = optimizer_form if optimizer_form in OPTIMIZER_FORMS else "long_only"
@@ -200,6 +244,11 @@ class StrategyConfig:
             cov_estimator=(
                 cov_estimator if cov_estimator in COV_ESTIMATORS else "sample"
             ),
+            class_budgets=(
+                {k: float(v) / 100.0 for k, v in class_budgets_pct.items()}
+                if class_budgets_pct
+                else None
+            ),
         )
 
     @property
@@ -209,6 +258,20 @@ class StrategyConfig:
     @property
     def uses_lookback(self) -> bool:
         return method_uses_lookback(self.method)
+
+    def saved_fields(self) -> Dict[str, object]:
+        """The settings as written to disk; budgets as a plain mapping."""
+        fields: Dict[str, object] = {f: getattr(self, f) for f in CONFIG_FIELDS}
+        fields["class_budgets"] = self.budgets or None
+        return fields
+
+    @property
+    def has_class_budgets(self) -> bool:
+        return bool(self.class_budgets)
+
+    @property
+    def budgets(self) -> Dict[str, float]:
+        return dict(self.class_budgets or ())
 
     @property
     def effective_lookback(self) -> int:

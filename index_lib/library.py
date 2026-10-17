@@ -115,7 +115,7 @@ def to_dict(saved: SavedStrategy) -> Dict[str, object]:
         "app_version": saved.app_version,
         "created_at": saved.created_at,
         "updated_at": saved.updated_at,
-        "config": {f: getattr(saved.config, f) for f in CONFIG_FIELDS},
+        "config": saved.config.saved_fields(),
         "overlay": {f: getattr(saved.overlay, f) for f in OVERLAY_FIELDS},
         "stocks": None,
     }

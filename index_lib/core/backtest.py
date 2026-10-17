@@ -4,6 +4,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
+from index_lib.config import asset_class_label
+
 from .rebalancing import rebalance_dates
 from .weighting import compute_weights
 
@@ -80,6 +82,134 @@ def _has_sufficient_history(hist: pd.DataFrame, min_obs: int) -> bool:
     return len(usable_cols) >= 2
 
 
+def _solve(
+    hist: pd.DataFrame,
+    method: str,
+    *,
+    lookback: int,
+    weight_kwargs: Dict[str, object],
+    initial: bool,
+) -> Tuple[pd.Series, Optional[Dict[str, object]]]:
+    """
+    Target weights for one pool of holdings, and the optimizer's report if one ran.
+
+    Optimizers need return history, so they start equal-weighted and fall back to
+    equal weight until there is enough of it.
+    """
+    invested = float(weight_kwargs["net_exposure"])
+
+    if method in OPTIMIZER_METHODS:
+        if initial:
+            return _equal_weights(hist.columns, invested), None
+
+        if not _has_sufficient_history(hist, min_obs=max(20, min(int(lookback), 60))):
+            return _equal_weights(hist.columns, invested), _blank_diagnostics(
+                "not enough history yet; fell back to equal weight"
+            )
+
+        w, solver_report = compute_weights(
+            hist, method, return_diagnostics=True, **weight_kwargs
+        )
+        return w, {f: solver_report.get(f) for f in OPTIMIZER_DIAGNOSTIC_FIELDS}
+
+    return compute_weights(hist, method, **weight_kwargs), None
+
+
+def _combine_reports(
+    reports: Dict[str, Tuple[float, Dict[str, object]]], invested: float
+) -> Dict[str, object]:
+    """
+    One diagnostics row for a rebalance solved class by class.
+
+    Returns and exposures add up across classes, weighted by their budgets;
+    volatility and Sharpe do not, since they depend on how the classes co-move,
+    so they are left blank rather than misstated.
+    """
+    row: Dict[str, object] = dict.fromkeys(OPTIMIZER_DIAGNOSTIC_FIELDS)
+    row["success"] = all(bool(r.get("success")) for _, r in reports.values())
+    row["message"] = "; ".join(
+        f"{asset_class_label(k)}: {r.get('message')}" for k, (_, r) in reports.items()
+    )
+
+    for name in (
+        "solution_return",
+        "net_exposure",
+        "gross_exposure",
+        "short_notional",
+    ):
+        values = [(b, r.get(name)) for b, r in reports.values()]
+        if all(v is not None for _, v in values):
+            row[name] = invested * sum(b * float(v) for b, v in values)
+
+    return row
+
+
+def _target_weights(
+    hist: pd.DataFrame,
+    method: str,
+    *,
+    lookback: int,
+    weight_kwargs: Dict[str, object],
+    sleeves: Optional[Dict[str, Tuple[Sequence[str], float]]],
+    initial: bool = False,
+) -> Tuple[pd.Series, Optional[Dict[str, object]]]:
+    """
+    Target weights for the whole book.
+
+    Without class budgets the method runs on every holding at once. With them it
+    runs inside each class on its own, as though that class were the whole book,
+    and the result is scaled to the class's share of the invested fraction. Caps
+    and limits therefore apply within a class.
+    """
+    if not sleeves:
+        return _solve(
+            hist,
+            method,
+            lookback=lookback,
+            weight_kwargs=weight_kwargs,
+            initial=initial,
+        )
+
+    invested = float(weight_kwargs["net_exposure"])
+    gross = float(weight_kwargs["max_gross_exposure"])
+    sleeve_kwargs = dict(
+        weight_kwargs,
+        net_exposure=1.0,
+        max_gross_exposure=gross / invested if invested > 0 else 1.0,
+    )
+
+    parts: List[pd.Series] = []
+    reports: Dict[str, Tuple[float, Dict[str, object]]] = {}
+
+    for asset_class, (names, budget) in sleeves.items():
+        columns = [c for c in names if c in hist.columns]
+        if not columns or budget <= 0:
+            continue
+
+        if len(columns) == 1:
+            # One holding takes the whole budget; there is nothing to optimise.
+            w = pd.Series(1.0, index=columns)
+            report = None
+            if method in OPTIMIZER_METHODS and not initial:
+                report = _blank_diagnostics("one holding; no optimisation needed")
+                report.update(success=True, net_exposure=1.0, gross_exposure=1.0)
+        else:
+            w, report = _solve(
+                hist[columns],
+                method,
+                lookback=lookback,
+                weight_kwargs=sleeve_kwargs,
+                initial=initial,
+            )
+
+        parts.append(w * budget * invested)
+        if report is not None:
+            reports[asset_class] = (budget, report)
+
+    weights = pd.concat(parts) if parts else pd.Series(dtype=float)
+    return weights, (_combine_reports(reports, invested) if reports else None)
+
+
 def build_index_series(
     close: pd.DataFrame,
     constituents: Sequence[str],
@@ -102,6 +232,7 @@ def build_index_series(
     cov_estimator: str = "sample",
     cash_rates: Optional[pd.Series] = None,
     short_rates: Optional[pd.Series] = None,
+    sleeves: Optional[Dict[str, Tuple[Sequence[str], float]]] = None,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Backtest a long-only strategy with periodic rebalancing and daily weight drift.
@@ -113,6 +244,9 @@ def build_index_series(
     - Those target weights are then used for the return on t.
     - Missing returns are handled by dropping unavailable names and
       renormalizing weights.
+    - With ``sleeves`` (class -> (holdings, share of the invested book)) the
+      method runs inside each class and holdings outside every sleeve get no
+      weight.
     """
     if optimizer_form not in {"long_only", "long_short"}:
         raise ValueError("optimizer_form must be 'long_only' or 'long_short'.")
@@ -160,12 +294,11 @@ def build_index_series(
                 caps_series_init = market_caps.loc[available_dates[-1]]
     # Initial state before the first rebalance.
     # Optimizers require historical returns, so they must not be called on px.iloc[:1].
-    if method in OPTIMIZER_METHODS:
-        w = _equal_weights(px.columns, net_exposure)
-    else:
-        w = compute_weights(
-            px.iloc[:1],
-            method,
+    w, _ = _target_weights(
+        px.iloc[:1],
+        method,
+        lookback=lookback,
+        weight_kwargs=dict(
             lookback=lookback,
             cap=cap,
             market_caps=caps_series_init,
@@ -177,7 +310,10 @@ def build_index_series(
             short_borrow_cost=short_borrow_cost,
             risk_free_rate=risk_free_rate,
             cov_estimator=cov_estimator,
-        )
+        ),
+        sleeves=sleeves,
+        initial=True,
+    )
 
     level = float(base_level)
     levels: List[Tuple[pd.Timestamp, float]] = []
@@ -229,24 +365,17 @@ def build_index_series(
                 cov_estimator=cov_estimator,
             )
 
-            if method in OPTIMIZER_METHODS and not _has_sufficient_history(
+            w, report = _target_weights(
                 hist,
-                min_obs=max(20, min(int(lookback), 60)),
-            ):
-                w = _equal_weights(hist.columns, net_exposure)
-                optimizer_records[dt] = _blank_diagnostics(
-                    "not enough history yet; fell back to equal weight"
+                method,
+                lookback=lookback,
+                weight_kwargs=weight_kwargs,
+                sleeves=sleeves,
+            )
+            if method in OPTIMIZER_METHODS:
+                optimizer_records[dt] = report or _blank_diagnostics(
+                    "no holdings to optimise"
                 )
-            elif method in OPTIMIZER_METHODS:
-                w, solver_report = compute_weights(
-                    hist, method, return_diagnostics=True, **weight_kwargs
-                )
-                optimizer_records[dt] = {
-                    field: solver_report.get(field)
-                    for field in OPTIMIZER_DIAGNOSTIC_FIELDS
-                }
-            else:
-                w = compute_weights(hist, method, **weight_kwargs)
 
             weights_hist[dt] = w
 
