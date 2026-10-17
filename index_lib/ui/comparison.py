@@ -77,8 +77,6 @@ def render(
     history_start: str = "2022-01-01",
     data_dir: str = "data",
 ) -> None:
-    st.subheader("Compare")
-
     recorded = runs.list_runs()
     tickers = [t for t in data.close.columns if isinstance(t, str)]
 
@@ -99,7 +97,8 @@ def render(
             format_func=lambda rid: next(
                 (r.name for r in recorded if r.run_id == rid), rid
             ),
-            default=[r.run_id for r in recorded[:2]],
+            # The newest run only: the one just recorded is the usual subject.
+            default=[r.run_id for r in recorded[:1]],
         )
 
     with stocks_col:
@@ -216,6 +215,12 @@ def render(
             )
 
     correlation = compare.correlation_matrix(comparables, alignment=alignment)
-    if not correlation.empty:
-        section("Correlation of daily returns")
-        st.dataframe(tables.correlation_frame(correlation), width="stretch")
+    if not correlation.empty and len(correlation) > 1:
+        st.plotly_chart(
+            figures.make_correlation_heatmap(
+                correlation,
+                title="Correlation of daily returns",
+                height=max(320, 40 * len(correlation) + 140),
+            ),
+            width="stretch",
+        )

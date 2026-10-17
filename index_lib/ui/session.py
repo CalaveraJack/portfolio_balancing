@@ -14,7 +14,7 @@ from typing import Dict, Optional
 
 import streamlit as st
 
-from index_lib.config import ASSET_CLASSES, classes_present, resolve_universe_key
+from index_lib.config import classes_present, resolve_universe_key
 from index_lib.library import SavedStrategy
 from index_lib.strategy import OverlayConfig, StrategyConfig
 
@@ -29,10 +29,17 @@ ASSET_CLASSES_KEY = "forge_asset_classes"
 #: The classes picked on the previous run, so a change can tell what was added.
 PREVIOUS_CLASSES_KEY = "_forge_asset_classes_before"
 BUDGETS_ON_KEY = "forge_budgets_on"
+#: Class key -> budget in percent: what the budget table shows and edits.
+BUDGETS_KEY = "forge_budgets"
+#: Bumped whenever the budgets are set from outside the table (a preset, a
+#: loaded strategy), so the table is drawn afresh rather than from its edits.
+BUDGET_VERSION_KEY = "_forge_budget_version"
 
 
-def budget_key(asset_class: str) -> str:
-    return f"forge_budget_{asset_class}"
+def bump_budget_version() -> None:
+    st.session_state[BUDGET_VERSION_KEY] = (
+        int(st.session_state.get(BUDGET_VERSION_KEY, 0)) + 1
+    )
 
 
 # Controls whose valid choices depend on which stock set is loaded. A selection
@@ -46,8 +53,6 @@ UNIVERSE_DEPENDENT_KEYS = (
     "forge_start",
     "forge_end",
     "univ_ticker",
-    "univ_start",
-    "univ_end",
 )
 
 
@@ -127,14 +132,10 @@ def control_values(config: StrategyConfig, overlay: OverlayConfig) -> Dict[str, 
         BUDGETS_ON_KEY: config.has_class_budgets,
     }
 
-    # A strategy without budgets leaves the budget inputs as they were, so
+    # A strategy without budgets leaves the budget table as it was, so
     # switching budgets back on finds the last values used.
     if config.has_class_budgets:
-        budgets = config.budgets
-        for asset_class in ASSET_CLASSES:
-            values[budget_key(asset_class)] = float(
-                budgets.get(asset_class, 0.0) * 100.0
-            )
+        values[BUDGETS_KEY] = {k: float(v * 100.0) for k, v in config.budgets.items()}
 
     return values
 
@@ -154,6 +155,7 @@ def apply_pending_load() -> None:
 
     for key, value in control_values(pending.config, pending.overlay).items():
         st.session_state[key] = value
+    bump_budget_version()
 
     st.session_state[LOADED_NAME_KEY] = pending.name
     st.session_state["lib_name"] = pending.name

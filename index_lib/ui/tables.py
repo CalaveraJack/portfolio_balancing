@@ -5,31 +5,18 @@ render them with a plain ``st.dataframe`` call.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 
 from index_lib.config import asset_class_label, describe, group_by_class
 from index_lib.core import compute_stats_from_price_series
-from index_lib.core.rates import compute_curve_spreads
-from index_lib.ui.formatting import fmt_bp, fmt_num, fmt_pct
-
-CURVE_SPREADS = ("2s10s", "3m10y", "5s30s")
-CURVE_TENORS = (
-    ("USD_3M", "3M"),
-    ("USD_2Y", "2Y"),
-    ("USD_10Y", "10Y"),
-    ("USD_30Y", "30Y"),
-)
+from index_lib.ui.formatting import fmt_num, fmt_pct
 
 
 def _metric_frame(rows: Sequence[Tuple[str, str]]) -> pd.DataFrame:
     return pd.DataFrame(list(rows), columns=["Metric", "Value"])
-
-
-def _rate_pct(value: object) -> str:
-    return f"{float(value):.3f}%" if pd.notna(value) else "-"
 
 
 def stats_frame(stats: Dict[str, object], *, include_obs: bool = True) -> pd.DataFrame:
@@ -79,9 +66,6 @@ def _period(value: object) -> str:
     )
 
 
-STATUS_MARKS = {"ok": "✅ ok", "failed": "⚠️ failed", "not cached": "— not cached"}
-
-
 def macro_status_frame(status: pd.DataFrame) -> pd.DataFrame:
     """The catalogue table, formatted for reading."""
     if status is None or status.empty:
@@ -92,8 +76,6 @@ def macro_status_frame(status: pd.DataFrame) -> pd.DataFrame:
             "Region": status["Region"],
             "Category": status["Category"],
             "Indicator": status["Indicator"],
-            "Status": status["Status"].map(lambda s: STATUS_MARKS.get(s, s)),
-            "Freq.": status["Frequency"],
             "Latest": status["Latest"].map(_num),
             "Unit": status["Unit"],
             "Period": status["Period"].map(_period),
@@ -101,16 +83,11 @@ def macro_status_frame(status: pd.DataFrame) -> pd.DataFrame:
                 _signed(v, u)
                 for v, u in zip(status["Change on year"], status["Change unit"])
             ],
-            "Days old": status["Days old"].map(lambda v: "-" if pd.isna(v) else int(v)),
-            "Since": status["Since"].map(_period),
-            "Source": status["Source"],
         }
     )
 
 
-def macro_key_figures_frame(
-    figures: Dict[str, object], indicator, state
-) -> pd.DataFrame:
+def macro_key_figures_frame(figures: Dict[str, object], indicator) -> pd.DataFrame:
     """Latest reading, its changes and its place in the recent range."""
     unit = "pp" if indicator.is_rate else "%"
     rows: List[Tuple[str, str]] = [
@@ -128,9 +105,6 @@ def macro_key_figures_frame(
         ),
         ("History from", _period(figures.get("first_date"))),
         ("Observations", str(figures.get("observations", "-"))),
-        ("Source", indicator.provider),
-        ("Series key", indicator.key),
-        ("Fetched", str(state.fetched_at) if state and state.fetched_at else "-"),
     ]
     return _metric_frame(rows)
 
@@ -247,92 +221,6 @@ def overlay_stats_frame(overlay_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _curve_rows_at(
-    curve: pd.DataFrame,
-    spreads: pd.DataFrame,
-    curve_date: Optional[str],
-) -> Tuple[pd.Series, pd.Series, str]:
-    """Curve and spread levels on the selected date (or the latest populated one)."""
-    if curve_date:
-        selected = pd.to_datetime(curve_date)
-
-        def _at(df: pd.DataFrame) -> pd.Series:
-            if df.empty:
-                return pd.Series(dtype=float)
-            return (
-                df.reindex(df.index.union([selected]))
-                .sort_index()
-                .ffill()
-                .loc[selected]
-            )
-
-        return _at(curve), _at(spreads), str(selected.date())
-
-    curve_populated = curve.dropna(how="all")
-    spreads_populated = spreads.dropna(how="all")
-
-    return (
-        curve_populated.iloc[-1]
-        if not curve_populated.empty
-        else pd.Series(dtype=float),
-        spreads_populated.iloc[-1]
-        if not spreads_populated.empty
-        else pd.Series(dtype=float),
-        str(curve_populated.index[-1].date()) if not curve_populated.empty else "-",
-    )
-
-
-def _change_20d(df: pd.DataFrame, column: str) -> float:
-    if column not in df.columns:
-        return np.nan
-
-    series = df[column].dropna()
-    if len(series) < 21:
-        return np.nan
-
-    return float(series.iloc[-1] - series.iloc[-21])
-
-
-def rates_summary_frame(
-    funding: pd.DataFrame,
-    curve: pd.DataFrame,
-    cache_info: Dict[str, object],
-    *,
-    curve_date: Optional[str] = None,
-) -> pd.DataFrame:
-    """Cache provenance, latest funding fixing, and curve levels/spreads."""
-    meta = cache_info.get("meta", {}) if isinstance(cache_info, dict) else {}
-
-    sofr_latest = np.nan
-    if "USD_SOFR" in funding.columns:
-        series = funding["USD_SOFR"].dropna()
-        if not series.empty:
-            sofr_latest = float(series.iloc[-1])
-
-    spreads = compute_curve_spreads(curve)
-    curve_row, spread_row, selected_curve_date = _curve_rows_at(
-        curve, spreads, curve_date
-    )
-
-    rows: List[Tuple[str, str]] = [
-        ("Source", str(meta.get("source", "FRED"))),
-        ("Last refresh", str(meta.get("last_refresh_ts", "-"))),
-        ("Latest funding fixing", str(meta.get("latest_funding_fixing_date", "-"))),
-        ("Latest curve fixing", str(meta.get("latest_curve_fixing_date", "-"))),
-        ("Selected curve date", selected_curve_date),
-        ("USD SOFR", _rate_pct(sofr_latest)),
-    ]
-
-    rows += [(name, fmt_bp(spread_row.get(name))) for name in CURVE_SPREADS]
-    rows += [
-        (f"{name} (20d chg)", fmt_bp(_change_20d(spreads, name)))
-        for name in CURVE_SPREADS
-    ]
-    rows += [(label, _rate_pct(curve_row.get(col))) for col, label in CURVE_TENORS]
-
-    return _metric_frame(rows)
-
-
 def move_summary_frame(summary: pd.DataFrame) -> pd.DataFrame:
     """How often each kind of curve move happened, formatted."""
     if summary is None or summary.empty:
@@ -442,9 +330,3 @@ def comparison_stats_frame(stats: pd.DataFrame) -> pd.DataFrame:
             out[column] = out[column].map(formatter)
 
     return out
-
-
-def correlation_frame(matrix: pd.DataFrame) -> pd.DataFrame:
-    if matrix is None or matrix.empty:
-        return pd.DataFrame()
-    return matrix.round(2)

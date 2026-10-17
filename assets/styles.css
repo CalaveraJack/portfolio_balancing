@@ -78,6 +78,14 @@
   margin: 6px 0 10px;
 }
 
+.section-help {
+  color: var(--muted);
+  font-weight: 400;
+  cursor: help;
+  margin-left: 4px;
+  letter-spacing: 0;
+}
+
 .note {
   color: var(--muted);
   font-size: 12px;

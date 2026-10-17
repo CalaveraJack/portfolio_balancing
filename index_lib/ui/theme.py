@@ -4,8 +4,10 @@ Page chrome: Streamlit page config, the dark stylesheet, and the Plotly template
 
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
+from typing import Optional
 
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -105,9 +107,20 @@ def render_header() -> None:
     )
 
 
-def section(title: str) -> None:
-    """Small uppercase accent heading used to open a panel."""
-    st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
+def section(title: str, help: Optional[str] = None) -> None:
+    """
+    Small uppercase accent heading used to open a panel.
+
+    ``help`` adds an info mark whose tooltip explains the panel, for the
+    things worth knowing that do not belong on screen all the time.
+    """
+    mark = ""
+    if help:
+        text = html.escape(help, quote=True)
+        mark = f' <span class="section-help" title="{text}">ⓘ</span>'
+    st.markdown(
+        f'<div class="section-header">{title}{mark}</div>', unsafe_allow_html=True
+    )
 
 
 def note(text: str) -> None:

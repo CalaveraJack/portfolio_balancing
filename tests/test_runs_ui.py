@@ -50,13 +50,15 @@ def test_recording_keeps_the_settings_and_the_numbers(app: AppTest, tmp_path):
     assert not result.index_level.empty
 
 
-def test_a_run_needs_a_name(app: AppTest, tmp_path):
+def test_a_run_without_a_name_gets_one(app: AppTest, tmp_path):
+    """Naming is not a reason to refuse: the run is named after what it is."""
     app.session_state["run_name"] = "   "
     app.run()
     app.button(key="run_save").click().run()
 
-    assert runs.list_runs(directory=tmp_path) == []
-    assert any("name" in w.value.lower() for w in app.warning)
+    (record,) = runs.list_runs(directory=tmp_path)
+    assert "Equal Weight" in record.name
+    assert " to " in record.name
 
 
 def test_opening_a_run_shows_it_and_closing_returns_to_live(app: AppTest, tmp_path):

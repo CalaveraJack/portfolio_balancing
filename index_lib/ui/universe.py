@@ -16,10 +16,18 @@ from index_lib.config import asset_class_label, asset_class_of, describe, group_
 from index_lib.core import compute_stats_from_price_series
 from index_lib.datasets import UniverseData
 from index_lib.ui import figures, tables
-from index_lib.ui.theme import note, section
+from index_lib.ui.window import cut
 
 #: More lines than this and the colours stop telling names apart.
 MAX_COMPARED = 8
+
+VIEWS = ("Overview", "Performance", "Correlation", "Single name")
+
+CORRELATION_HELP = (
+    "Daily return correlation over the window, names ordered by asset class, so "
+    "blocks along the diagonal are classes that move together. Orange is "
+    "positive, blue negative. Pairs need 60 shared days."
+)
 
 
 def _name_label(tickers: List[str]):
@@ -41,7 +49,6 @@ def _default_compared(tickers: List[str]) -> List[str]:
 
 
 def _overview(close: pd.DataFrame) -> None:
-    section("Overview by asset class")
     st.dataframe(
         tables.universe_overview_frame(close),
         hide_index=True,
@@ -51,8 +58,6 @@ def _overview(close: pd.DataFrame) -> None:
 
 
 def _relative(close: pd.DataFrame, tickers: List[str]) -> None:
-    section("Relative performance")
-
     compared = st.multiselect(
         "Names",
         key="univ_compared",
@@ -90,8 +95,6 @@ def _relative(close: pd.DataFrame, tickers: List[str]) -> None:
 
 
 def _correlation(close: pd.DataFrame, tickers: List[str]) -> None:
-    section("Correlation of daily returns")
-
     ordered = [t for names in group_by_class(tickers).values() for t in names]
     returns = close[ordered].pct_change(fill_method=None)
     matrix = returns.corr(min_periods=60)
@@ -102,16 +105,10 @@ def _correlation(close: pd.DataFrame, tickers: List[str]) -> None:
         ),
         width="stretch",
     )
-    note(
-        "Names are ordered by asset class, so blocks along the diagonal are classes "
-        "that move together. Orange is positive correlation, blue negative. Needs "
-        "at least 60 shared days per pair."
-    )
+    st.caption("How to read this", help=CORRELATION_HELP)
 
 
 def _single_name(close: pd.DataFrame, tickers: List[str]) -> None:
-    section("Single name")
-
     pick_col, stats_col = st.columns([2, 1], gap="large")
 
     with pick_col:
@@ -159,37 +156,30 @@ def _single_name(close: pd.DataFrame, tickers: List[str]) -> None:
         )
 
 
-def render(data: UniverseData) -> None:
+def render(data: UniverseData, window: str) -> None:
     if data.close.empty:
         st.warning("No price data loaded.")
         return
 
     tickers = [t for t in data.close.columns if isinstance(t, str)]
-    first_day = data.close.index.min().date()
-    last_day = data.close.index.max().date()
+    close = cut(data.close[tickers], window)
 
-    start_col, end_col, _ = st.columns([1, 1, 2])
-    start = start_col.date_input(
-        "Start date",
-        key="univ_start",
-        value=first_day,
-        min_value=first_day,
-        max_value=last_day,
-    )
-    end = end_col.date_input(
-        "End date",
-        key="univ_end",
-        value=last_day,
-        min_value=first_day,
-        max_value=last_day,
+    view = (
+        st.segmented_control(
+            "Universe view",
+            options=VIEWS,
+            default=VIEWS[0],
+            key="univ_view",
+            label_visibility="collapsed",
+        )
+        or VIEWS[0]
     )
 
-    close = data.close.loc[pd.to_datetime(start) : pd.to_datetime(end), tickers]
-
-    _overview(close)
-    st.divider()
-    _relative(close, tickers)
-    st.divider()
-    _correlation(close, tickers)
-    st.divider()
-    _single_name(close, tickers)
+    if view == "Overview":
+        _overview(close)
+    elif view == "Performance":
+        _relative(close, tickers)
+    elif view == "Correlation":
+        _correlation(close, tickers)
+    else:
+        _single_name(close, tickers)

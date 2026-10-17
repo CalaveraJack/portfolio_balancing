@@ -33,17 +33,18 @@ REBALANCE_FREQUENCIES: Dict[str, str] = {
     "daily": "Daily",
 }
 
-# Construction methods, in menu order. The CM.<group>.<n> code encodes the
-# family: CM.0.x are passive/simple rules, CM.1.x are the PM classics.
+# Construction methods, in menu order. The name comes first; the CM.<group>.<n>
+# code after it encodes the family: CM.0.x are passive/simple rules, CM.1.x are
+# the PM classics.
 METHODS: Dict[str, str] = {
-    "equal": "CM.0.0  Equal Weight",
-    "cap_weight": "CM.0.1  Cap Weight",
-    "price_weight": "CM.0.2  Price Weight",
-    "inv_vol": "CM.0.3  Inverse Volatility",
-    "min_var": "CM.1.0  Minimum Variance",
-    "risk_parity": "CM.1.1  Risk Parity / ERC",
-    "max_sharpe": "CM.1.2  Maximum Sharpe",
-    "max_diversification": "CM.1.3  Maximum Diversification",
+    "equal": "Equal Weight · CM.0.0",
+    "cap_weight": "Cap Weight · CM.0.1",
+    "price_weight": "Price Weight · CM.0.2",
+    "inv_vol": "Inverse Volatility · CM.0.3",
+    "min_var": "Minimum Variance · CM.1.0",
+    "risk_parity": "Risk Parity / ERC · CM.1.1",
+    "max_sharpe": "Maximum Sharpe · CM.1.2",
+    "max_diversification": "Maximum Diversification · CM.1.3",
 }
 
 DEFAULT_METHOD = "equal"
@@ -112,6 +113,11 @@ OVERLAY_FIELDS = (
 
 def method_label(method: str) -> str:
     return METHODS.get(method, method)
+
+
+def method_name(method: str) -> str:
+    """The method's name without its code, for running text."""
+    return method_label(method).split(" · ", 1)[0]
 
 
 def is_optimizer_method(method: str) -> bool:
