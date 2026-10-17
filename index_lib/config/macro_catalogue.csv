@@ -1,0 +1,35 @@
+id,name,category,region,frequency,kind,unit,source
+us_gdp,Real GDP,Growth,US,Q,level,bn chained 2017 USD,fred:GDPC1
+us_indpro,Industrial production,Growth,US,M,level,index 2017=100,fred:INDPRO
+us_retail,Retail sales,Growth,US,M,level,mn USD,fred:RSAFS
+us_housing_starts,Housing starts,Growth,US,M,level,thousand units,fred:HOUST
+us_sentiment,Consumer sentiment (Michigan),Sentiment,US,M,level,index 1966Q1=100,fred:UMCSENT
+us_unrate,Unemployment rate,Labour,US,M,rate,%,fred:UNRATE
+us_payrolls,Nonfarm payrolls,Labour,US,M,level,thousand persons,fred:PAYEMS
+us_claims,Initial jobless claims,Labour,US,W,level,persons,fred:ICSA
+us_cpi,CPI all items,Inflation,US,M,level,index 1982-84=100,fred:CPIAUCSL
+us_core_pce,Core PCE price index,Inflation,US,M,level,index 2017=100,fred:PCEPILFE
+us_breakeven_10y,10y breakeven inflation,Inflation,US,D,rate,%,fred:T10YIE
+us_fedfunds,Effective fed funds rate,Rates & money,US,M,rate,%,fred:FEDFUNDS
+us_m2,M2 money stock,Rates & money,US,M,level,bn USD,fred:M2SL
+us_ig_oas,Investment grade OAS (FRED keeps 3 years),Credit & stress,US,D,rate,%,fred:BAMLC0A0CM
+us_hy_oas,High yield OAS (FRED keeps 3 years),Credit & stress,US,D,rate,%,fred:BAMLH0A0HYM2
+us_nfci,Chicago Fed financial conditions (NFCI),Credit & stress,US,W,rate,index (0 = average),fred:NFCI
+ea_gdp,Real GDP,Growth,Euro area,Q,level,mn chained 2010 EUR,estat:namq_10_gdp/Q.CLV10_MEUR.SCA.B1GQ.EA20
+ea_indpro,Industrial production,Growth,Euro area,M,level,index 2021=100,estat:sts_inpr_m/M.PRD.B-D.SCA.I21.EA21
+ea_esi,Economic sentiment (ESI),Sentiment,Euro area,M,level,index (100 = average),estat:ei_bssi_m_r2/M.BS-ESI-I.SA.EA21
+ea_unrate,Unemployment rate,Labour,Euro area,M,rate,%,estat:une_rt_m/M.SA.TOTAL.PC_ACT.T.EA21
+ea_hicp,HICP all items,Inflation,Euro area,M,level,index 2025=100,estat:prc_hicp_minr/M.I25.TOTAL.EA
+ea_core_hicp,HICP excl. energy and food,Inflation,Euro area,M,level,index 2025=100,estat:prc_hicp_minr/M.I25.TOT_X_NRG_FOOD.EA
+ea_deposit_rate,ECB deposit facility rate,Rates & money,Euro area,D,rate,%,ecb:FM/D.U2.EUR.4F.KR.DFR.LEV
+ea_aaa_2y,AAA government yield 2y,Rates & money,Euro area,D,rate,%,ecb:YC/B.U2.EUR.4F.G_N_A.SV_C_YM.SR_2Y
+ea_aaa_10y,AAA government yield 10y,Rates & money,Euro area,D,rate,%,ecb:YC/B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y
+ea_m3,M3 annual growth,Rates & money,Euro area,M,rate,%,ecb:BSI/M.U2.Y.V.M30.X.I.U2.2300.Z01.A
+ea_nfc_loans,Loans to non-financial corporations (annual growth),Credit & stress,Euro area,M,rate,%,ecb:BSI/M.U2.Y.U.A20T.A.I.U2.2240.Z01.A
+ea_ciss,Composite indicator of systemic stress (CISS),Credit & stress,Euro area,D,level,index 0-1,ecb:CISS/D.U2.Z0Z.4F.EC.SS_CIN.IDX
+eurusd,EUR/USD reference rate,FX,Euro area,D,level,USD per EUR,ecb:EXR/D.USD.EUR.SP00.A
+de_indpro,Industrial production,Growth,Germany,M,level,index 2021=100,estat:sts_inpr_m/M.PRD.B-D.SCA.I21.DE
+de_unrate,Unemployment rate,Labour,Germany,M,rate,%,estat:une_rt_m/M.SA.TOTAL.PC_ACT.T.DE
+de_hicp,HICP all items,Inflation,Germany,M,level,index 2025=100,estat:prc_hicp_minr/M.I25.TOTAL.DE
+de_bund_10y,Bund yield 10y (listed federal securities),Rates & money,Germany,D,rate,%,bbk:BBSIS/D.I.ZST.ZI.EUR.S1311.B.A604.R10XX.R.A.A._Z._Z.A
+de_bund_2y,Bund yield 2y (listed federal securities),Rates & money,Germany,D,rate,%,bbk:BBSIS/D.I.ZST.ZI.EUR.S1311.B.A604.R02XX.R.A.A._Z._Z.A

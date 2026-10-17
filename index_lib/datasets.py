@@ -5,11 +5,13 @@ from typing import Callable, Dict, Optional, Sequence, TypeVar
 
 import pandas as pd
 
+from index_lib.config.macro import macro_catalogue
 from index_lib.loaders import (
     inspect_rates_cache,
     load_rates_cached,
     load_universe_close_volume_cached,
 )
+from index_lib.loaders.macro_cache import MacroData, load_macro_cached
 from index_lib.loaders.market_caps import (
     align_market_caps_to_prices,
     load_market_caps,
@@ -194,4 +196,16 @@ def load_rates_data(
         funding=rates.funding,
         curve=rates.curve,
         cache_info=inspect_rates_cache(data_dir=data_dir),
+    )
+
+
+def load_macro_data(*, data_dir: str = "data", cache_mode: str = "cache") -> MacroData:
+    """
+    Load every indicator in the macro catalogue under the app's cache policy.
+
+    Unlike prices and rates, a failure here never raises: the macro view reports
+    each series that did not load, and the rest of the app does not need them.
+    """
+    return load_macro_cached(
+        macro_catalogue(), data_dir=data_dir, cache_mode=cache_mode
     )

@@ -223,6 +223,8 @@ data/*
 # Local exports
 exports/
 *.csv
+# Configuration, not an export: the macro indicator catalogue.
+!index_lib/config/macro_catalogue.csv
 
 # Dash / Plotly local temp
 *.html
