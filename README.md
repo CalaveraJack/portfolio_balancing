@@ -1,8 +1,9 @@
 # Strategy Forge
 
-A Streamlit research terminal for building systematic equity strategies, saving
-them, re-running them, comparing them, and working out why they behaved the way
-they did.
+A Streamlit research terminal for building systematic equity and multi-asset
+strategies, saving them, re-running them, comparing them, and working out why
+they behaved the way they did. Alongside it sits a data inspection layer for the
+USD curve, the stock sets and a catalogue of macro indicators.
 
 It covers passive construction rules and the PM classics, funding-aware
 volatility targeting, forward simulation, and a persistence layer that separates
@@ -56,18 +57,55 @@ A sidebar control, not a command-line flag:
 
 ---
 
-## 🧭 The four tabs
+## 🧭 The three tabs
 
 | Tab | What it is for |
 | --- | --- |
-| **Macro & Funding** | SOFR history, the USD Treasury curve, curve snapshots and spreads |
-| **Universe Diagnostics** | One stock at a time: price, return distribution, drawdown, statistics |
+| **Data Inspection** | Rates & Funding, Universe and Macro Indicators, one sub-tab each |
 | **Strategy Forge** | Build, save, backtest, diagnose and simulate a strategy |
 | **Compare** | Recorded runs, single stocks and benchmarks side by side |
 
-![Macro & Funding](docs/screenshots/macro_funding.png)
+### Rates & Funding
 
-![Universe Diagnostics](docs/screenshots/universe_diagnostics.png)
+Two dated USD Treasury curves and the change between them; the whole curve over
+time as a **3D surface** or a **heatmap** (of yields, or of 21-day changes);
+tenor, spread and SOFR history; and two analyses of what moves the curve:
+
+- **Factor decomposition.** Level, slope and curvature, either as principal
+  components of yield changes (loadings, variance explained, cumulative factor
+  moves) or model-free from the 2y, 5y and 10y. The 1-month bill is left out of
+  the PCA by default; it moves on bill supply and debt-ceiling news and would
+  otherwise take over the second component.
+- **Curve moves.** Every daily, weekly or monthly move of a short/long pair
+  (2s10s, 3m10y, 5s30s, 2s30s) named as a bull or bear steepener or flattener,
+  a twist, or a parallel shift, with how often each happened and how large it was.
+
+![Rates](docs/screenshots/rates.png)
+
+![Rates factors](docs/screenshots/rates_factors.png)
+
+### Universe
+
+The loaded set grouped by asset class with return, volatility, Sharpe and
+drawdown per name; growth of 100 and drawdowns for up to eight names; the
+correlation of daily returns ordered by class; and the single-name inspector.
+
+![Universe](docs/screenshots/universe.png)
+
+### Macro Indicators
+
+A catalogue of 34 indicators for the US, the euro area and Germany: growth,
+labour, inflation, sentiment, rates and money, credit and stress, FX. The
+catalogue table shows each one's latest reading, change on the year, how many
+days old it is and whether it loaded. The inspector shows one indicator as a
+level, a change on the previous period, a change on a year earlier, or indexed
+to 100, with a complementary second chart, key figures (including where today's
+value sits in its ten-year range) and a CSV download.
+
+Changes are computed on the full history before cutting to the start date. A
+level changes in percent; a rate (unemployment, a yield) in percentage points.
+
+![Macro](docs/screenshots/macro_indicator.png)
 
 ### Stock sets
 
@@ -78,6 +116,7 @@ The sidebar picks which stocks are loaded. Three ship with the app:
 | Pharma & Healthcare | 45 |
 | Mega-cap Core | 10 |
 | Diversified + ETFs | 21 |
+| Multi-asset (ETFs) | 17 |
 
 Switching reloads the data and clears selections made against the previous set,
 since they are not valid against the new one.
@@ -85,6 +124,17 @@ since they are not valid against the new one.
 Stock sets are identified internally by a stable key, never by the name on
 screen, so a label can be reworded without orphaning anything saved against it.
 Definitions live in `index_lib/config/universes.py`.
+
+### Asset classes
+
+Every ticker belongs to one of seven asset classes: equities, government bonds,
+inflation-linked bonds, corporate & EM credit, real estate, commodities, gold.
+ETFs are tagged in `index_lib/config/asset_classes.py`; anything untagged is a
+single stock and so an equity, which is why the equity sets need no tagging.
+
+The **Multi-asset (ETFs)** set holds proxies for each class: SPY, IWM, VEA, VGK,
+EWJ, EEM; SHY, IEF, TLT, BWX; TIP; LQD, HYG, EMB; VNQ; DBC; GLD. Bond returns
+are total returns from the adjusted close.
 
 ---
 
@@ -118,6 +168,31 @@ gross exposure both at 100% cannot short at all: shorting requires gross above
 net.
 
 Covariance estimators: **sample**, **EWMA**, **Ledoit-Wolf**, **OAS**.
+
+### Holdings and asset classes
+
+Pick asset classes first, then the holdings within them. Adding a class adds all
+of its holdings; removing one removes them. A set spanning several classes opens
+with all of its names selected.
+
+### Class budgets
+
+An optional fixed share of the invested book per asset class, for example 60%
+equities, 30% government bonds, 10% gold. The construction method then runs
+*inside* each class on its own, as though that class were the whole book: equal
+weight among the equities, risk parity among the bonds, and so on. Caps and
+limits apply within a class.
+
+Budgets are restored at every rebalance and drift in between. They are scaled to
+add up to 100%. A class with a budget but no holdings has its budget shared out
+over the others, and a class with holdings but no budget gets no weight; the app
+says so in both cases.
+
+A budget is a rule, so it is saved with a **strategy**, not only with a
+portfolio. Strategies saved before v0.4 load without budgets and behave exactly
+as before.
+
+![Class budgets](docs/screenshots/multi_asset_budgets.png)
 
 ### How much is invested
 
@@ -197,6 +272,8 @@ Alongside the performance statistics, every backtest reports:
 
 - **Exposure** — net, gross, long and short over time. Net and gross coincide for
   a long-only book and separate as soon as it shorts.
+- **Asset classes** — weight by class over time, and each class's average and
+  latest weight against its budget.
 - **Concentration** — weight in the top five positions, the Herfindahl index, and
   the effective number of equally weighted holdings (its reciprocal).
 - **Turnover** — one-way, halved because every sale funds a purchase.
@@ -263,10 +340,11 @@ structure rather than a static latest-cap vector. GBM is disabled here because
 the engine does not simulate shares outstanding, corporate actions or cap-rank
 dynamics.
 
-**PM classics** — strategy return bootstrap. These resample the realized strategy
+**PM classics and class budgets** — strategy return bootstrap. These resample the realized strategy
 return stream produced by the historical backtest, rather than re-optimizing
 inside every simulated constituent path. Pathwise re-optimization is not
-implemented.
+implemented. A book with class budgets takes this route too, since the
+constituent engines apply one weighting rule across every name.
 
 ### Funding
 
@@ -335,6 +413,40 @@ $$
 If every sampled market cap is unavailable for a simulation row, that row falls
 back to equal weight.
 
+### Class budgets
+
+With budgets $b_k$ (summing to one) and invested fraction $f$, the target weight
+of holding $i$ in class $k$ is
+
+$$
+w_i = f \cdot b_k \cdot w_i^{(k)}
+$$
+
+where $w^{(k)}$ is what the construction method gives when run on class $k$
+alone.
+
+### Curve factors
+
+Principal components of the covariance of yield changes $\Delta y_t$ (in bp).
+Signs are fixed so that level is positive when yields rise, slope when the long
+end rises against the short end, and curvature when the belly (2y to 10y) rises
+against the wings. The paths shown are cumulative projections of the changes on
+the loadings.
+
+### Curve moves
+
+For a short and a long tenor with changes $\Delta s$ and $\Delta l$:
+
+$$
+\Delta \text{level} = \tfrac{1}{2}(\Delta s + \Delta l) \qquad
+\Delta \text{slope} = \Delta l - \Delta s
+$$
+
+Bull or bear is the sign of the level change, and steepener or flattener is the
+sign of the slope change. Opposite signs at the two ends make a twist, and a
+slope change inside the band (1 bp by default) makes a parallel shift. Windows
+do not overlap.
+
 ### Diagnostics
 
 $$
@@ -354,12 +466,42 @@ $$
 | Yahoo Finance | Close and volume | `data/*.parquet` |
 | Yahoo Finance | Market caps, sector metadata | `data/*.parquet` |
 | FRED | SOFR and the Treasury curve | `data/*.parquet` |
+| FRED, ECB, Eurostat, Bundesbank | Macro indicators | `data/macro_series.parquet` |
+
+### Macro indicators
+
+Every indicator is one row of `index_lib/config/macro_catalogue.csv`: id, name,
+category, region, frequency, kind (level or rate), unit, and a source key whose
+prefix names the provider (`fred:`, `ecb:`, `estat:`, `bbk:`). Adding an
+indicator means adding a row. Then test the key against its source:
+
+```bash
+uv run python scripts/check_macro_catalogue.py          # all
+uv run python scripts/check_macro_catalogue.py ecb      # one provider
+```
+
+It reports observations, first and last period, and flags keys that have stopped
+updating. Euro area aggregates change: since Bulgaria joined in 2026, EA20
+series have stopped and EA21 carries on.
+
+Each refresh fetches an indicator's whole history and replaces the cached copy,
+since macro data is revised. Observations are dated at the start of their
+period. A series that fails to refresh keeps its cached values and is flagged
+(an error in `refresh` mode, a warning in `auto` mode); it never stops the rest
+of the app.
 
 ### Known approximations
 
 **Market caps are approximate.** They are historical close × *current* shares
 outstanding, which ignores issuance and buybacks. Cap-weighted backtests inherit
 that.
+
+**Credit spreads have three years of history.** FRED only keeps three years
+of the ICE BofA option-adjusted spreads.
+
+**ETF market caps are not market weights.** For ETFs the "market cap" is roughly
+fund size, and Yahoo has no share count for VEA, BWX or EMB. Cap-weighting the
+multi-asset set is therefore not a market portfolio.
 
 **Fundamentals are not point-in-time.** Sector metadata is fetched but not yet
 surfaced; no other fundamentals are used.
@@ -385,6 +527,8 @@ index_lib/datasets.py      data loading and the loaded panels
 index_lib/library.py       saved strategies and portfolios
 index_lib/runs.py          saved runs
 index_lib/diagnostics.py   exposure, concentration, turnover, drawdowns
+index_lib/allocation.py    class budgets resolved against holdings
+index_lib/macro.py         indicator views, key figures, catalogue status
 index_lib/compare.py       comparables and comparison statistics
 ```
 
@@ -401,7 +545,11 @@ index_lib/portfolio/optimization.py             PM-classic optimizers
 index_lib/portfolio/covariance.py               covariance estimators
 index_lib/simulation/                           funding paths, strategy bootstrap
 index_lib/vectorization_utilities/              vectorized MC engines
+index_lib/core/rates.py                         curve factors and curve moves
 index_lib/config/universes.py                   stock sets and benchmarks
+index_lib/config/asset_classes.py               asset classes and ETF tags
+index_lib/config/macro_catalogue.csv            the macro indicator catalogue
+index_lib/loaders/macro_cache.py                FRED and SDMX fetchers, macro cache
 ```
 
 ### Interface
@@ -411,8 +559,9 @@ index_lib/config/universes.py                   stock sets and benchmarks
 ```text
 index_lib/ui/cache.py       Streamlit caching in front of the runner
 index_lib/ui/session.py     session state and how it maps onto the controls
-index_lib/ui/macro.py       Macro & Funding tab
-index_lib/ui/universe.py    Universe Diagnostics tab
+index_lib/ui/rates.py       Data Inspection: Rates & Funding
+index_lib/ui/universe.py    Data Inspection: Universe
+index_lib/ui/macro.py       Data Inspection: Macro Indicators
 index_lib/ui/forge.py       Strategy Forge tab
 index_lib/ui/comparison.py  Compare tab
 index_lib/ui/figures.py     Plotly figure builders
@@ -424,7 +573,8 @@ index_lib/ui/theme.py       page chrome, stylesheet, Plotly template
 
 ## ✅ Tests
 
-90 tests, none of which need network access — they run against the local cache.
+173 tests, none of which need network access — they run against the local
+cache, and the macro loader is tested against a stub.
 
 ```bash
 uv run pytest
@@ -432,7 +582,8 @@ uv run pytest
 
 They cover the storage layers, the diagnostics and comparison maths, and the app
 itself end to end through Streamlit's `AppTest`: saving and reopening strategies,
-portfolios and runs, switching stock sets, and the comparison tab.
+portfolios and runs, switching stock sets, and the comparison tab. Class
+budgets are checked against the engine: every rebalance must restore them.
 
 Screenshots are generated from the running app, so they cannot drift from it:
 
@@ -457,6 +608,15 @@ uv run streamlit run app.py
 ---
 
 ## 📜 Version log
+
+### 2026-10-17 — v0.4 (in progress)
+
+Data Inspection tab with Rates & Funding (3D curve surface and heatmap, PCA and
+model-free curve factors, steepener/flattener classification), Universe (asset
+class overview, relative performance, correlation) and Macro Indicators (34
+series from FRED, the ECB, Eurostat and the Bundesbank, catalogue as CSV with a
+key checker). Asset classes, a multi-asset ETF set, an asset-class selector and
+class budgets in the Strategy Forge.
 
 ### 2026-09-19 — v0.3
 
@@ -504,5 +664,7 @@ and no market impact; short-borrow cost is modelled only where noted.
 
 v0.3 set out to make the object model solid — what a strategy *is*, how it is
 stored, how one execution is compared with another — before adding more on top.
-What comes next builds on it: company fundamentals, market regimes, factor
-strategies, trend following, and sector and factor attribution.
+v0.4 turns it multi-asset and adds the macro layer. Next: bond history from
+the curve, indicator-vs-return analysis, market weights for asset classes, and
+Black-Litterman with views drawn from the macro data. After that, v0.5:
+fundamentals, factor strategies, trend following and attribution.

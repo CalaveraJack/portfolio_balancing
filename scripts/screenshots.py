@@ -169,7 +169,11 @@ def _open_panel(page, label: str) -> None:
 def _choose(page, label: str, option: str) -> None:
     """Pick an option from a Streamlit selectbox."""
     try:
-        page.get_by_label(label, exact=False).first.click()
+        # Tabs inside tabs keep hidden copies of their controls in the DOM, so
+        # the first match is not necessarily the one on screen.
+        boxes = page.locator('[data-testid="stSelectbox"]', has_text=label).all()
+        visible = [b for b in boxes if b.is_visible()]
+        (visible or boxes)[0].click()
         page.wait_for_timeout(800)
         page.get_by_role("option", name=option).first.click()
         page.wait_for_timeout(6_000)
@@ -186,7 +190,9 @@ def _shot(page, filename: str, *, section: str = "") -> None:
     an st.dataframe are drawn on a canvas rather than put in the DOM.
     """
     if section:
-        locator = page.locator(".section-header", has_text=section).first
+        # Tabs inside tabs keep their hidden siblings in the DOM, so only a
+        # visible heading will do.
+        locator = page.locator(".section-header:visible", has_text=section).first
 
         if locator.count() == 0:
             print(f"    (no section called {section!r})")
@@ -230,11 +236,21 @@ def capture() -> None:
             page.evaluate("window.scrollTo(0, 0)")
             page.wait_for_timeout(4_000)
 
-        tab("Macro & Funding")
-        _shot(page, "macro_funding.png")
+        tab("Data Inspection")
 
-        tab("Universe Diagnostics")
-        _shot(page, "universe_diagnostics.png")
+        tab("Rates & Funding")
+        _shot(page, "rates.png")
+        _shot(page, "rates_surface.png", section="The curve over time")
+        _shot(page, "rates_factors.png", section="What moves the curve")
+        _shot(page, "rates_moves.png", section="Curve moves")
+
+        tab("Universe")
+        _shot(page, "universe.png")
+        _shot(page, "universe_correlation.png", section="Correlation")
+
+        tab("Macro Indicators")
+        _shot(page, "macro.png")
+        _shot(page, "macro_indicator.png", section="Indicator")
 
         tab("Strategy Forge")
         _open_panel(page, "Strategy Library")
@@ -243,7 +259,7 @@ def capture() -> None:
         _shot(page, "strategy_forge.png")
 
         # An optimizer, so the diagnostics include what the solver reported.
-        _choose(page, "Construction method", "CM.1.0  Minimum Variance")
+        _choose(page, "Construction method", "Minimum Variance")
         has_optimizer = page.locator(
             ".section-header", has_text="What the optimizer did"
         ).count()
@@ -264,6 +280,25 @@ def capture() -> None:
 
         tab("Compare")
         _shot(page, "compare.png")
+
+        # A multi-asset book with class budgets: the selector, the budgets, and
+        # the class mix in the diagnostics.
+        _choose(page, "Stock set", "Multi-asset (ETFs)")
+        page.wait_for_timeout(8_000)
+        tab("Strategy Forge")
+        try:
+            page.get_by_text("Fixed budget per asset class").first.click()
+            page.wait_for_timeout(8_000)
+        except Exception as exc:
+            print(f"    (could not switch class budgets on: {exc})")
+        _shot(page, "multi_asset_budgets.png", section="Holdings")
+
+        try:
+            page.get_by_role("tab", name="Asset classes").first.click()
+            page.wait_for_timeout(3_000)
+        except Exception as exc:
+            print(f"    (could not open the asset class view: {exc})")
+        _shot(page, "multi_asset_diagnostics.png", section="Diagnostics")
 
         browser.close()
 
