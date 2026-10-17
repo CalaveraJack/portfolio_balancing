@@ -5,6 +5,8 @@ strategies, saving them, re-running them, comparing them, and working out why
 they behaved the way they did. Alongside it sits a data inspection layer for the
 USD curve, the stock sets and a catalogue of macro indicators.
 
+> UI/UX co-authored with Claude (Anthropic).
+
 It covers passive construction rules and the PM classics, funding-aware
 volatility targeting, forward simulation, and a persistence layer that separates
 the logic of a strategy from any one execution of it.

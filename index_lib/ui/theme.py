@@ -20,6 +20,7 @@ APP_SUBTITLE = (
     "Research terminal for strategy construction, funding-aware overlays, "
     "and forward simulation."
 )
+APP_CREDIT = "UI/UX co-authored with Claude (Anthropic)."
 
 BG = "#0f1115"
 PANEL = "#171a21"
@@ -95,6 +96,7 @@ def render_header() -> None:
           <div>
             <div class="app-title">{APP_TITLE}</div>
             <div class="app-subtitle">{APP_SUBTITLE}</div>
+            <div class="app-credit">{APP_CREDIT}</div>
           </div>
           <div class="app-badge">{APP_VERSION}</div>
         </div>

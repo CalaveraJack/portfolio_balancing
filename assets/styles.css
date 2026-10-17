@@ -46,6 +46,13 @@
   margin-top: 4px;
 }
 
+.app-credit {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+  opacity: 0.75;
+}
+
 .app-badge {
   flex: none;
   border: 1px solid var(--accent);
