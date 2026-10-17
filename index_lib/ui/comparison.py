@@ -10,7 +10,7 @@ from index_lib import compare, runs
 from index_lib.config import BENCHMARK_TICKERS, benchmark_group
 from index_lib.datasets import UniverseData
 from index_lib.ui import cache, figures, tables
-from index_lib.ui.theme import note, section
+from index_lib.ui.theme import note, screen, section
 
 MAX_SENSIBLE = 8
 
@@ -77,6 +77,8 @@ def render(
     history_start: str = "2022-01-01",
     data_dir: str = "data",
 ) -> None:
+    screen("compare")
+
     recorded = runs.list_runs()
     tickers = [t for t in data.close.columns if isinstance(t, str)]
 

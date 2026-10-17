@@ -41,7 +41,7 @@ from index_lib.strategy import (
     method_uses_lookback,
 )
 from index_lib.ui import cache, figures, session, tables
-from index_lib.ui.theme import note, section
+from index_lib.ui.theme import SERIES_COLORS, note, screen, section
 
 DEFAULT_CONSTITUENT_COUNT = 6
 
@@ -1006,13 +1006,7 @@ def _render_backtest(
 
 #: Colour follows the class, never its rank, so a class keeps its colour
 #: whichever others are in the book.
-CLASS_COLORS = {
-    asset_class_label(k): c
-    for k, c in zip(
-        ASSET_CLASSES,
-        ("#d9822b", "#4c9be8", "#59c9a5", "#c77dff", "#e8c547", "#ef6f6c", "#9aa5b1"),
-    )
-}
+CLASS_COLORS = {asset_class_label(k): c for k, c in zip(ASSET_CLASSES, SERIES_COLORS)}
 
 
 def _render_class_mix(result: runner.BacktestResult, cfg: StrategyConfig) -> None:
@@ -1295,6 +1289,7 @@ def render(
     universe_key: str = "",
     data_mode: str = "",
 ) -> None:
+    screen("forge")
     session.show_flash()
 
     available = [t for t in data.close.columns if isinstance(t, str)]

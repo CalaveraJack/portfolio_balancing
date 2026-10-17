@@ -13,6 +13,7 @@ from index_lib.datasets import UniverseData
 from index_lib.loaders.curve_cache import CurveData
 from index_lib.loaders.macro_cache import MacroData
 from index_lib.ui import macro, rates, universe
+from index_lib.ui.theme import screen
 from index_lib.ui.window import DEFAULT_WINDOW, WINDOWS
 
 VIEWS = ("Rates", "Universe", "Macro")
@@ -21,6 +22,8 @@ VIEWS = ("Rates", "Universe", "Macro")
 def render(
     data: UniverseData, curves: CurveData, macro_data: MacroData, cache_mode: str
 ) -> None:
+    screen("inspection")
+
     nav_col, window_col = st.columns([3, 2], vertical_alignment="bottom")
 
     view = nav_col.segmented_control(

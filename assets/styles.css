@@ -1,26 +1,105 @@
 /* Strategy Forge - Streamlit skin.
-   Palette and layout only; the base dark theme lives in .streamlit/config.toml. */
+
+   Warm, minimal "cyber renaissance": gold on warm black, thin brass lines,
+   square corners, one angular motif (corner brackets). Each main screen
+   carries its own mild accent; the rest of the palette is shared.
+   The base theme (colours Streamlit's own widgets use) lives in
+   .streamlit/config.toml and must agree with the tokens below. */
+
+@import url("https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap");
 
 :root {
-  --bg: #0f1115;
-  --panel: #171a21;
-  --panel-2: #1f2430;
+  /* Surfaces: warm black, never blue-black. */
+  --bg: #0c0a07;
+  --panel: #15120d;
+  --panel-2: #1d1911;
 
-  --text: #f2f2f2;
-  --muted: #a0a6b3;
-  --border: #2b313d;
+  /* Ink. */
+  --text: #efe5cf;
+  --muted: #a39881;
+  --border: #3a3020;
+  --grid: #2a2418;
+  /* Frames and control borders. Neutral brass here; each screen tints them
+     with its accent (see below). */
+  --frame: var(--border);
 
-  --accent: #d9822b;
-  --accent-soft: rgba(217, 130, 43, 0.16);
+  /* House accent: Sarif gold. Screens override --accent below. */
+  --gold: #e3a33b;
+  --ember: #e2773a;
+  --copper: #c9876b;
+
+  --accent: var(--gold);
+  --accent-soft: rgba(227, 163, 59, 0.12);
+
+  --display: "Rajdhani", "Segoe UI", sans-serif;
+}
+
+/* ---------------------------------------------------------------
+   Per-screen accents. Each screen drops a hidden marker; the tab
+   panel holding it takes that screen's accent, and everything inside
+   inherits it, nested tabs included.
+   --------------------------------------------------------------- */
+
+[data-testid="stTabPanel"]:has(.screen-inspection) {
+  --accent: var(--gold);
+  --accent-soft: rgba(227, 163, 59, 0.12);
+}
+
+[data-testid="stTabPanel"]:has(.screen-forge) {
+  --accent: var(--ember);
+  --accent-soft: rgba(226, 119, 58, 0.12);
+}
+
+[data-testid="stTabPanel"]:has(.screen-compare) {
+  --accent: var(--copper);
+  --accent-soft: rgba(201, 135, 107, 0.12);
+}
+
+/* Inside a screen, frames and borders lean towards its accent. */
+[data-testid="stTabPanel"] {
+  --frame: color-mix(in srgb, var(--accent) 42%, var(--bg));
+}
+
+/* The main tabs carry their screen's colour. Only the top level: tabs
+   nested inside a screen (the Forge diagnostics) keep the screen's own. */
+[data-testid="stTab"]:not([data-testid="stTabPanel"] *)[data-key="0"] {
+  --accent: var(--gold);
+}
+
+[data-testid="stTab"]:not([data-testid="stTabPanel"] *)[data-key="1"] {
+  --accent: var(--ember);
+}
+
+[data-testid="stTab"]:not([data-testid="stTabPanel"] *)[data-key="2"] {
+  --accent: var(--copper);
+}
+
+[data-testid="stTab"]:not([data-testid="stTabPanel"] *):hover p {
+  color: var(--accent);
+}
+
+[data-testid="stElementContainer"]:has(.screen-mark) {
+  display: none;
 }
 
 /* ---------------------------------------------------------------
    App shell
    --------------------------------------------------------------- */
 
+.stApp {
+  background:
+    radial-gradient(circle at 88% -12%, rgba(227, 163, 59, 0.07), transparent 42%),
+    var(--bg);
+}
+
 .block-container {
   max-width: 1480px;
   padding-top: 2.2rem;
+}
+
+[data-testid="stSidebar"] {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
 }
 
 .app-header {
@@ -34,16 +113,18 @@
 }
 
 .app-title {
-  font-size: 28px;
+  font-family: var(--display);
+  font-size: 30px;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
 }
 
 .app-subtitle {
   color: var(--muted);
   font-size: 13px;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .app-credit {
@@ -55,27 +136,38 @@
 
 .app-badge {
   flex: none;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--gold);
   background: var(--accent-soft);
-  color: var(--accent);
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 12px;
+  color: var(--gold);
+  padding: 6px 14px;
+  font-family: var(--display);
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.1em;
+  /* The one angular cut, Deus Ex style. */
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%);
 }
 
 /* ---------------------------------------------------------------
-   Panel headings and annotations
+   Headings and annotations
    --------------------------------------------------------------- */
 
-.section-header {
-  font-weight: 800;
-  font-size: 13px;
-  text-transform: uppercase;
+h1, h2, h3,
+[data-testid="stSidebar"] h3 {
+  font-family: var(--display);
   letter-spacing: 0.06em;
+}
+
+.section-header {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
   color: var(--accent);
   margin: 6px 0 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--accent);
 }
 
 .section-help {
@@ -93,47 +185,184 @@
   margin: 8px 0 4px;
 }
 
+.note code,
+.stMarkdown code {
+  color: var(--accent);
+  background: var(--panel-2);
+}
+
 /* ---------------------------------------------------------------
-   Tabs
+   Navigation: underlined tabs, boxed pills
    --------------------------------------------------------------- */
 
-.stTabs [data-baseweb="tab-list"] {
+[data-testid="stTabs"] [role="tablist"] {
   gap: 4px;
   border-bottom: 1px solid var(--border);
 }
 
-.stTabs [data-baseweb="tab"] {
+[data-testid="stTab"] {
   padding: 10px 18px;
+}
+
+[data-testid="stTab"] p {
+  font-family: var(--display);
+  font-size: 16px;
   font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--muted);
 }
 
-.stTabs [aria-selected="true"] {
-  color: var(--accent);
+[data-testid="stTab"][aria-selected="true"] {
   background: var(--panel-2);
-  border-radius: 8px 8px 0 0;
+}
+
+[data-testid="stTab"][aria-selected="true"] p {
+  color: var(--accent);
+}
+
+[data-testid="stTab"] .react-aria-SelectionIndicator {
+  background-color: var(--accent);
+}
+
+/* Segmented pills: second-level navigation and single choices. */
+[data-testid="stButtonGroup"] button {
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+[data-testid="stButtonGroup"] button[aria-checked="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Chosen items in multiselects: outlined, not filled - quieter in bulk. */
+[data-testid="stMultiSelectTagsContainer"] [data-tag] {
+  background: var(--accent-soft) !important;
+  border: 1px solid var(--accent);
+}
+
+[data-testid="stMultiSelectTagsContainer"] [data-tag] span {
+  color: var(--text) !important;
 }
 
 /* ---------------------------------------------------------------
-   Charts and tables
+   Controls inside a screen follow its accent
    --------------------------------------------------------------- */
 
-.stPlotlyChart {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
+/* Field borders, and the accent when a field has focus. */
+[data-testid="stNumberInputContainer"],
+[data-testid="stTextInputRootElement"],
+[data-testid="stDateInputField"],
+[data-testid="stSelectbox"] [role="group"],
+[data-testid="stMultiSelect"] [role="group"] {
+  border-color: var(--frame) !important;
+}
+
+[data-testid="stNumberInputContainer"]:focus-within,
+[data-testid="stTextInputRootElement"]:focus-within,
+[data-testid="stSelectbox"] [role="group"]:focus-within,
+[data-testid="stMultiSelect"] [role="group"]:focus-within {
+  border-color: var(--accent) !important;
+}
+
+/* Radio: the chosen ring and dot. */
+[data-testid="stRadioOption"][data-selected="true"] > div > div:first-child {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+/* Toggle: the track when on. */
+[data-testid="stCheckbox"] label[data-selected="true"] > div:first-of-type {
+  background-color: var(--accent) !important;
+}
+
+/* Buttons, popover buttons and pills: framed in the screen's tint. */
+[data-testid^="stBaseButton"],
+[data-testid="stPopoverButton"],
+[data-testid="stButtonGroup"] button {
+  border-color: var(--frame) !important;
+}
+
+[data-testid^="stBaseButton"]:hover,
+[data-testid="stPopoverButton"]:hover,
+[data-testid="stButtonGroup"] button:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+[data-testid="stBaseButton-primary"] {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--bg) !important;
+}
+
+[data-testid="stExpander"] details {
+  border-color: var(--frame) !important;
+}
+
+hr {
+  border-color: var(--frame) !important;
+}
+
+/* ---------------------------------------------------------------
+   Panels: thin brass frame with a corner bracket in the accent
+   --------------------------------------------------------------- */
+
+.stPlotlyChart,
+[data-testid="stDataFrame"] {
+  position: relative;
   background: var(--panel);
 }
 
-[data-testid="stDataFrame"] {
-  border: 1px solid var(--border);
-  border-radius: 10px;
+/* The frame is an overlay drawn above the content, not the element's own
+   border: a Plotly canvas or a data grid can paint over a border's right and
+   bottom edges, which left frames open on some sides. */
+.stPlotlyChart::after,
+[data-testid="stDataFrame"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--frame);
+  pointer-events: none;
+  z-index: 3;
 }
 
+.stPlotlyChart::before,
+[data-testid="stDataFrame"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  border-top: 2px solid var(--accent);
+  border-left: 2px solid var(--accent);
+  pointer-events: none;
+  z-index: 4;
+}
+
+[data-testid="stExpander"] summary {
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+/* ---------------------------------------------------------------
+   Figures
+   --------------------------------------------------------------- */
+
 [data-testid="stMetricValue"] {
-  font-size: 20px;
+  font-family: var(--display);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 [data-testid="stMetricLabel"] {
   color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }

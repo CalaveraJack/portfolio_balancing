@@ -24,24 +24,38 @@ APP_SUBTITLE = (
 )
 APP_CREDIT = "UI/UX co-authored with Claude (Anthropic)."
 
-BG = "#0f1115"
-PANEL = "#171a21"
-TEXT = "#f2f2f2"
-MUTED = "#a0a6b3"
-BORDER = "#2b313d"
-ACCENT = "#d9822b"
+# Warm black and cream, gold as the house colour. Keep in step with the CSS
+# tokens in assets/styles.css and the base theme in .streamlit/config.toml.
+BG = "#0c0a07"
+PANEL = "#15120d"
+TEXT = "#efe5cf"
+MUTED = "#a39881"
+BORDER = "#3a3020"
+GRID = "#2a2418"
+GOLD = "#e3a33b"
 
-#: Categorical series colors, accent-first and distinguishable on the dark panel.
+DISPLAY_FONT = "Rajdhani, Segoe UI, sans-serif"
+
+#: Categorical series colours, warm-led, in fixed order (never cycled past the
+#: seventh: the eighth is a neutral for "the rest"). Validated for the dark
+#: panel: lightness band, chroma floor, contrast, and colour-blind separation
+#: of neighbours (worst pair verdigris/terracotta at the 8.0 target, so charts
+#: using both keep a legend).
 SERIES_COLORS = (
-    "#d9822b",
-    "#4c9be8",
-    "#59c9a5",
-    "#c77dff",
-    "#e8c547",
-    "#ef6f6c",
-    "#7fd1b9",
-    "#9aa5b1",
+    "#C68206",  # gold
+    "#418AD1",  # steel blue
+    "#C9593D",  # terracotta
+    "#3CA17B",  # verdigris
+    "#926ABE",  # violet
+    "#9D9631",  # brass olive
+    "#C1628A",  # rose
+    "#8A8170",  # warm grey, for overflow
 )
+
+#: Polarity: gold for rising, blue for falling, warm grey at zero.
+UP_COLOR = SERIES_COLORS[0]
+DOWN_COLOR = SERIES_COLORS[1]
+NEUTRAL = "#5c5242"
 
 PLOTLY_TEMPLATE = "strategy_forge"
 
@@ -53,14 +67,18 @@ def register_plotly_template() -> None:
     template.layout.paper_bgcolor = PANEL
     template.layout.plot_bgcolor = PANEL
     template.layout.font = dict(
-        family="Inter, Segoe UI, Roboto, Arial, sans-serif",
+        family="Source Sans Pro, Segoe UI, Roboto, Arial, sans-serif",
         color=TEXT,
         size=12,
     )
-    template.layout.title = dict(font=dict(color=TEXT, size=15), x=0.0, xanchor="left")
-    template.layout.colorway = list(SERIES_COLORS)
-    template.layout.xaxis = dict(gridcolor=BORDER, zerolinecolor=BORDER)
-    template.layout.yaxis = dict(gridcolor=BORDER, zerolinecolor=BORDER)
+    template.layout.title = dict(
+        font=dict(family=DISPLAY_FONT, color=TEXT, size=18),
+        x=0.0,
+        xanchor="left",
+    )
+    template.layout.colorway = list(SERIES_COLORS[:7])
+    template.layout.xaxis = dict(gridcolor=GRID, zerolinecolor=BORDER, linecolor=BORDER)
+    template.layout.yaxis = dict(gridcolor=GRID, zerolinecolor=BORDER, linecolor=BORDER)
     template.layout.legend = dict(bgcolor="rgba(0,0,0,0)", font=dict(color=MUTED))
     template.layout.margin = dict(l=60, r=30, t=50, b=40)
     template.layout.hoverlabel = dict(bgcolor=PANEL, bordercolor=BORDER)
@@ -104,6 +122,17 @@ def render_header() -> None:
         </div>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def screen(name: str) -> None:
+    """
+    Mark which main screen this is, so the stylesheet gives it its accent.
+
+    The marker is hidden; the tab panel holding it picks the accent up.
+    """
+    st.markdown(
+        f'<div class="screen-mark screen-{name}"></div>', unsafe_allow_html=True
     )
 
 
