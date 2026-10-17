@@ -1,31 +1,19 @@
 # Strategy Forge — User Journey and Interface Review
 
-Written 2026-10-17 against v0.4 (`strategy-forge-v.04`), before the interface
-clean-up. It describes who uses the app and for what, measures how long the
-main tasks take today, finds where the interface works against the user, and
-sets out the target layout. The clean-up is then built from this document and
-checked against it.
-
-Two methods are used:
-
-- **GOMS** (Card, Moran & Newell, 1983): each task is broken into Goals,
-  Operators, Methods and Selection rules. Its Keystroke-Level Model (KLM) then
-  estimates how long an expert takes to do it, which lets us compare today's
-  layout with the proposed one in seconds rather than opinions.
-- **Cognitive Dimensions of Notations** (Green & Petre, 1996): a vocabulary for
-  what an interface makes easy or hard, such as hidden dependencies, viscosity
-  and premature commitment. GOMS measures speed; the dimensions catch the
-  problems that speed alone misses.
+| | |
+| --- | --- |
+| Date | 2026-10-17 |
+| Version | v0.4, branch `strategy-forge-v.04`, before the interface clean-up |
+| Purpose | User journeys, task times today vs target, interface problems, target layout |
+| Methods | GOMS / Keystroke-Level Model (Card, Moran & Newell, 1983); Cognitive Dimensions of Notations (Green & Petre, 1996) |
+| Use | The clean-up is built from this document and checked against section 10 |
 
 ---
 
 ## 1. Who uses it, and for what
 
-One user role: a **researcher** who builds and judges systematic strategies,
-equity and multi-asset, and needs to understand the market context they run in.
-Expert, frequent use, keyboard and mouse, wide screen.
-
-The app is used in three modes, which map onto the three main tabs:
+One user: a **researcher** building and judging equity and multi-asset
+strategies. Expert, frequent use, wide screen.
 
 | Mode | Tab | What the user does there |
 | --- | --- | --- |
@@ -33,8 +21,7 @@ The app is used in three modes, which map onto the three main tabs:
 | **Make** | Strategy Forge | Builds a strategy, reads its backtest and diagnostics, saves it, records a run. |
 | **Judge** | Compare | Puts recorded runs, stocks and benchmarks side by side. |
 
-Settings that apply everywhere (which data is loaded, from where, how fresh)
-are a fourth concern. They belong to none of the modes.
+Global settings (which data, from where, how fresh) belong to none of them.
 
 ---
 
@@ -147,8 +134,8 @@ Goal: *know the latest weekly curve move*.
 | Remove the old runs that were preselected | 2 × P BB = 2.6 | 0: the newest run is preselected alone |
 | **Total** | **≈ 50 s + 5R** | **≈ 38 s + 5R** |
 
-Most of the saving comes from two moves: actions placed where their results
-are, and panels that no longer sit between the user and the controls.
+The saving comes from placing actions next to their results and removing the
+panels between the user and the controls.
 
 ### B4 — check data freshness
 
@@ -173,8 +160,8 @@ obvious:
 - *What drives the curve?* Use PCA for the statistical answer; use spreads for
   the one you can quote.
 
-Two methods with no obvious rule is a problem. That is the case for the two
-weight caps and the two "invested" controls (section 5).
+Two methods with no obvious rule is a problem: the two "invested" controls
+(section 5). The two weight caps are fine once explained (section 6).
 
 ---
 
@@ -190,7 +177,7 @@ Each dimension, what the app does today, and the fix.
 | **Viscosity** (resistance to change) | Budgets are one input per class; changing a 7-class split means seven edits. | One editable table, with presets (equal, 60/40). |
 | **Premature commitment** | *Record this run* sits above the results, so you name a run before seeing it. The run name is required up front. | Record next to the results; default name from the strategy and date. |
 | **Role-expressiveness** (does it look like what it does?) | Sub-tabs look the same as main tabs, so the hierarchy is invisible. "CM.1.0" codes, "MC method", "VaR alpha". "Strategy Builder" heading inside the "Strategy Forge" tab of the "Strategy Forge" app. | Sub-navigation as pills, visibly lighter. Plain method names (codes kept as a hint). Drop the duplicate heading. |
-| **Error-proneness** | Two caps (*Weight cap* and *PM max weight*) where the stricter binds. Budgets not adding to 100% are rescaled, which is easy to miss. | One cap. The budget total shown in the table, highlighted when not 100%. |
+| **Error-proneness** | Two caps (*Weight cap* and *PM max weight*), the stricter binding, with no explanation of either. Budgets not adding to 100% are rescaled, which is easy to miss. | An info button on each cap saying what it limits and which one binds. The budget total shown in the table, highlighted when not 100%. |
 | **Hard mental operations** | Two borrow spreads (overlay leverage, short positions), both "over SOFR" but labelled differently. | Group them under one *Financing* heading with matching labels. |
 | **Consistency** | Each section has its own date control: Forge start/end, Universe start/end, Rates factor *From*, Macro *From*. | One window per tab: Data Inspection shares one across its views; the Forge keeps its own, since it is part of the run. |
 | **Diffuseness** (too much to read) | Long notes everywhere: Monte Carlo paragraphs, the catalogue editing hint, backtest assumptions, rotate instructions. Cache metadata tables. | Short help tooltips; developer notes in Settings; metadata in Data status. |
@@ -205,7 +192,7 @@ Each dimension, what the app does today, and the fix.
 | # | Redundancy | Resolution |
 | --- | --- | --- |
 | R1 | *Invested %* and, for long/short, *Net exposure %* control the same quantity. | One control, *Net exposure (invested %)*, shown for both forms. |
-| R2 | *Weight cap* and *PM max weight*, with the stricter binding. | One *Max weight per name*, applied to every method. |
+| R2 | *Weight cap* and *PM max weight*, with the stricter binding. | Kept: they differ (the cap applies to every method, the PM max only to optimizers). Each gets an info button. |
 | R3 | Rates "Cache & levels" table repeats the curve levels already on the chart, and mixes them with cache metadata. | Levels move into the chart hover and a small key-figures strip; metadata moves to Data status. |
 | R4 | Four separate date controls (see Consistency). | One window per tab. |
 | R5 | Title "Strategy Forge", tab "Strategy Forge", heading "Strategy Builder". | Drop the in-tab heading; the tab name is enough. |
@@ -214,7 +201,15 @@ Each dimension, what the app does today, and the fix.
 
 ---
 
-## 6. Diagnostics to hide
+## 6. Explanations
+
+Every control whose meaning is not obvious from its label gets an info button
+(help tooltip): what it does, its unit, and how it interacts with other
+controls. First in line: both weight caps, net exposure / invested %, the two
+borrow spreads, lookback vs covariance lookback, class budgets, the covariance
+estimators, the Monte Carlo methods, VaR alpha, the parallel band.
+
+## 7. Diagnostics to hide
 
 The test for each item: *does the user need this to do the task on screen
 right now?* If not, it goes behind one click (an expander, a tooltip or
@@ -235,7 +230,7 @@ Settings). Nothing is removed.
 
 ---
 
-## 7. Target layout
+## 8. Target layout
 
 ```text
 ┌ Sidebar ─────────────────────┐  ┌ Main ───────────────────────────────────────────┐
@@ -262,19 +257,14 @@ Strategy Forge
  4 SIMULATION    ▸ Monte Carlo (closed until wanted)
 ```
 
-**General settings are separated from page settings.** The sidebar holds only
-what applies to every tab: the working set (with its real date range) and, in a
-closed *Settings* section, the data mode, reload and data status. Everything
-that shapes one view stays on that view.
-
-**Sub-navigation looks different from navigation.** Main tabs keep the
-underline and panel; sub-views become rounded pills with no underline, in
-muted text with the accent only when selected. One glance tells the two levels
-apart.
+- **Global vs page settings:** the sidebar holds only what applies to every
+  tab. Everything else stays on its view.
+- **Sub-navigation:** pills in muted text, the accent only when selected. Main
+  tabs keep the underline.
 
 ---
 
-## 8. Multiple curves: what "select available rates" needs
+## 9. Multiple curves: what "select available rates" needs
 
 | Curve | Source | Tenors | Funding rate |
 | --- | --- | --- | --- |
@@ -282,39 +272,36 @@ apart.
 | EUR AAA government | ECB `YC/B.U2.EUR.4F.G_N_A.SV_C_YM.SR_*` | 3M–30Y | €STR (ECB `EST`) |
 | German Bunds | Bundesbank `BBSIS` listed federal securities | 1Y–30Y | €STR |
 
-The engine needs one change: curves become a mapping *curve id → panel of
-tenors* instead of the fixed `USD_*` columns. The factor and move analytics
-already work on any panel of tenors. The Forge keeps financing on SOFR until a
-strategy can choose its currency.
+Engine change: curves become *curve id → panel of tenors* instead of fixed
+`USD_*` columns. The analytics already work on any panel. Forge financing stays
+on SOFR for now.
 
 ---
 
-## 9. How the clean-up will be checked
+## 10. How the clean-up will be checked
 
 The clean-up passes when all of the following hold:
 
-1. **B1–B5** come in at or under the target times in section 3, recounted on
-   the built screens.
+1. **B1–B5** at or under target, recounted on the built screens.
 2. Reaching any **result** from its controls takes at most one screen of
    scrolling on a 900 px viewport.
 3. Every **global setting** is in the sidebar's Settings section, and no
    global setting appears anywhere else.
 4. Sub-navigation and main tabs are told apart **at a glance**: side-by-side
    screenshot check.
-5. Every item in section 6 is behind **one** click, and nothing in it has been
+5. Every item in section 7 is behind **one** click, and nothing in it has been
    removed.
-6. Each redundancy in section 5 is resolved or recorded as deliberately kept,
-   with the reason.
-7. All existing tests pass. Saved strategies keep loading: R1 and R2 merge
-   fields, so old files map onto the merged controls.
+6. Each redundancy in section 5 is resolved or kept with a reason.
+7. Every control listed in section 6 has an info button.
+8. All tests pass and saved strategies keep loading (R1 merges two fields).
 
-## 10. Order of work
+## 11. Order of work
 
 1. Settings and Data status in the sidebar; sub-navigation as pills.
 2. Rates: curve picker (USD first, then EUR AAA and Bunds), the view switcher,
    the shared window, and metadata moved out.
-3. Forge: toolbar, the result-side *Record run*, merged exposure and cap
-   controls, budget table, and diagnostics behind expanders.
+3. Forge: toolbar, *Record run* by the results, merged exposure control, info
+   buttons, budget table, diagnostics behind expanders.
 4. Macro and Universe: row selection, lean catalogue, and the shared window.
 5. Compare: newest run preselected; correlation as a heatmap.
 6. Re-measure B1–B5 and update this document with the results.
