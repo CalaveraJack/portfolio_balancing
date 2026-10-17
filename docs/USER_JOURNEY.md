@@ -305,3 +305,31 @@ The clean-up passes when all of the following hold:
 4. Macro and Universe: row selection, lean catalogue, and the shared window.
 5. Compare: newest run preselected; correlation as a heatmap.
 6. Re-measure B1–B5 and update this document with the results.
+
+## 12. Result (2026-10-18)
+
+Steps 1–6 built. Recounted on the built screens:
+
+| # | Target | Built | Method on the built screens |
+| --- | --- | --- | --- |
+| B1 | 2.7 s | 2.7 s | M + click *Moves* |
+| B2 | 4.0 s + R | 4.0 s + R | M + pick *EUR AAA* in Curve |
+| B3 | ≈ 38 s + 5R | ≈ 33 s + 5R | Record no longer needs a name (−5.9 s); *Class budgets* expander adds one click (+1.3 s) |
+| B4 | 2.7 s | 2.7 s | M + open Settings |
+| B5 | ≈ 3.8 s | ≈ 3.8 s | one screen down + open the optimizer expander |
+
+Checks from section 10:
+
+| Check | Result |
+| --- | --- |
+| 1. B1–B5 at or under target | Yes |
+| 2. One screen from controls to result | Yes: Forge backtest starts below the controls; inspection views fit one screen |
+| 3. Global settings only in sidebar Settings | Yes: data mode, reload, data status |
+| 4. Pills vs tabs at a glance | Yes: segmented pills below underlined tabs |
+| 5. Section 7 items behind one click | Yes; nothing removed |
+| 6. Redundancies | R1 merged; R2 kept, with info buttons; R3–R7 resolved |
+| 7. Info buttons on section 6 controls | Yes; "VaR alpha" renamed "Tail (%)" |
+| 8. Tests and saved strategies | All pass; old files load (R1 also fixes invested % not being restored on load) |
+
+Beyond the plan: Universe got the same view pills as Rates (consistency), and
+the curve loader gives USD history from 1990 instead of 2022.

@@ -45,17 +45,25 @@ uv run streamlit run app.py
 
 Open the URL Streamlit prints (by default <http://localhost:8501>).
 
-### Data mode
+### Sidebar
 
-A sidebar control, not a command-line flag:
+Only what applies to every tab:
 
-| Mode | Behaviour |
+- **Working set**: the stock set Universe, Strategy Forge and Compare use, with
+  its real date range.
+- **Settings** (closed by default): data mode, reload, and **Data status**, the
+  latest observation of every source and any failures.
+
+| Data mode | Behaviour |
 | --- | --- |
-| `refresh` | Fetch fresh data, update the cache, fail loudly on API errors. The error says when a usable cache exists. |
-| `cache` | Never call external APIs; read the local cache only. |
-| `auto` | Fetch fresh data, fall back to the cache if that fails. |
+| Cache only | Never call external APIs; read the local cache only. |
+| Refresh, fall back to cache | Fetch fresh data, fall back to the cache if that fails. |
+| Refresh, fail on errors | Fetch fresh data; stop on price or rates errors. |
 
-**Reload data** clears the caches and reloads under the selected mode.
+Macro and curve failures never stop the app; they show in Data status and as a
+warning on the affected view.
+
+Controls that need explaining carry an info button (ⓘ / ?).
 
 ---
 
@@ -63,22 +71,27 @@ A sidebar control, not a command-line flag:
 
 | Tab | What it is for |
 | --- | --- |
-| **Data Inspection** | Rates & Funding, Universe and Macro Indicators, one sub-tab each |
+| **Data Inspection** | Rates, Universe and Macro, chosen with pills, over one shared window (1Y to Max) |
 | **Strategy Forge** | Build, save, backtest, diagnose and simulate a strategy |
 | **Compare** | Recorded runs, single stocks and benchmarks side by side |
 
-### Rates & Funding
+### Rates
 
-Two dated USD Treasury curves and the change between them; the whole curve over
-time as a **3D surface** or a **heatmap** (of yields, or of 21-day changes);
-tenor, spread and SOFR history; and two analyses of what moves the curve:
+Pick a curve, **USD Treasury** (FRED), **EUR AAA government** (ECB) or **German
+Bunds** (Bundesbank), each with its funding rate (SOFR or €STR). Then one of
+five views:
 
-- **Factor decomposition.** Level, slope and curvature, either as principal
+- **Snapshot**: two dated curves, the change between them, and key levels.
+- **Surface**: the whole curve over time as a 3D surface or a heatmap of yields
+  or 21-day changes.
+- **History**: tenors, spreads and the funding rate.
+
+- **Factors**: level, slope and curvature, either as principal
   components of yield changes (loadings, variance explained, cumulative factor
   moves) or model-free from the 2y, 5y and 10y. The 1-month bill is left out of
   the PCA by default; it moves on bill supply and debt-ceiling news and would
   otherwise take over the second component.
-- **Curve moves.** Every daily, weekly or monthly move of a short/long pair
+- **Moves**: every daily, weekly or monthly move of a short/long pair
   (2s10s, 3m10y, 5s30s, 2s30s) named as a bull or bear steepener or flattener,
   a twist, or a parallel shift, with how often each happened and how large it was.
 
@@ -88,26 +101,26 @@ tenor, spread and SOFR history; and two analyses of what moves the curve:
 
 ### Universe
 
-The loaded set grouped by asset class with return, volatility, Sharpe and
-drawdown per name; growth of 100 and drawdowns for up to eight names; the
-correlation of daily returns ordered by class; and the single-name inspector.
+Four views: an overview grouped by asset class (return, volatility, Sharpe,
+drawdown per name); performance (growth of 100 and drawdowns for up to eight
+names); correlation of daily returns ordered by class; and a single name.
 
 ![Universe](docs/screenshots/universe.png)
 
-### Macro Indicators
+### Macro
 
 A catalogue of 34 indicators for the US, the euro area and Germany: growth,
 labour, inflation, sentiment, rates and money, credit and stress, FX. The
-catalogue table shows each one's latest reading, change on the year, how many
-days old it is and whether it loaded. The inspector shows one indicator as a
+catalogue table shows each one's latest reading and change on the year; click a
+row to open it. The inspector shows one indicator as a
 level, a change on the previous period, a change on a year earlier, or indexed
 to 100, with a complementary second chart, key figures (including where today's
 value sits in its ten-year range) and a CSV download.
 
-Changes are computed on the full history before cutting to the start date. A
+Changes are computed on the full history before cutting to the window. A
 level changes in percent; a rate (unemployment, a yield) in percentage points.
 
-![Macro](docs/screenshots/macro_indicator.png)
+![Macro](docs/screenshots/macro.png)
 
 ### Stock sets
 
@@ -198,9 +211,11 @@ as before.
 
 ### How much is invested
 
-**Invested %** decides how much of the book is in the strategy; the rest sits in
-cash earning SOFR. At 100% there is no cash leg and nothing changes. Long-only
-means no shorting, not fully invested, so a long-only book may hold cash.
+**Net exposure** decides how much of the book is in the strategy; the rest sits
+in cash earning SOFR. At 100% there is no cash leg and nothing changes. It is one
+control for both forms: for long-only it is the invested fraction (up to 100%),
+for long/short it is longs minus shorts. Long-only means no shorting, not fully
+invested, so a long-only book may hold cash.
 
 Exposure is reported as it actually is, including the volatility overlay: a book
 running at 0.34x shows as 34% exposed, not 100%.
@@ -230,6 +245,10 @@ leverage, and the borrow spread.
 ---
 
 ## 💾 Saving your work
+
+The **Library** and **Recorded runs** buttons at the top of the Strategy Forge
+open saved work. **Record run** sits under the backtest it records; a run left
+unnamed is named after its method and dates.
 
 Three different things can be kept, and the difference between them is the point.
 
@@ -469,6 +488,7 @@ $$
 | Yahoo Finance | Market caps, sector metadata | `data/*.parquet` |
 | FRED | SOFR and the Treasury curve | `data/*.parquet` |
 | FRED, ECB, Eurostat, Bundesbank | Macro indicators | `data/macro_series.parquet` |
+| FRED, ECB, Bundesbank | Inspectable curves, SOFR, €STR | `data/curves_series.parquet` |
 
 ### Macro indicators
 
@@ -551,7 +571,9 @@ index_lib/core/rates.py                         curve factors and curve moves
 index_lib/config/universes.py                   stock sets and benchmarks
 index_lib/config/asset_classes.py               asset classes and ETF tags
 index_lib/config/macro_catalogue.csv            the macro indicator catalogue
-index_lib/loaders/macro_cache.py                FRED and SDMX fetchers, macro cache
+index_lib/loaders/macro_cache.py                FRED and SDMX fetchers, series cache
+index_lib/config/curves.py                      inspectable curves and funding rates
+index_lib/loaders/curve_cache.py                curves built from the series cache
 ```
 
 ### Interface
@@ -561,9 +583,11 @@ index_lib/loaders/macro_cache.py                FRED and SDMX fetchers, macro ca
 ```text
 index_lib/ui/cache.py       Streamlit caching in front of the runner
 index_lib/ui/session.py     session state and how it maps onto the controls
-index_lib/ui/rates.py       Data Inspection: Rates & Funding
+index_lib/ui/settings.py    sidebar settings and data status
+index_lib/ui/inspection.py  Data Inspection: view pills and shared window
+index_lib/ui/rates.py       Data Inspection: Rates
 index_lib/ui/universe.py    Data Inspection: Universe
-index_lib/ui/macro.py       Data Inspection: Macro Indicators
+index_lib/ui/macro.py       Data Inspection: Macro
 index_lib/ui/forge.py       Strategy Forge tab
 index_lib/ui/comparison.py  Compare tab
 index_lib/ui/figures.py     Plotly figure builders

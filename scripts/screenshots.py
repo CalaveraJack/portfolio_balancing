@@ -236,62 +236,85 @@ def capture() -> None:
             page.evaluate("window.scrollTo(0, 0)")
             page.wait_for_timeout(4_000)
 
+        def pill(label: str) -> None:
+            """Sub-views are segmented controls, exposed as radios, not tabs."""
+            try:
+                buttons = page.get_by_role("radio", name=label, exact=True).all()
+                visible = [b for b in buttons if b.is_visible()]
+                (visible or buttons)[0].click()
+                page.evaluate("window.scrollTo(0, 0)")
+                page.wait_for_timeout(4_000)
+            except Exception as exc:
+                print(f"    (could not open {label!r}: {exc})")
+
         tab("Data Inspection")
 
-        tab("Rates & Funding")
-        _shot(page, "rates.png")
-        _shot(page, "rates_surface.png", section="The curve over time")
-        _shot(page, "rates_factors.png", section="What moves the curve")
-        _shot(page, "rates_moves.png", section="Curve moves")
+        pill("Rates")
+        for view, filename in (
+            ("Snapshot", "rates.png"),
+            ("Surface", "rates_surface.png"),
+            ("Factors", "rates_factors.png"),
+            ("Moves", "rates_moves.png"),
+        ):
+            pill(view)
+            _shot(page, filename)
 
-        tab("Universe")
+        _choose(page, "Curve", "EUR AAA government")
+        pill("Snapshot")
+        _shot(page, "rates_eur.png")
+
+        pill("Universe")
+        pill("Overview")
         _shot(page, "universe.png")
-        _shot(page, "universe_correlation.png", section="Correlation")
+        pill("Correlation")
+        _shot(page, "universe_correlation.png")
 
-        tab("Macro Indicators")
+        pill("Macro")
         _shot(page, "macro.png")
-        _shot(page, "macro_indicator.png", section="Indicator")
+
+        _open_panel(page, "Settings")
+        _shot(page, "settings.png")
 
         tab("Strategy Forge")
-        _open_panel(page, "Strategy Library")
-        _open_panel(page, "Saved Runs")
-        page.wait_for_timeout(2_000)
         _shot(page, "strategy_forge.png")
 
         # An optimizer, so the diagnostics include what the solver reported.
         _choose(page, "Construction method", "Minimum Variance")
-        has_optimizer = page.locator(
-            ".section-header", has_text="What the optimizer did"
-        ).count()
+        _open_panel(page, "What the optimizer did")
+        has_optimizer = page.get_by_text("What the optimizer did").count()
         print(f"    optimizer panel present: {bool(has_optimizer)}")
         _shot(page, "strategy_diagnostics.png", section="Diagnostics")
 
-        # The simulation panel is empty until something has been simulated.
+        # The simulation panel is closed and empty until something is simulated.
+        _open_panel(page, "Monte Carlo simulation")
         try:
-            page.get_by_role(
-                "button", name="Run Monte Carlo"
-            ).scroll_into_view_if_needed()
-            page.get_by_role("button", name="Run Monte Carlo").click()
+            run = page.get_by_role("button", name="Run Monte Carlo")
+            run.scroll_into_view_if_needed()
+            run.click()
             page.wait_for_timeout(25_000)
+            page.get_by_text("Monte Carlo simulation").first.evaluate(
+                "el => el.scrollIntoView({block: 'start', behavior: 'instant'})"
+            )
+            page.wait_for_timeout(2_000)
         except Exception as exc:
             print(f"    (Monte Carlo did not run: {exc})")
-
-        _shot(page, "monte_carlo.png", section="Monte Carlo Simulation")
+        _shot(page, "monte_carlo.png")
 
         tab("Compare")
         _shot(page, "compare.png")
 
-        # A multi-asset book with class budgets: the selector, the budgets, and
-        # the class mix in the diagnostics.
+        # A multi-asset book with class budgets: the selector, the budget table,
+        # and the class mix in the diagnostics.
         _choose(page, "Stock set", "Multi-asset (ETFs)")
         page.wait_for_timeout(8_000)
         tab("Strategy Forge")
+        _open_panel(page, "Class budgets")
         try:
             page.get_by_text("Fixed budget per asset class").first.click()
             page.wait_for_timeout(8_000)
         except Exception as exc:
             print(f"    (could not switch class budgets on: {exc})")
-        _shot(page, "multi_asset_budgets.png", section="Holdings")
+        _shot(page, "multi_asset_budgets.png", section="Construction")
 
         try:
             page.get_by_role("tab", name="Asset classes").first.click()
