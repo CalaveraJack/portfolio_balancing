@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from index_lib.config import asset_class_label, describe, group_by_class
+from index_lib.core import compute_stats_from_price_series
 from index_lib.core.rates import compute_curve_spreads
 from index_lib.ui.formatting import fmt_bp, fmt_num, fmt_pct
 
@@ -51,17 +53,172 @@ def stats_frame(stats: Dict[str, object], *, include_obs: bool = True) -> pd.Dat
     return _metric_frame(rows)
 
 
-def latest_weights_frame(weights_history: pd.DataFrame) -> pd.DataFrame:
-    """Weights as of the last rebalance, descending."""
+def _num(value: object, digits: int = 4) -> str:
+    """Readable at any size: 24,410 rather than 2.441e+04, 0.0108 not 1.08e-02."""
+    if value is None or pd.isna(value):
+        return "-"
+    number = float(value)
+    if abs(number) >= 1000:
+        return f"{number:,.0f}"
+    if number == 0 or abs(number) >= 0.01:
+        return f"{number:,.{digits}g}"
+    return f"{number:.4f}"
+
+
+def _signed(value: object, unit: str) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    return f"{float(value):+.2f} {unit}"
+
+
+def _period(value: object) -> str:
+    return (
+        str(pd.Timestamp(value).date())
+        if value is not None and pd.notna(value)
+        else "-"
+    )
+
+
+STATUS_MARKS = {"ok": "✅ ok", "failed": "⚠️ failed", "not cached": "— not cached"}
+
+
+def macro_status_frame(status: pd.DataFrame) -> pd.DataFrame:
+    """The catalogue table, formatted for reading."""
+    if status is None or status.empty:
+        return pd.DataFrame()
+
+    return pd.DataFrame(
+        {
+            "Region": status["Region"],
+            "Category": status["Category"],
+            "Indicator": status["Indicator"],
+            "Status": status["Status"].map(lambda s: STATUS_MARKS.get(s, s)),
+            "Freq.": status["Frequency"],
+            "Latest": status["Latest"].map(_num),
+            "Unit": status["Unit"],
+            "Period": status["Period"].map(_period),
+            "Change on year": [
+                _signed(v, u)
+                for v, u in zip(status["Change on year"], status["Change unit"])
+            ],
+            "Days old": status["Days old"].map(lambda v: "-" if pd.isna(v) else int(v)),
+            "Since": status["Since"].map(_period),
+            "Source": status["Source"],
+        }
+    )
+
+
+def macro_key_figures_frame(
+    figures: Dict[str, object], indicator, state
+) -> pd.DataFrame:
+    """Latest reading, its changes and its place in the recent range."""
+    unit = "pp" if indicator.is_rate else "%"
+    rows: List[Tuple[str, str]] = [
+        ("Latest", f"{_num(figures.get('latest'))} {indicator.unit}"),
+        ("Period", _period(figures.get("latest_date"))),
+        ("Change on period", _signed(figures.get("change_period"), unit)),
+        ("Change on year", _signed(figures.get("change_year"), unit)),
+        ("10y low", _num(figures.get("range_low"))),
+        ("10y high", _num(figures.get("range_high"))),
+        (
+            "Place in 10y range",
+            f"{figures['range_percentile']:.0f}th percentile"
+            if figures.get("range_percentile") is not None
+            else "-",
+        ),
+        ("History from", _period(figures.get("first_date"))),
+        ("Observations", str(figures.get("observations", "-"))),
+        ("Source", indicator.provider),
+        ("Series key", indicator.key),
+        ("Fetched", str(state.fetched_at) if state and state.fetched_at else "-"),
+    ]
+    return _metric_frame(rows)
+
+
+def universe_overview_frame(close: pd.DataFrame) -> pd.DataFrame:
+    """Every name with its asset class and headline statistics, class by class."""
+    rows = []
+
+    for asset_class, names in group_by_class(close.columns).items():
+        for ticker in names:
+            stats = compute_stats_from_price_series(close[ticker].dropna())
+            rows.append(
+                {
+                    "Asset class": asset_class_label(asset_class),
+                    "Ticker": ticker,
+                    "What it is": describe(ticker),
+                    "Total return": fmt_pct(stats.get("total_return")),
+                    "CAGR": fmt_pct(stats.get("cagr")),
+                    "Ann. vol": fmt_pct(stats.get("vol_ann")),
+                    "Sharpe (rf=0)": fmt_num(stats.get("sharpe_0rf")),
+                    "Max drawdown": fmt_pct(stats.get("max_drawdown")),
+                    "From": str(stats.get("min_date", "-")),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def latest_weights_frame(
+    weights_history: pd.DataFrame, *, by_class: bool = False
+) -> pd.DataFrame:
+    """
+    Weights as of the last rebalance, descending.
+
+    With ``by_class`` a book spanning several asset classes is listed class by
+    class, each class's names descending, with the class beside each name.
+    """
     if weights_history is None or weights_history.empty:
         return pd.DataFrame(columns=["Ticker", "Weight (%)"])
 
     last = weights_history.loc[weights_history.index.max()].sort_values(ascending=False)
+    groups = group_by_class(last.index)
+
+    if not by_class or len(groups) < 2:
+        return pd.DataFrame(
+            {
+                "Ticker": last.index,
+                "Weight (%)": np.round(last.values * 100.0, 3),
+            }
+        )
+
+    rows = [
+        (asset_class_label(k), ticker, round(float(last[ticker]) * 100.0, 3))
+        for k, names in groups.items()
+        for ticker in names
+    ]
+    return pd.DataFrame(rows, columns=["Class", "Ticker", "Weight (%)"])
+
+
+def class_mix_frame(
+    mix: pd.DataFrame,
+    budgets: Dict[str, float],
+    *,
+    net_exposure: float = 1.0,
+) -> pd.DataFrame:
+    """
+    Each class's weight: average, latest, and the target where one is set.
+
+    Targets are budgets rescaled to sum to one, times the invested fraction, so
+    they compare like for like with the weights.
+    """
+    if mix is None or mix.empty:
+        return pd.DataFrame(columns=["Asset class", "Average", "Latest", "Target"])
+
+    labelled = {asset_class_label(k): v for k, v in budgets.items()}
+    total = sum(labelled.values())
+
+    def _target(label: str) -> str:
+        if not total:
+            return "-"
+        return fmt_pct(labelled.get(label, 0.0) / total * net_exposure)
 
     return pd.DataFrame(
         {
-            "Ticker": last.index,
-            "Weight (%)": np.round(last.values * 100.0, 3),
+            "Asset class": mix.columns,
+            "Average": [fmt_pct(mix[c].mean()) for c in mix.columns],
+            "Latest": [fmt_pct(mix[c].iloc[-1]) for c in mix.columns],
+            "Target": [_target(c) for c in mix.columns],
         }
     )
 
@@ -174,6 +331,24 @@ def rates_summary_frame(
     rows += [(label, _rate_pct(curve_row.get(col))) for col, label in CURVE_TENORS]
 
     return _metric_frame(rows)
+
+
+def move_summary_frame(summary: pd.DataFrame) -> pd.DataFrame:
+    """How often each kind of curve move happened, formatted."""
+    if summary is None or summary.empty:
+        return pd.DataFrame(
+            columns=["Move", "Count", "Share", "Avg level", "Avg slope"]
+        )
+
+    return pd.DataFrame(
+        {
+            "Move": summary["Move"],
+            "Count": summary["Count"],
+            "Share": summary["Share"].map(lambda v: f"{v * 100:.0f}%"),
+            "Avg level": summary["Avg level (bp)"].map(lambda v: f"{v:+.1f} bp"),
+            "Avg slope": summary["Avg slope (bp)"].map(lambda v: f"{v:+.1f} bp"),
+        }
+    )
 
 
 DIAGNOSTIC_ROWS = (

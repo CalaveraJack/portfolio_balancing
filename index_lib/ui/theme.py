@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ASSETS_DIR = PROJECT_ROOT / "assets"
 
 APP_TITLE = "Strategy Forge"
-APP_VERSION = "v0.3"
+APP_VERSION = "v0.4"
 APP_SUBTITLE = (
     "Research terminal for strategy construction, funding-aware overlays, "
     "and forward simulation."
@@ -112,8 +112,9 @@ def note(text: str) -> None:
     """
     Muted explanatory copy.
 
-    Streamlit does not parse Markdown inside a raw HTML block, so emphasis is
-    converted here; otherwise the asterisks show up verbatim.
+    Streamlit does not parse Markdown inside a raw HTML block, so emphasis and
+    inline code are converted here; otherwise the markers show up verbatim.
     """
     html = re.sub(r"\*\*(.+?)\*\*", lambda m: f"<strong>{m.group(1)}</strong>", text)
+    html = re.sub(r"`(.+?)`", lambda m: f"<code>{m.group(1)}</code>", html)
     st.markdown(f'<div class="note">{html}</div>', unsafe_allow_html=True)

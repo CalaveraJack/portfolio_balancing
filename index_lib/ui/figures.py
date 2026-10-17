@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from index_lib.core.rates import tenor_sort_key
+from index_lib.core.rates import tenor_label, tenor_sort_key, tenor_years
 
 
 def _layout(fig: go.Figure, title: str, x_title: str, y_title: str, height: int):
@@ -329,3 +329,450 @@ def make_mc_funding_fig(
     )
 
     return _layout(fig, title, "Trading Days", "Rate (%)", height)
+
+
+# ---------------------------------------------------------------------------
+# Curve shape and factors
+# ---------------------------------------------------------------------------
+
+#: Magnitude: one hue, dark to light on the dark panel.
+SEQUENTIAL_SCALE = [[0.0, "#14223a"], [0.5, "#2f6db5"], [1.0, "#cfe5ff"]]
+
+#: Polarity: blue for falling, orange for rising, grey at zero.
+DIVERGING_SCALE = [[0.0, "#4c9be8"], [0.5, "#3a3f4b"], [1.0, "#d9822b"]]
+
+UP_COLOR = "#d9822b"
+DOWN_COLOR = "#4c9be8"
+ZERO_LINE = dict(color="#5f6875", width=1)
+
+#: Factors keep their colour whichever method produced them.
+FACTOR_COLORS = {"Level": "#d9822b", "Slope": "#4c9be8", "Curvature": "#59c9a5"}
+
+#: Colour follows the kind of move, so a filter never repaints the others.
+#: Bull moves are blues, bear moves oranges, twists and parallels set apart.
+MOVE_COLORS = {
+    "Bull steepener": "#4c9be8",
+    "Bull flattener": "#9cc8f2",
+    "Bear steepener": "#d9822b",
+    "Bear flattener": "#f0b77a",
+    "Steepening twist": "#59c9a5",
+    "Flattening twist": "#c77dff",
+    "Parallel up": "#9aa5b1",
+    "Parallel down": "#5f6875",
+}
+
+
+def _tenor_axis(columns: Sequence[str]):
+    return [tenor_years(c) for c in columns], [tenor_label(c) for c in columns]
+
+
+def _signed_colors(values) -> list:
+    return [UP_COLOR if v >= 0 else DOWN_COLOR for v in values]
+
+
+def make_curve_compare_figure(
+    current: pd.Series,
+    previous: Optional[pd.Series],
+    *,
+    current_label: str,
+    previous_label: str,
+    title: str = "Curve Snapshot",
+    height: int = 420,
+) -> go.Figure:
+    """Two dated curves on a maturity axis spaced by years, not by label."""
+    if current is None or current.empty:
+        return empty_fig(title=title, height=height)
+
+    years, labels = _tenor_axis(current.index)
+
+    fig = go.Figure()
+    if previous is not None and not previous.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=years,
+                y=previous.reindex(current.index).values,
+                mode="lines+markers",
+                name=previous_label,
+                line=dict(width=2, dash="dot", color="#9aa5b1"),
+                marker=dict(size=8),
+                text=labels,
+                hovertemplate="%{text}: %{y:.3f}%<extra>" + previous_label + "</extra>",
+            )
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=years,
+            y=current.values,
+            mode="lines+markers",
+            name=current_label,
+            line=dict(width=2),
+            marker=dict(size=8),
+            text=labels,
+            hovertemplate="%{text}: %{y:.3f}%<extra>" + current_label + "</extra>",
+        )
+    )
+    fig.update_xaxes(type="log", tickvals=years, ticktext=labels)
+    return _layout(fig, title, "Maturity (log scale)", "Yield (% p.a.)", height)
+
+
+def make_curve_change_figure(
+    current: pd.Series,
+    previous: pd.Series,
+    *,
+    title: str = "Change Between the Two Dates",
+    height: int = 300,
+) -> go.Figure:
+    if current is None or previous is None or current.empty or previous.empty:
+        return empty_fig(title=title, height=height)
+
+    change = (current - previous.reindex(current.index)) * 100.0
+
+    fig = go.Figure(
+        go.Bar(
+            x=[tenor_label(c) for c in change.index],
+            y=change.values,
+            marker_color=_signed_colors(change.values),
+            hovertemplate="%{x}: %{y:+.1f} bp<extra></extra>",
+        )
+    )
+    fig.add_hline(y=0.0, line=ZERO_LINE)
+    return _layout(fig, title, "Maturity", "Change (bp)", height)
+
+
+def make_curve_surface_figure(
+    curve: pd.DataFrame,
+    columns: Sequence[str],
+    *,
+    title: str = "Curve Surface",
+    height: int = 580,
+) -> go.Figure:
+    """Yield by date and maturity, as a 3D surface coloured by yield."""
+    data = curve[list(columns)].dropna(how="any") if columns else pd.DataFrame()
+    if data.empty:
+        return empty_fig(title=title, height=height)
+
+    years, labels = _tenor_axis(columns)
+    # Maturities are spaced by log years, or 1M to 2Y would be squeezed into a
+    # sliver beside the long end.
+    positions = np.log10(years)
+    tenor_text = np.tile(np.array(labels, dtype=object), (len(data.index), 1))
+
+    fig = go.Figure(
+        go.Surface(
+            x=positions,
+            y=data.index,
+            z=data.values,
+            text=tenor_text,
+            colorscale=SEQUENTIAL_SCALE,
+            colorbar=dict(title="Yield %"),
+            hovertemplate="%{y|%Y-%m-%d} · %{text}: %{z:.3f}%<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title=title,
+        height=height,
+        scene=dict(
+            xaxis=dict(title="Maturity", tickvals=positions, ticktext=labels),
+            yaxis=dict(title="Date"),
+            zaxis=dict(title="Yield (%)"),
+            aspectmode="manual",
+            aspectratio=dict(x=1.1, y=2.0, z=0.8),
+            camera=dict(eye=dict(x=1.9, y=-1.3, z=0.9)),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+    return fig
+
+
+def make_curve_heatmap_figure(
+    frame: pd.DataFrame,
+    columns: Sequence[str],
+    *,
+    diverging: bool = False,
+    value_label: str = "Yield %",
+    title: str = "Curve Heatmap",
+    height: int = 420,
+) -> go.Figure:
+    """Date across, maturity up, colour for the value: levels or changes."""
+    data = frame[list(columns)].dropna(how="all") if columns else pd.DataFrame()
+    if data.empty:
+        return empty_fig(title=title, height=height)
+
+    z = data.T.values
+
+    scale = dict(colorscale=SEQUENTIAL_SCALE)
+    if diverging:
+        bound = float(np.nanmax(np.abs(z))) or 1.0
+        scale = dict(colorscale=DIVERGING_SCALE, zmid=0.0, zmin=-bound, zmax=bound)
+
+    fig = go.Figure(
+        go.Heatmap(
+            x=data.index,
+            y=[tenor_label(c) for c in columns],
+            z=z,
+            colorbar=dict(title=value_label),
+            hovertemplate="%{x|%Y-%m-%d} · %{y}: %{z:.2f}<extra></extra>",
+            **scale,
+        )
+    )
+    return _layout(fig, title, "Date", "Maturity", height)
+
+
+def make_loadings_figure(
+    loadings: pd.DataFrame,
+    *,
+    title: str = "Factor Loadings",
+    height: int = 360,
+) -> go.Figure:
+    """How much each maturity moves for one unit of each factor."""
+    if loadings is None or loadings.empty:
+        return empty_fig(title=title, height=height)
+
+    years, labels = _tenor_axis(loadings.index)
+
+    fig = go.Figure()
+    for factor in loadings.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=years,
+                y=loadings[factor].values,
+                mode="lines+markers",
+                name=factor,
+                line=dict(width=2, color=FACTOR_COLORS.get(factor)),
+                marker=dict(size=8),
+                text=labels,
+                hovertemplate="%{text}: %{y:.2f}<extra>" + factor + "</extra>",
+            )
+        )
+    fig.add_hline(y=0.0, line=ZERO_LINE)
+    fig.update_xaxes(type="log", tickvals=years, ticktext=labels)
+    return _layout(fig, title, "Maturity (log scale)", "Loading", height)
+
+
+def make_explained_figure(
+    explained: pd.Series,
+    *,
+    title: str = "Share of Curve Moves Explained",
+    height: int = 360,
+) -> go.Figure:
+    if explained is None or explained.empty:
+        return empty_fig(title=title, height=height)
+
+    fig = go.Figure(
+        go.Bar(
+            x=list(explained.index),
+            y=explained.values * 100.0,
+            text=[f"{v * 100:.1f}%" for v in explained.values],
+            textposition="outside",
+            marker_color=[FACTOR_COLORS.get(f) for f in explained.index],
+            hovertemplate="%{x}: %{y:.1f}%<extra></extra>",
+        )
+    )
+    fig.update_yaxes(range=[0, 105])
+    return _layout(fig, title, "Factor", "Variance explained (%)", height)
+
+
+def make_factor_paths_figure(
+    factors: pd.DataFrame,
+    *,
+    title: str,
+    y_title: str,
+    height: int = 360,
+) -> go.Figure:
+    """Each factor through time, in its own colour."""
+    if factors is None or factors.empty:
+        return empty_fig(title=title, height=height)
+
+    fig = go.Figure()
+    for factor in factors.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=factors.index,
+                y=factors[factor],
+                mode="lines",
+                name=factor,
+                line=dict(width=2, color=FACTOR_COLORS.get(factor)),
+            )
+        )
+    fig.add_hline(y=0.0, line=ZERO_LINE)
+    fig.update_layout(hovermode="x unified")
+    return _layout(fig, title, "Date", y_title, height)
+
+
+def make_move_scatter_figure(
+    moves: pd.DataFrame,
+    *,
+    title: str = "Level vs Slope Moves",
+    height: int = 440,
+) -> go.Figure:
+    """Each window as a point: right is yields up, up is steepening."""
+    if moves is None or moves.empty:
+        return empty_fig(title=title, height=height)
+
+    fig = go.Figure()
+    for move, color in MOVE_COLORS.items():
+        subset = moves[moves["move"] == move]
+        if subset.empty:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=subset["d_level"],
+                y=subset["d_slope"],
+                mode="markers",
+                name=move,
+                marker=dict(size=8, color=color, line=dict(width=1, color="#171a21")),
+                customdata=np.stack(
+                    [
+                        subset.index.strftime("%Y-%m-%d"),
+                        subset["d_short"].round(1),
+                        subset["d_long"].round(1),
+                    ],
+                    axis=-1,
+                ),
+                hovertemplate=(
+                    "%{customdata[0]}<br>level %{x:+.1f} bp · slope %{y:+.1f} bp"
+                    "<br>short %{customdata[1]} bp · long %{customdata[2]} bp"
+                    "<extra>" + move + "</extra>"
+                ),
+            )
+        )
+    fig.add_hline(y=0.0, line=ZERO_LINE)
+    fig.add_vline(x=0.0, line=ZERO_LINE)
+    return _layout(fig, title, "Level change (bp)", "Slope change (bp)", height)
+
+
+def make_move_timeline_figure(
+    moves: pd.DataFrame,
+    *,
+    title: str = "Slope Changes Over Time",
+    height: int = 320,
+) -> go.Figure:
+    """The slope change of each window, coloured by the kind of move."""
+    if moves is None or moves.empty:
+        return empty_fig(title=title, height=height)
+
+    fig = go.Figure()
+    for move, color in MOVE_COLORS.items():
+        subset = moves[moves["move"] == move]
+        if subset.empty:
+            continue
+        fig.add_trace(
+            go.Bar(
+                x=subset.index,
+                y=subset["d_slope"],
+                name=move,
+                marker_color=color,
+                hovertemplate="%{x|%Y-%m-%d}: %{y:+.1f} bp<extra>" + move + "</extra>",
+            )
+        )
+    fig.update_layout(barmode="relative", bargap=0.1)
+    return _layout(fig, title, "Date", "Slope change (bp)", height)
+
+
+# ---------------------------------------------------------------------------
+# Macro indicators
+# ---------------------------------------------------------------------------
+
+
+def make_indicator_figure(
+    series: pd.Series,
+    *,
+    title: str,
+    y_title: str,
+    source: str,
+    as_bars: bool = False,
+    height: int = 340,
+) -> go.Figure:
+    """One indicator in one view, with the period and source in the hover."""
+    if series is None or series.empty:
+        return empty_fig(title=title, height=height)
+
+    hover = "%{x|%Y-%m-%d}: %{y:,.3f} " + y_title + "<extra>" + source + "</extra>"
+
+    fig = go.Figure()
+    if as_bars:
+        fig.add_trace(
+            go.Bar(
+                x=series.index,
+                y=series.values,
+                marker_color=_signed_colors(series.values),
+                hovertemplate=hover,
+                name=title,
+            )
+        )
+        fig.add_hline(y=0.0, line=ZERO_LINE)
+    else:
+        fig.add_trace(
+            go.Scatter(
+                x=series.index,
+                y=series.values,
+                mode="lines",
+                line=dict(width=2),
+                hovertemplate=hover,
+                name=title,
+            )
+        )
+    return _layout(fig, title, "Period", y_title, height)
+
+
+# ---------------------------------------------------------------------------
+# Universe
+# ---------------------------------------------------------------------------
+
+
+def make_correlation_heatmap(
+    matrix: pd.DataFrame,
+    *,
+    title: str = "Return Correlation",
+    height: int = 520,
+) -> go.Figure:
+    if matrix is None or matrix.empty:
+        return empty_fig(title=title, height=height)
+
+    fig = go.Figure(
+        go.Heatmap(
+            x=list(matrix.columns),
+            y=list(matrix.index),
+            z=matrix.values,
+            colorscale=DIVERGING_SCALE,
+            zmin=-1.0,
+            zmax=1.0,
+            zmid=0.0,
+            colorbar=dict(title="ρ"),
+            hovertemplate="%{y} vs %{x}: %{z:.2f}<extra></extra>",
+        )
+    )
+    fig.update_yaxes(autorange="reversed")
+    return _layout(fig, title, "", "", height)
+
+
+def make_stacked_area_figure(
+    frame: pd.DataFrame,
+    *,
+    title: str,
+    y_title: str = "Weight",
+    colors: Optional[dict] = None,
+    height: int = 360,
+) -> go.Figure:
+    """Shares that add up to the whole, stacked: asset-class weights over time."""
+    if frame is None or frame.empty:
+        return empty_fig(title=title, height=height)
+
+    fig = go.Figure()
+    for column in frame.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=frame.index,
+                y=frame[column] * 100.0,
+                mode="lines",
+                name=str(column),
+                stackgroup="one",
+                line=dict(width=1, color=(colors or {}).get(column)),
+                hovertemplate="%{x|%Y-%m-%d}: %{y:.1f}%<extra>"
+                + str(column)
+                + "</extra>",
+            )
+        )
+    fig.update_layout(hovermode="x unified")
+    return _layout(fig, title, "Date", f"{y_title} (%)", height)

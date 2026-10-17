@@ -18,8 +18,10 @@ from index_lib.datasets import (
     RatesInspectorData,
     UniverseData,
     load_data,
+    load_macro_data,
     load_rates_data,
 )
+from index_lib.loaders.macro_cache import MacroData
 from index_lib.strategy import OverlayConfig, StrategyConfig, UniverseSelection
 
 
@@ -42,6 +44,11 @@ def get_rates_data(
     cache_mode: str,
 ) -> RatesInspectorData:
     return load_rates_data(start=start, data_dir=data_dir, cache_mode=cache_mode)
+
+
+@st.cache_resource(show_spinner="Loading macro indicators...")
+def get_macro_data(*, data_dir: str, cache_mode: str) -> MacroData:
+    return load_macro_data(data_dir=data_dir, cache_mode=cache_mode)
 
 
 def data_token(data: UniverseData) -> str:

@@ -7,8 +7,16 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import streamlit as st
 
-from index_lib import diagnostics, library, runner, runs
-from index_lib.config import universe_label, universe_tickers
+from index_lib import allocation, diagnostics, library, runner, runs
+from index_lib.config import (
+    ASSET_CLASSES,
+    asset_class_label,
+    asset_class_of,
+    classes_present,
+    describe,
+    universe_label,
+    universe_tickers,
+)
 from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.strategy import (
     COV_ESTIMATORS,
@@ -50,6 +58,13 @@ MC_NOTES: Dict[str, str] = {
         "re-optimization inside each simulation is not implemented yet. "
     )
     + SHARED_MC_CAVEATS,
+    "class_budgets": (
+        "**Class-budget Monte Carlo** — A book built class by class is simulated "
+        "by bootstrapping its realized return stream. The constituent engines "
+        "apply one weighting rule across every name and cannot hold the class "
+        "budgets. "
+    )
+    + SHARED_MC_CAVEATS,
     "cap_weight": (
         "**Cap-weight Monte Carlo** — Cap-weighted strategies currently use "
         "constituent block bootstrap only. At simulated rebalance dates the engine "
@@ -69,7 +84,7 @@ MC_NOTES: Dict[str, str] = {
 
 
 def _mc_engines(cfg: StrategyConfig) -> Dict[str, str]:
-    if cfg.is_optimizer:
+    if cfg.is_optimizer or cfg.has_class_budgets:
         return {"strategy_bootstrap": "Strategy Return Bootstrap"}
     if cfg.method == "cap_weight":
         return {"bootstrap": "Constituent Bootstrap with Historical Caps"}
@@ -80,6 +95,8 @@ def _mc_engines(cfg: StrategyConfig) -> Dict[str, str]:
 
 
 def _mc_note_key(cfg: StrategyConfig) -> str:
+    if cfg.has_class_budgets:
+        return "class_budgets"
     if cfg.is_optimizer:
         return "optimizer"
     if cfg.method == "cap_weight":
@@ -394,6 +411,12 @@ def _default_constituents(available: Sequence[str], universe_key: str) -> List[s
     available when the set is unknown.
     """
     ordered = universe_tickers(universe_key)
+
+    # A set spanning several asset classes is meant to be held across all of
+    # them; the first few names would cover only the first class or two.
+    if len(classes_present(ordered)) > 1:
+        return [t for t in ordered if t in available] or list(available)
+
     picks = [t for t in ordered if t in available][:DEFAULT_CONSTITUENT_COUNT]
     return picks or list(available[:DEFAULT_CONSTITUENT_COUNT])
 
@@ -422,29 +445,166 @@ def _drop_unavailable_constituents(available: Sequence[str]) -> None:
     )
 
 
+def _holding_label(ticker: str) -> str:
+    """ETFs carry a short description; single stocks are just their ticker."""
+    text = describe(ticker)
+    return ticker if text == "Single stock" else f"{ticker} · {text}"
+
+
+def _sync_constituents_to_classes(available: Sequence[str]) -> None:
+    """
+    Keep the holdings in step with the asset classes picked.
+
+    Removing a class removes its holdings; adding one adds all of its holdings,
+    which can then be trimmed by hand. Holdings in classes that stay picked are
+    left exactly as they were.
+    """
+    chosen = set(st.session_state.get(session.ASSET_CLASSES_KEY) or ())
+    before = set(st.session_state.get(session.PREVIOUS_CLASSES_KEY) or ())
+
+    kept = [
+        t
+        for t in st.session_state.get(session.CONSTITUENTS_KEY) or ()
+        if asset_class_of(t) in chosen
+    ]
+    added = [
+        t for t in available if asset_class_of(t) in chosen - before and t not in kept
+    ]
+    st.session_state[session.CONSTITUENTS_KEY] = kept + added
+
+
 def _universe_controls(universe_key: str, available: List[str]) -> UniverseSelection:
-    section("Stocks")
+    section("Holdings")
 
     _drop_unavailable_constituents(available)
 
+    present = classes_present(available)
+
+    # Seeded through session state rather than a widget default, because the
+    # stored pick is also corrected here: a restored portfolio may name classes
+    # this stock set does not have.
+    stored_classes = st.session_state.get(session.ASSET_CLASSES_KEY)
+    st.session_state[session.ASSET_CLASSES_KEY] = (
+        present
+        if stored_classes is None
+        else [c for c in stored_classes if c in present]
+    )
+
+    chosen_classes = st.multiselect(
+        "Asset classes",
+        key=session.ASSET_CLASSES_KEY,
+        options=present,
+        format_func=asset_class_label,
+        on_change=_sync_constituents_to_classes,
+        args=(available,),
+        help=(
+            "Pick the classes first, then the holdings within them. Adding a "
+            "class adds all of its holdings; removing one removes them."
+        ),
+    )
+    st.session_state[session.PREVIOUS_CLASSES_KEY] = list(chosen_classes)
+
+    options = [t for t in available if asset_class_of(t) in chosen_classes]
+
+    # Holdings of a class just deselected are no longer among the options.
+    stored = st.session_state.get(session.CONSTITUENTS_KEY)
+    st.session_state[session.CONSTITUENTS_KEY] = (
+        _default_constituents(options, universe_key)
+        if stored is None
+        else [t for t in stored if t in options]
+    )
+
     constituents = st.multiselect(
         "Constituents",
-        key="forge_constituents",
-        options=available,
-        default=_default_constituents(available, universe_key),
+        key=session.CONSTITUENTS_KEY,
+        options=options,
+        format_func=_holding_label,
         help="Which names from the loaded stock set this strategy holds.",
     )
 
     if universe_key:
+        plural = "es" if len(chosen_classes) != 1 else ""
         st.caption(
             f"{len(constituents)} of {len(available)} selected from "
-            f"{universe_label(universe_key)}. Change the stock set in the sidebar."
+            f"{universe_label(universe_key)} across {len(chosen_classes)} asset "
+            f"class{plural}. Change the stock set in the sidebar."
         )
 
     return UniverseSelection.from_ui(universe=universe_key, constituents=constituents)
 
 
-def _construction_controls(data: UniverseData) -> StrategyConfig:
+def _budget_controls(selection: UniverseSelection) -> Optional[Dict[str, float]]:
+    """
+    Optional fixed share per asset class, in percent.
+
+    Offered for the classes picked, plus any class a loaded strategy budgeted
+    for, so that loading a strategy never silently drops part of its rule.
+    """
+    picked = st.session_state.get(session.ASSET_CLASSES_KEY) or []
+    loaded = [
+        k
+        for k in ASSET_CLASSES
+        if st.session_state.get(session.BUDGETS_ON_KEY)
+        and float(st.session_state.get(session.budget_key(k)) or 0.0) > 0.0
+    ]
+    classes = [k for k in ASSET_CLASSES if k in picked or k in loaded]
+
+    enabled = st.toggle(
+        "Fixed budget per asset class",
+        key=session.BUDGETS_ON_KEY,
+        value=False,
+        disabled=len(classes) < 2,
+        help=(
+            "Give each asset class a fixed share of the invested book, then run "
+            "the construction method inside each class on its own. Caps and "
+            "limits apply within a class."
+        ),
+    )
+
+    if len(classes) < 2:
+        st.caption("Class budgets need holdings in at least two asset classes.")
+        return None
+    if not enabled:
+        return None
+
+    default = round(100.0 / len(classes), 1)
+    columns = st.columns(min(len(classes), 4))
+    budgets: Dict[str, float] = {}
+
+    for i, asset_class in enumerate(classes):
+        budgets[asset_class] = columns[i % len(columns)].number_input(
+            f"{asset_class_label(asset_class)} (%)",
+            key=session.budget_key(asset_class),
+            min_value=0.0,
+            max_value=100.0,
+            step=5.0,
+            value=default,
+        )
+
+    total = sum(budgets.values())
+    if total <= 0:
+        st.warning("Every budget is zero, so class budgets are off.")
+        return None
+
+    # Equal defaults are rounded to one decimal, so seven classes add to 100.1%.
+    if abs(total - 100.0) > 0.5:
+        note(
+            f"Budgets add up to {total:.1f}%. They are shares of the invested "
+            "book, so they are scaled to 100%."
+        )
+
+    plan = allocation.resolve_sleeves(
+        {k: v / 100.0 for k, v in budgets.items()}, selection.constituents
+    )
+    for message in plan.notes:
+        st.warning(message, icon="⚠️")
+
+    return budgets
+
+
+def _construction_controls(
+    data: UniverseData, selection: UniverseSelection
+) -> StrategyConfig:
     section("Construction")
 
     method_col, rebalance_col, lookback_col, cap_col = st.columns(4)
@@ -567,6 +727,8 @@ def _construction_controls(data: UniverseData) -> StrategyConfig:
                 "Risk-free rate (% p.a.)", key="forge_rf_rate", step=0.25, value=0.0
             )
 
+    budgets_pct = _budget_controls(selection)
+
     first_day = data.close.index.min().date()
     last_day = data.close.index.max().date()
 
@@ -602,6 +764,7 @@ def _construction_controls(data: UniverseData) -> StrategyConfig:
         short_borrow_cost_pct=short_borrow_cost_pct,
         rf_rate_pct=rf_rate_pct,
         cov_estimator=cov_estimator,
+        class_budgets_pct=budgets_pct,
     )
 
 
@@ -830,7 +993,38 @@ def _render_mc_results(mc_cfg: MonteCarloConfig) -> None:
         st.caption("Settings changed since this run. Re-run to refresh the results.")
 
 
-def _render_diagnostics(result: runner.BacktestResult) -> None:
+#: Colour follows the class, never its rank, so a class keeps its colour
+#: whichever others are in the book.
+CLASS_COLORS = {
+    asset_class_label(k): c
+    for k, c in zip(
+        ASSET_CLASSES,
+        ("#d9822b", "#4c9be8", "#59c9a5", "#c77dff", "#e8c547", "#ef6f6c", "#9aa5b1"),
+    )
+}
+
+
+def _render_class_mix(result: runner.BacktestResult, cfg: StrategyConfig) -> None:
+    mix = allocation.class_weights(result.daily_weights)
+    st.plotly_chart(
+        figures.make_stacked_area_figure(
+            mix, title="Weight by Asset Class", colors=CLASS_COLORS
+        ),
+        width="stretch",
+    )
+    st.dataframe(
+        tables.class_mix_frame(mix, cfg.budgets, net_exposure=cfg.net_exposure),
+        hide_index=True,
+        width="stretch",
+    )
+    if cfg.has_class_budgets:
+        note(
+            "Budgets are restored at each rebalance and drift in between, so the "
+            "gap between target and latest weight is the drift since the last one."
+        )
+
+
+def _render_diagnostics(result: runner.BacktestResult, cfg: StrategyConfig) -> None:
     """Is it concentrated, is it shorting, is exposure stable, what hurt it."""
     section("Diagnostics")
 
@@ -852,9 +1046,14 @@ def _render_diagnostics(result: runner.BacktestResult) -> None:
         )
 
     with charts:
-        exposure_tab, concentration_tab, turnover_tab, drawdown_tab = st.tabs(
-            ["Exposure", "Concentration", "Turnover", "Drawdowns"]
+        exposure_tab, classes_tab, concentration_tab, turnover_tab, drawdown_tab = (
+            st.tabs(
+                ["Exposure", "Asset classes", "Concentration", "Turnover", "Drawdowns"]
+            )
         )
+
+        with classes_tab:
+            _render_class_mix(result, cfg)
 
         with exposure_tab:
             st.plotly_chart(
@@ -948,7 +1147,7 @@ def render(
 
     with controls:
         selection = _universe_controls(universe_key, available)
-        cfg = _construction_controls(data)
+        cfg = _construction_controls(data, selection)
         overlay_cfg = _overlay_controls()
 
     with library_slot:
@@ -969,7 +1168,7 @@ def render(
     with weights_panel:
         section("Latest Weights")
         st.dataframe(
-            tables.latest_weights_frame(result.weights_history),
+            tables.latest_weights_frame(result.weights_history, by_class=True),
             hide_index=True,
             width="stretch",
             height=420,
@@ -982,7 +1181,7 @@ def render(
     _render_backtest(result, overlay_cfg)
 
     st.divider()
-    _render_diagnostics(result)
+    _render_diagnostics(result, opened.config if opened is not None else cfg)
 
     st.divider()
 

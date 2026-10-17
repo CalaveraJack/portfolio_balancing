@@ -26,7 +26,14 @@ def test_app_runs_without_exception(app: AppTest):
 def test_app_renders_all_tabs(app: AppTest):
     labels = [tab.label for tab in app.tabs]
 
-    for expected in ("Macro & Funding", "Universe Diagnostics", "Strategy Forge"):
+    for expected in (
+        "Data Inspection",
+        "Rates & Funding",
+        "Universe",
+        "Macro Indicators",
+        "Strategy Forge",
+        "Compare",
+    ):
         assert expected in labels
 
 

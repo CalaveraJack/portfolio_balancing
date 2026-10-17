@@ -14,7 +14,7 @@ from typing import Dict, Optional
 
 import streamlit as st
 
-from index_lib.config import resolve_universe_key
+from index_lib.config import ASSET_CLASSES, classes_present, resolve_universe_key
 from index_lib.library import SavedStrategy
 from index_lib.strategy import OverlayConfig, StrategyConfig
 
@@ -25,12 +25,24 @@ FLASH_KEY = "_flash"
 
 UNIVERSE_KEY = "universe_key"
 CONSTITUENTS_KEY = "forge_constituents"
+ASSET_CLASSES_KEY = "forge_asset_classes"
+#: The classes picked on the previous run, so a change can tell what was added.
+PREVIOUS_CLASSES_KEY = "_forge_asset_classes_before"
+BUDGETS_ON_KEY = "forge_budgets_on"
+
+
+def budget_key(asset_class: str) -> str:
+    return f"forge_budget_{asset_class}"
+
 
 # Controls whose valid choices depend on which stock set is loaded. A selection
 # made against one stock set is not valid against another, so these are cleared
 # when the stock set changes.
 UNIVERSE_DEPENDENT_KEYS = (
     CONSTITUENTS_KEY,
+    ASSET_CLASSES_KEY,
+    PREVIOUS_CLASSES_KEY,
+    "univ_compared",
     "forge_start",
     "forge_end",
     "univ_ticker",
@@ -90,7 +102,7 @@ def control_values(config: StrategyConfig, overlay: OverlayConfig) -> Dict[str, 
     The engine holds fractions; the controls show percentages. The overlay borrow
     spread is the one value already kept in annual percent, so it passes through.
     """
-    return {
+    values: Dict[str, object] = {
         "forge_method": config.method,
         "forge_rebalance": config.rebalance,
         "forge_lookback": int(config.lookback),
@@ -112,7 +124,19 @@ def control_values(config: StrategyConfig, overlay: OverlayConfig) -> Dict[str, 
         "forge_max_lev": float(overlay.max_leverage),
         "forge_min_lev": float(overlay.min_leverage),
         "forge_borrow_spread": float(overlay.borrow_spread_ann),
+        BUDGETS_ON_KEY: config.has_class_budgets,
     }
+
+    # A strategy without budgets leaves the budget inputs as they were, so
+    # switching budgets back on finds the last values used.
+    if config.has_class_budgets:
+        budgets = config.budgets
+        for asset_class in ASSET_CLASSES:
+            values[budget_key(asset_class)] = float(
+                budgets.get(asset_class, 0.0) * 100.0
+            )
+
+    return values
 
 
 def apply_pending_load() -> None:
@@ -157,3 +181,9 @@ def apply_pending_load() -> None:
 
     # Names that no longer exist are dropped where the options are known.
     st.session_state[CONSTITUENTS_KEY] = list(pending.stocks.constituents)
+
+    # The asset-class picker follows the restored holdings, or it would filter
+    # some of them straight back out.
+    restored_classes = classes_present(pending.stocks.constituents)
+    st.session_state[ASSET_CLASSES_KEY] = restored_classes
+    st.session_state[PREVIOUS_CLASSES_KEY] = restored_classes

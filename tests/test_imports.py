@@ -25,12 +25,13 @@ def test_runner_imports():
 
 
 def test_ui_imports():
-    from index_lib.ui import cache, figures, forge, macro, tables, universe
+    from index_lib.ui import cache, figures, forge, macro, rates, tables, universe
 
     assert cache.run_backtest is not None
     assert figures.make_line_fig is not None
     assert tables.stats_frame is not None
     assert macro.render is not None
+    assert rates.render is not None
     assert universe.render is not None
     assert forge.render is not None
 
