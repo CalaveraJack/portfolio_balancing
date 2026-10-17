@@ -28,8 +28,7 @@ from index_lib.loaders.rates_cache import _fred_fetch_series
 
 logger = logging.getLogger(__name__)
 
-CACHE_SERIES = "macro_series.parquet"
-CACHE_META = "macro_meta.json"
+MACRO_CACHE = "macro"
 
 HISTORY_START_YEAR = 1990
 TIMEOUT_S = 60
@@ -155,16 +154,13 @@ def parse_sdmx_csv(text: str) -> pd.Series:
 # ---------------------------------------------------------------------------
 
 
-def _fetch_sdmx(indicator: Indicator) -> pd.Series:
-    prefix = indicator.prefix
-    flow, series_key = indicator.key.split("/", 1)
+def _fetch_sdmx(prefix: str, key: str, frequency: str) -> pd.Series:
+    flow, series_key = key.split("/", 1)
     url = SDMX_URLS[prefix].format(flow=flow, key=series_key)
 
     params = dict(SDMX_FORMAT_PARAMS[prefix])
     params["startPeriod"] = (
-        START_PERIODS[indicator.frequency]
-        if prefix == "bbk"
-        else str(HISTORY_START_YEAR)
+        START_PERIODS[frequency] if prefix == "bbk" else str(HISTORY_START_YEAR)
     )
 
     response = requests.get(
@@ -177,23 +173,32 @@ def _fetch_sdmx(indicator: Indicator) -> pd.Series:
     return parse_sdmx_csv(response.text)
 
 
-def fetch_indicator(indicator: Indicator) -> pd.Series:
-    """Download one indicator's full history."""
-    if indicator.prefix == "fred":
-        series = _fred_fetch_series(
-            indicator.key, start=f"{HISTORY_START_YEAR}-01-01"
-        ).dropna()
-    elif indicator.prefix in SDMX_URLS:
-        series = _fetch_sdmx(indicator)
+def fetch_series(source: str, frequency: str) -> pd.Series:
+    """
+    Download the full history of one ``<prefix>:<key>`` source.
+
+    The macro catalogue and the curves name their sources the same way, so
+    they share this one fetcher.
+    """
+    prefix, key = source.split(":", 1)
+
+    if prefix == "fred":
+        series = _fred_fetch_series(key, start=f"{HISTORY_START_YEAR}-01-01").dropna()
+    elif prefix in SDMX_URLS:
+        series = _fetch_sdmx(prefix, key, frequency)
     else:
-        raise ValueError(f"unknown source prefix {indicator.prefix!r}")
+        raise ValueError(f"unknown source prefix {prefix!r}")
 
     if series.empty:
         raise ValueError("the source returned no observations")
 
     series.index = pd.to_datetime(series.index).tz_localize(None)
-    series.name = indicator.id
     return series.sort_index()
+
+
+def fetch_indicator(indicator: Indicator) -> pd.Series:
+    """Download one catalogue indicator's full history."""
+    return fetch_series(indicator.source, indicator.frequency).rename(indicator.id)
 
 
 def _short_error(exc: Exception) -> str:
@@ -207,8 +212,8 @@ def _short_error(exc: Exception) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _read_cache(data_dir: Path) -> Dict[str, pd.Series]:
-    path = data_dir / CACHE_SERIES
+def _read_cache(data_dir: Path, name: str) -> Dict[str, pd.Series]:
+    path = data_dir / f"{name}_series.parquet"
     if not path.exists():
         return {}
 
@@ -219,7 +224,7 @@ def _read_cache(data_dir: Path) -> Dict[str, pd.Series]:
     }
 
 
-def _write_cache(data_dir: Path, series: Dict[str, pd.Series]) -> None:
+def _write_cache(data_dir: Path, name: str, series: Dict[str, pd.Series]) -> None:
     frames = [
         pd.DataFrame({"id": key, "date": s.index, "value": s.values})
         for key, s in series.items()
@@ -229,32 +234,44 @@ def _write_cache(data_dir: Path, series: Dict[str, pd.Series]) -> None:
         return
 
     data_dir.mkdir(parents=True, exist_ok=True)
-    pd.concat(frames, ignore_index=True).to_parquet(data_dir / CACHE_SERIES)
+    pd.concat(frames, ignore_index=True).to_parquet(data_dir / f"{name}_series.parquet")
 
 
-def _read_meta(data_dir: Path) -> dict:
-    path = data_dir / CACHE_META
+def _read_meta(data_dir: Path, name: str) -> dict:
+    path = data_dir / f"{name}_meta.json"
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     return {"last_refresh_ts": None, "series": {}}
 
 
-def _write_meta(data_dir: Path, meta: dict) -> None:
+def _write_meta(data_dir: Path, name: str, meta: dict) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / CACHE_META).write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    (data_dir / f"{name}_meta.json").write_text(
+        json.dumps(meta, indent=2), encoding="utf-8"
+    )
 
 
-def load_macro_cached(
-    catalogue: Sequence[Indicator],
+@dataclass(frozen=True)
+class SeriesSpec:
+    """One series to keep cached: its id, where it comes from, how often."""
+
+    id: str
+    source: str
+    frequency: str
+
+
+def load_series_cached(
+    specs: Sequence[SeriesSpec],
     *,
+    cache_name: str,
     data_dir: str = "data",
     cache_mode: str = "cache",
 ) -> MacroData:
     """
-    Load every catalogue indicator under the app's cache policy.
+    Load a set of series under the app's cache policy.
 
-    cache   -> read the local cache only; indicators never fetched are reported.
-    refresh -> fetch every indicator; failures keep their cached values and are
+    cache   -> read the local cache only; series never fetched are reported.
+    refresh -> fetch every series; failures keep their cached values and are
                reported for the UI to show as errors.
     auto    -> the same fetch, with failures reported for the UI to show as
                warnings.
@@ -263,61 +280,75 @@ def load_macro_cached(
         raise ValueError("cache_mode must be one of: refresh, cache, auto")
 
     path = Path(data_dir)
-    cached = _read_cache(path)
-    meta = _read_meta(path)
+    cached = _read_cache(path, cache_name)
+    meta = _read_meta(path, cache_name)
     fetched_at = dict(meta.get("series", {}))
 
     series: Dict[str, pd.Series] = {}
     status: Dict[str, SeriesStatus] = {}
 
     if cache_mode == "cache":
-        for indicator in catalogue:
-            if indicator.id in cached:
-                series[indicator.id] = cached[indicator.id]
-                status[indicator.id] = SeriesStatus(
-                    STATUS_OK, fetched_at.get(indicator.id)
-                )
+        for spec in specs:
+            if spec.id in cached:
+                series[spec.id] = cached[spec.id]
+                status[spec.id] = SeriesStatus(STATUS_OK, fetched_at.get(spec.id))
             else:
-                status[indicator.id] = SeriesStatus(
+                status[spec.id] = SeriesStatus(
                     STATUS_MISSING,
                     message="Not in the local cache. Reload in refresh or auto mode.",
                 )
         return MacroData(series, status, meta.get("last_refresh_ts"))
 
-    def _attempt(indicator: Indicator):
+    def _attempt(spec: SeriesSpec):
         try:
-            return indicator, fetch_indicator(indicator), None
+            return spec, fetch_series(spec.source, spec.frequency), None
         except Exception as exc:  # reported per series, never fatal
-            logger.warning("macro fetch failed for %s: %s", indicator.id, exc)
-            return indicator, None, exc
+            logger.warning("fetch failed for %s: %s", spec.id, exc)
+            return spec, None, exc
 
     now = str(pd.Timestamp.now().floor("s"))
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        outcomes = list(pool.map(_attempt, catalogue))
+        outcomes = list(pool.map(_attempt, specs))
 
-    for indicator, fetched, error in outcomes:
+    for spec, fetched, error in outcomes:
         if fetched is not None:
-            series[indicator.id] = fetched
-            cached[indicator.id] = fetched
-            fetched_at[indicator.id] = now
-            status[indicator.id] = SeriesStatus(STATUS_OK, now)
+            fetched = fetched.rename(spec.id)
+            series[spec.id] = fetched
+            cached[spec.id] = fetched
+            fetched_at[spec.id] = now
+            status[spec.id] = SeriesStatus(STATUS_OK, now)
             continue
 
         reason = _short_error(error)
-        if indicator.id in cached:
-            series[indicator.id] = cached[indicator.id]
-            status[indicator.id] = SeriesStatus(
+        if spec.id in cached:
+            series[spec.id] = cached[spec.id]
+            status[spec.id] = SeriesStatus(
                 STATUS_FAILED,
-                fetched_at.get(indicator.id),
+                fetched_at.get(spec.id),
                 f"Refresh failed ({reason}); showing the cached copy.",
             )
         else:
-            status[indicator.id] = SeriesStatus(
+            status[spec.id] = SeriesStatus(
                 STATUS_FAILED, None, f"Refresh failed ({reason}); nothing cached."
             )
 
-    _write_cache(path, cached)
-    _write_meta(path, {"last_refresh_ts": now, "series": fetched_at})
+    _write_cache(path, cache_name, cached)
+    _write_meta(path, cache_name, {"last_refresh_ts": now, "series": fetched_at})
 
     return MacroData(series, status, now)
+
+
+def load_macro_cached(
+    catalogue: Sequence[Indicator],
+    *,
+    data_dir: str = "data",
+    cache_mode: str = "cache",
+) -> MacroData:
+    """Load every catalogue indicator; see ``load_series_cached``."""
+    return load_series_cached(
+        [SeriesSpec(i.id, i.source, i.frequency) for i in catalogue],
+        cache_name=MACRO_CACHE,
+        data_dir=data_dir,
+        cache_mode=cache_mode,
+    )

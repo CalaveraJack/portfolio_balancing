@@ -11,6 +11,7 @@ from index_lib.loaders import (
     load_rates_cached,
     load_universe_close_volume_cached,
 )
+from index_lib.loaders.curve_cache import CurveData, load_curves_cached
 from index_lib.loaders.macro_cache import MacroData, load_macro_cached
 from index_lib.loaders.market_caps import (
     align_market_caps_to_prices,
@@ -209,3 +210,13 @@ def load_macro_data(*, data_dir: str = "data", cache_mode: str = "cache") -> Mac
     return load_macro_cached(
         macro_catalogue(), data_dir=data_dir, cache_mode=cache_mode
     )
+
+
+def load_curve_data(*, data_dir: str = "data", cache_mode: str = "cache") -> CurveData:
+    """
+    Every inspectable yield curve and funding rate.
+
+    Separate from ``load_rates_data``, which feeds the backtest its SOFR: these
+    curves are for looking at, so like the macro data a failure never raises.
+    """
+    return load_curves_cached(data_dir=data_dir, cache_mode=cache_mode)

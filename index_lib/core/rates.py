@@ -7,8 +7,18 @@ import numpy as np
 import pandas as pd
 
 
+def tenor_label(col: str) -> str:
+    """USD_10Y -> 10Y; a bare 10Y is returned as it is."""
+    return col.split("_", 1)[1] if "_" in col else col
+
+
+def _is_tenor(col: object) -> bool:
+    label = tenor_label(str(col))
+    return len(label) > 1 and label[-1] in "MY" and label[:-1].isdigit()
+
+
 def tenor_sort_key(col: str) -> Tuple[int, float]:
-    tenor = col.split("_", 1)[1] if "_" in col else col
+    tenor = tenor_label(col)
 
     if tenor.endswith("M"):
         return (0, float(tenor[:-1]))
@@ -20,8 +30,8 @@ def tenor_sort_key(col: str) -> Tuple[int, float]:
 
 
 def tenor_years(col: str) -> float:
-    """USD_3M -> 0.25, USD_10Y -> 10.0."""
-    tenor = col.split("_", 1)[1] if "_" in col else col
+    """3M -> 0.25, 10Y -> 10.0; a currency prefix (USD_10Y) is ignored."""
+    tenor = tenor_label(col)
 
     if tenor.endswith("M"):
         return float(tenor[:-1]) / 12.0
@@ -31,36 +41,47 @@ def tenor_years(col: str) -> float:
     raise ValueError(f"Not a tenor: {col}")
 
 
-def tenor_label(col: str) -> str:
-    return col.split("_", 1)[1] if "_" in col else col
+def by_tenor(curve: pd.DataFrame) -> pd.DataFrame:
+    """
+    The tenor columns of a curve panel, named by tenor alone, shortest first.
+
+    Accepts both the rates loader's USD_10Y columns and plain 10Y, so the
+    analytics below work on any curve.
+    """
+    columns = sorted([c for c in curve.columns if _is_tenor(c)], key=tenor_sort_key)
+    out = curve[columns].copy()
+    out.columns = [tenor_label(c) for c in columns]
+    return out
 
 
-def curve_columns(curve: pd.DataFrame, prefix: str = "USD_") -> List[str]:
-    return sorted(
-        [c for c in curve.columns if c.startswith(prefix)], key=tenor_sort_key
-    )
+def curve_columns(curve: pd.DataFrame) -> List[str]:
+    """Tenor labels the curve has, shortest first."""
+    return list(by_tenor(curve).columns)
+
+
+#: Spread name -> (short tenor, long tenor).
+SPREADS: Dict[str, Tuple[str, str]] = {
+    "2s10s": ("2Y", "10Y"),
+    "3m10y": ("3M", "10Y"),
+    "5s30s": ("5Y", "30Y"),
+}
 
 
 def compute_curve_spreads(curve: pd.DataFrame) -> pd.DataFrame:
+    """The standard spreads the curve has both legs for, in percentage points."""
+    curve = by_tenor(curve)
     out = pd.DataFrame(index=curve.index)
 
-    if {"USD_10Y", "USD_2Y"}.issubset(curve.columns):
-        out["2s10s"] = curve["USD_10Y"] - curve["USD_2Y"]
-
-    if {"USD_10Y", "USD_3M"}.issubset(curve.columns):
-        out["3m10y"] = curve["USD_10Y"] - curve["USD_3M"]
-
-    if {"USD_30Y", "USD_5Y"}.issubset(curve.columns):
-        out["5s30s"] = curve["USD_30Y"] - curve["USD_5Y"]
+    for name, (short, long) in SPREADS.items():
+        if {short, long}.issubset(curve.columns):
+            out[name] = curve[long] - curve[short]
 
     return out
 
 
 def curve_at(curve: pd.DataFrame, date: pd.Timestamp) -> pd.Series:
     """The curve as it stood on a date: the last fixing on or before it."""
-    columns = curve_columns(curve)
-    populated = curve[columns].dropna(how="all")
-    populated = populated.loc[: pd.to_datetime(date)]
+    populated = by_tenor(curve).dropna(how="all").loc[: pd.to_datetime(date)]
     if populated.empty:
         return pd.Series(dtype=float)
     return populated.ffill().iloc[-1]
@@ -87,10 +108,9 @@ def curve_changes(curve: pd.DataFrame, horizon_days: int = 1) -> pd.DataFrame:
     Non-overlapping, so that a weekly or monthly sample does not count the same
     move five or twenty-one times.
     """
-    columns = curve_columns(curve)
-    levels = curve[columns].dropna(how="any")
+    levels = by_tenor(curve).dropna(how="any")
     if levels.empty:
-        return pd.DataFrame(columns=columns)
+        return levels
 
     sampled = levels.iloc[::horizon_days] if horizon_days > 1 else levels
     return (sampled.diff() * 100.0).dropna(how="any")
@@ -184,11 +204,11 @@ def simple_factors(curve: pd.DataFrame) -> pd.DataFrame:
     the 2s5s10s butterfly (twice the 5y minus the 2y and the 10y), positive when
     the belly sits above the line through the wings.
     """
-    needed = {"USD_2Y", "USD_5Y", "USD_10Y"}
-    if not needed.issubset(curve.columns):
+    curve = by_tenor(curve)
+    if not {"2Y", "5Y", "10Y"}.issubset(curve.columns):
         return pd.DataFrame(columns=list(FACTOR_NAMES))
 
-    two, five, ten = curve["USD_2Y"], curve["USD_5Y"], curve["USD_10Y"]
+    two, five, ten = curve["2Y"], curve["5Y"], curve["10Y"]
     out = pd.DataFrame(
         {
             "Level": (two + five + ten) / 3.0,
@@ -253,12 +273,13 @@ def classify_move(d_short: float, d_long: float, band_bp: float = 1.0) -> str:
 def curve_moves(
     curve: pd.DataFrame,
     *,
-    short: str = "USD_2Y",
-    long: str = "USD_10Y",
+    short: str = "2Y",
+    long: str = "10Y",
     horizon_days: int = 1,
     band_bp: float = 1.0,
 ) -> pd.DataFrame:
     """Every move of the chosen pair over non-overlapping windows, classified."""
+    curve = by_tenor(curve)
     if short not in curve.columns or long not in curve.columns:
         return pd.DataFrame()
 
@@ -308,12 +329,11 @@ def move_summary(moves: pd.DataFrame) -> pd.DataFrame:
     ]
 
 
+#: The short/long pairs offered for move classification, in menu order.
+MOVE_PAIRS = (("2Y", "10Y"), ("3M", "10Y"), ("5Y", "30Y"), ("2Y", "30Y"), ("1Y", "10Y"))
+
+
 def pair_options(curve: pd.DataFrame) -> Sequence[Tuple[str, str]]:
-    """The standard short/long pairs this curve can show."""
-    pairs = (
-        ("USD_2Y", "USD_10Y"),
-        ("USD_3M", "USD_10Y"),
-        ("USD_5Y", "USD_30Y"),
-        ("USD_2Y", "USD_30Y"),
-    )
-    return [p for p in pairs if set(p).issubset(curve.columns)]
+    """The standard short/long pairs this curve has both legs for."""
+    present = set(curve_columns(curve))
+    return [p for p in MOVE_PAIRS if set(p) <= present]

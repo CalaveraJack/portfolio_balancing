@@ -33,7 +33,7 @@ def _indicator(id_="x", kind="level", frequency="M") -> Indicator:
         frequency=frequency,
         kind=kind,
         unit="index",
-        source="fred:TEST",
+        source=f"fred:{id_.upper()}",
     )
 
 
@@ -131,10 +131,10 @@ def _monthly(values, start="2020-01-01") -> pd.Series:
 
 
 def test_cache_mode_never_fetches_and_reports_what_is_missing(tmp_path, monkeypatch):
-    def _explode(_):
+    def _explode(*_):
         raise AssertionError("cache mode must not fetch")
 
-    monkeypatch.setattr(macro_cache, "fetch_indicator", _explode)
+    monkeypatch.setattr(macro_cache, "fetch_series", _explode)
 
     data = load_macro_cached(
         [_indicator("a")], data_dir=str(tmp_path), cache_mode="cache"
@@ -147,15 +147,15 @@ def test_cache_mode_never_fetches_and_reports_what_is_missing(tmp_path, monkeypa
 def test_a_failed_refresh_keeps_the_cached_copy(tmp_path, monkeypatch):
     catalogue = [_indicator("a"), _indicator("b")]
 
-    monkeypatch.setattr(macro_cache, "fetch_indicator", lambda i: _monthly([1, 2, 3]))
+    monkeypatch.setattr(macro_cache, "fetch_series", lambda *_: _monthly([1, 2, 3]))
     load_macro_cached(catalogue, data_dir=str(tmp_path), cache_mode="refresh")
 
-    def _flaky(indicator):
-        if indicator.id == "b":
+    def _flaky(source, frequency):
+        if source == "fred:B":
             raise ValueError("provider down")
         return _monthly([1, 2, 3, 4])
 
-    monkeypatch.setattr(macro_cache, "fetch_indicator", _flaky)
+    monkeypatch.setattr(macro_cache, "fetch_series", _flaky)
     data = load_macro_cached(catalogue, data_dir=str(tmp_path), cache_mode="auto")
 
     assert data.status["a"].status == STATUS_OK
@@ -166,7 +166,7 @@ def test_a_failed_refresh_keeps_the_cached_copy(tmp_path, monkeypatch):
 
 
 def test_refreshed_series_reach_the_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(macro_cache, "fetch_indicator", lambda i: _monthly([5, 6]))
+    monkeypatch.setattr(macro_cache, "fetch_series", lambda *_: _monthly([5, 6]))
     load_macro_cached([_indicator("a")], data_dir=str(tmp_path), cache_mode="refresh")
 
     data = load_macro_cached(
