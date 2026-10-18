@@ -28,7 +28,8 @@ def _record(app: AppTest, name: str) -> None:
 
 
 def test_recording_keeps_the_settings_and_the_numbers(app: AppTest, tmp_path):
-    app.session_state["forge_method"] = "min_var"
+    sid = app.session_state["forge_sleeves"][0]["id"]
+    app.session_state[f"forge_s{sid}_method"] = "min_var"
     app.run()
 
     _record(app, "June min-var")

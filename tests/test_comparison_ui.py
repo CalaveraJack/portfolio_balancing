@@ -34,7 +34,8 @@ def test_the_tab_exists_and_survives_having_nothing_to_compare(app: AppTest):
 def test_two_recorded_runs_can_be_compared(app: AppTest, tmp_path):
     _record(app, "Equal weight")
 
-    app.session_state["forge_method"] = "min_var"
+    sid = app.session_state["forge_sleeves"][0]["id"]
+    app.session_state[f"forge_s{sid}_method"] = "min_var"
     app.run()
     _record(app, "Min variance")
 

@@ -15,7 +15,8 @@ import streamlit as st
 from index_lib.config import asset_class_label, asset_class_of, describe, group_by_class
 from index_lib.core import compute_stats_from_price_series
 from index_lib.datasets import UniverseData
-from index_lib.ui import figures, tables
+from index_lib.ui import figures, filters, tables
+from index_lib.ui.help_text import HELP
 from index_lib.ui.window import cut
 
 #: More lines than this and the colours stop telling names apart.
@@ -49,12 +50,22 @@ def _default_compared(tickers: List[str]) -> List[str]:
 
 
 def _overview(close: pd.DataFrame) -> None:
-    st.dataframe(
+    frame = filters.filter_frame(
         tables.universe_overview_frame(close),
+        "univ_overview",
+        category="Asset class",
+        text_columns=("Ticker", "What it is"),
+        placeholder="Ticker or description",
+    )
+    beta = frame["Data"].eq("beta").any()
+    st.dataframe(
+        frame if beta else frame.drop(columns="Data"),
         hide_index=True,
         width="stretch",
-        height=min(38 + 35 * close.shape[1], 560),
+        height=min(38 + 35 * len(frame), 560),
     )
+    if beta:
+        st.caption(":gray[BETA · synthetic bonds]", help=HELP["beta"])
 
 
 def _relative(close: pd.DataFrame, tickers: List[str]) -> None:

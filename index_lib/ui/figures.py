@@ -105,29 +105,35 @@ def make_hist_fig(
     return _layout(fig, title, x_title, "Count", height)
 
 
-def make_weight_fig(
-    daily_weights: pd.DataFrame,
-    title: str,
-    top_n: int = 20,
+def make_stacked_bar_figure(
+    frame: pd.DataFrame,
     *,
-    height: int = 360,
+    title: str,
+    colors: Optional[dict] = None,
+    height: int = 340,
 ) -> go.Figure:
-    if daily_weights is None or daily_weights.empty:
+    """Weights at each rebalance, stacked to the whole book (fractions in)."""
+    if frame is None or frame.empty:
         return empty_fig(title=title, height=height)
 
-    top = daily_weights.mean().sort_values(ascending=False).head(top_n).index
-
     fig = go.Figure()
-    for ticker in top:
+    for column in frame.columns:
         fig.add_trace(
-            go.Scatter(
-                x=daily_weights.index,
-                y=daily_weights[ticker],
-                mode="lines",
-                name=ticker,
+            go.Bar(
+                x=frame.index,
+                y=frame[column] * 100.0,
+                name=str(column),
+                marker=dict(
+                    color=(colors or {}).get(column),
+                    line=dict(width=0),
+                ),
+                hovertemplate="%{x|%Y-%m-%d}: %{y:.1f}%<extra>"
+                + str(column)
+                + "</extra>",
             )
         )
-    return _layout(fig, title, "Date", "Weight", height)
+    fig.update_layout(barmode="stack", bargap=0.15, hovermode="x unified")
+    return _layout(fig, title, "Rebalance", "Weight (%)", height)
 
 
 # ---------------------------------------------------------------------------

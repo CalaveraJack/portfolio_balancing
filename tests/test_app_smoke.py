@@ -82,18 +82,32 @@ def test_app_renders_charts_and_tables(app: AppTest):
     assert len(app.dataframe) >= 3
 
 
-def test_allocation_mode_builds_a_hedged_multi_asset_book():
-    """A fresh app on the long multi-asset set, in allocation mode, in EUR."""
+def test_a_set_opens_as_one_sleeve(app: AppTest):
+    sleeves = app.session_state["forge_sleeves"]
+    assert len(sleeves) == 1
+    assert sleeves[0]["names"]
+
+
+def test_sleeves_split_add_and_run_in_another_currency():
+    """Split the long multi-asset set by class, add a sleeve, switch to EUR."""
     at = AppTest.from_file(APP, default_timeout=300)
     at.session_state["universe_key"] = "multi_asset_long"
-    at.session_state["forge_mode"] = "allocation"
     at.run()
     _clean(at)
+
+    at.button(key="forge_split").click().run()
+    _clean(at)
+    assert len(at.session_state["forge_sleeves"]) == 5
+
+    at.button(key="forge_add").click().run()
+    _clean(at)
+    sleeves = at.session_state["forge_sleeves"]
+    assert len(sleeves) == 6
+    assert sum(s["budget"] for s in sleeves) == pytest.approx(100.0)
 
     at.session_state["forge_base_ccy"] = "EUR"
     at.run()
     _clean(at)
-    assert any("Allocation" in m.value for m in at.markdown)
 
 
 def test_monte_carlo_button_runs(app: AppTest):

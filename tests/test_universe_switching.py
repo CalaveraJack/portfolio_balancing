@@ -37,7 +37,7 @@ def test_switching_universe_keeps_a_valid_selection(app: AppTest):
 
         assert not app.exception, (key, [e.value for e in app.exception])
 
-        picked = app.session_state["forge_constituents"]
+        picked = [n for s in app.session_state["forge_sleeves"] for n in s["names"]]
         assert picked, f"{key} opened with no constituents selected"
         assert set(picked) <= set(UNIVERSES[key].tickers), (
             f"{key} kept names from another stock set: {picked}"
@@ -47,11 +47,14 @@ def test_switching_universe_keeps_a_valid_selection(app: AppTest):
 def test_stale_selection_is_dropped(app: AppTest):
     app.session_state["universe_key"] = "megacap"
     app.run()
-    app.session_state["forge_constituents"] = ["AAPL", "MSFT"]
+    sleeves = [dict(s) for s in app.session_state["forge_sleeves"]]
+    sleeves[0]["names"] = ["AAPL", "MSFT"]
+    app.session_state["forge_sleeves"] = sleeves
     app.run()
 
     app.session_state["universe_key"] = "pharma"
     app.run()
 
     assert not app.exception, [e.value for e in app.exception]
-    assert "AAPL" not in app.session_state["forge_constituents"]
+    held = [n for s in app.session_state["forge_sleeves"] for n in s["names"]]
+    assert "AAPL" not in held

@@ -5,12 +5,12 @@ render them with a plain ``st.dataframe`` call.
 
 from __future__ import annotations
 
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 
-from index_lib.config import asset_class_label, describe, group_by_class
+from index_lib.config import asset_class_label, describe, group_by_class, is_synthetic
 from index_lib.core import compute_stats_from_price_series
 from index_lib.ui.formatting import fmt_num, fmt_pct
 
@@ -121,6 +121,7 @@ def universe_overview_frame(close: pd.DataFrame) -> pd.DataFrame:
                     "Asset class": asset_class_label(asset_class),
                     "Ticker": ticker,
                     "What it is": describe(ticker),
+                    "Data": "beta" if is_synthetic(ticker) else "",
                     "Total return": fmt_pct(stats.get("total_return")),
                     "CAGR": fmt_pct(stats.get("cagr")),
                     "Ann. vol": fmt_pct(stats.get("vol_ann")),
@@ -164,32 +165,25 @@ def latest_weights_frame(
     return pd.DataFrame(rows, columns=["Class", "Ticker", "Weight (%)"])
 
 
-def class_mix_frame(
+def mix_frame(
     mix: pd.DataFrame,
-    budgets: Dict[str, float],
+    targets: Optional[Dict[str, float]] = None,
     *,
-    net_exposure: float = 1.0,
+    label: str = "Asset class",
 ) -> pd.DataFrame:
     """
-    Each class's weight: average, latest, and the target where one is set.
-
-    Targets are budgets rescaled to sum to one, times the invested fraction, so
-    they compare like for like with the weights.
+    Each part's share of the book: average, latest, and its target if it has
+    one (a sleeve's budget, as a share of the book).
     """
     if mix is None or mix.empty:
-        return pd.DataFrame(columns=["Asset class", "Average", "Latest", "Target"])
+        return pd.DataFrame(columns=[label, "Average", "Latest", "Target"])
 
-    labelled = {asset_class_label(k): v for k, v in budgets.items()}
-    total = sum(labelled.values())
-
-    def _target(label: str) -> str:
-        if not total:
-            return "-"
-        return fmt_pct(labelled.get(label, 0.0) / total * net_exposure)
+    def _target(name: str) -> str:
+        return fmt_pct(targets[name]) if targets and name in targets else "-"
 
     return pd.DataFrame(
         {
-            "Asset class": mix.columns,
+            label: mix.columns,
             "Average": [fmt_pct(mix[c].mean()) for c in mix.columns],
             "Latest": [fmt_pct(mix[c].iloc[-1]) for c in mix.columns],
             "Target": [_target(c) for c in mix.columns],
@@ -249,6 +243,31 @@ DIAGNOSTIC_ROWS = (
     ("annual_turnover", "Turnover p.a. (one-way)", fmt_pct),
     ("max_daily_turnover", "Busiest day", fmt_pct),
 )
+
+
+def book_numbers_frame(
+    stats: Dict[str, object], summary: Dict[str, object]
+) -> pd.DataFrame:
+    """The numbers worth a glance: performance, then how the book was held."""
+    rows: List[Tuple[str, str]] = [
+        ("Total return", fmt_pct(stats.get("total_return"))),
+        ("CAGR", fmt_pct(stats.get("cagr"))),
+        ("Ann. vol", fmt_pct(stats.get("vol_ann"))),
+        ("Sharpe (rf=0)", fmt_num(stats.get("sharpe_0rf"))),
+        ("Max drawdown", fmt_pct(stats.get("max_drawdown"))),
+    ]
+    if summary:
+        rows += [
+            ("Avg net exposure", fmt_pct(summary.get("avg_net_exposure"))),
+            ("Effective names", fmt_num(summary.get("avg_effective_names"))),
+            ("Turnover p.a.", fmt_pct(summary.get("annual_turnover"))),
+        ]
+        if summary.get("is_shorting"):
+            rows += [
+                ("Avg gross exposure", fmt_pct(summary.get("avg_gross_exposure"))),
+                ("Avg short notional", fmt_pct(summary.get("avg_short_notional"))),
+            ]
+    return _metric_frame(rows)
 
 
 def diagnostics_frame(summary: Dict[str, object]) -> pd.DataFrame:

@@ -27,14 +27,29 @@ def app(tmp_path, monkeypatch) -> AppTest:
     return at
 
 
+def _held(app: AppTest) -> list:
+    return [n for s in app.session_state["forge_sleeves"] for n in s["names"]]
+
+
+def _set_names(app: AppTest, names) -> None:
+    """Hold exactly these names, in one sleeve."""
+    sleeves = [dict(s) for s in app.session_state["forge_sleeves"]][:1]
+    sleeves[0]["names"] = list(names)
+    app.session_state["forge_sleeves"] = sleeves
+
+
 def _save_as(app: AppTest, name: str) -> None:
     app.session_state["lib_name"] = name
     app.run()
     app.button(key="lib_save").click().run()
 
 
+def _method_key(app: AppTest) -> str:
+    return f"forge_s{app.session_state['forge_sleeves'][0]['id']}_method"
+
+
 def test_save_then_load_restores_the_settings(app: AppTest, tmp_path):
-    app.session_state["forge_method"] = "min_var"
+    app.session_state[_method_key(app)] = "min_var"
     app.session_state["forge_rebalance"] = "quarterly"
     app.run()
 
@@ -44,7 +59,7 @@ def test_save_then_load_restores_the_settings(app: AppTest, tmp_path):
     assert not app.exception, [e.value for e in app.exception]
 
     # Move the controls somewhere else, then load the template back.
-    app.session_state["forge_method"] = "equal"
+    app.session_state[_method_key(app)] = "equal"
     app.session_state["forge_rebalance"] = "daily"
     app.run()
 
@@ -53,7 +68,7 @@ def test_save_then_load_restores_the_settings(app: AppTest, tmp_path):
     app.button(key="lib_load").click().run()
 
     assert not app.exception, [e.value for e in app.exception]
-    assert app.session_state["forge_method"] == "min_var"
+    assert app.session_state["forge_sleeves"][0]["method"] == "min_var"
     assert app.session_state["forge_rebalance"] == "quarterly"
 
 
@@ -104,7 +119,7 @@ def test_portfolio_restores_stocks_and_switches_stock_set(app: AppTest, tmp_path
     app.session_state["universe_key"] = "megacap"
     app.run()
 
-    app.session_state["forge_constituents"] = ["AAPL", "MSFT", "NVDA"]
+    _set_names(app, ["AAPL", "MSFT", "NVDA"])
     app.session_state["lib_save_stocks"] = True
     app.run()
 
@@ -118,7 +133,7 @@ def test_portfolio_restores_stocks_and_switches_stock_set(app: AppTest, tmp_path
     # Move to a stock set that shares none of those names.
     app.session_state["universe_key"] = "pharma"
     app.run()
-    assert "AAPL" not in app.session_state["forge_constituents"]
+    assert "AAPL" not in _held(app)
 
     app.session_state["lib_selected"] = "Mega book"
     app.run()
@@ -126,7 +141,7 @@ def test_portfolio_restores_stocks_and_switches_stock_set(app: AppTest, tmp_path
 
     assert not app.exception, [e.value for e in app.exception]
     assert app.session_state["universe_key"] == "megacap"
-    assert app.session_state["forge_constituents"] == ["AAPL", "MSFT", "NVDA"]
+    assert _held(app) == ["AAPL", "MSFT", "NVDA"]
 
 
 def test_strategy_leaves_the_stock_selection_alone(app: AppTest, tmp_path):
@@ -137,7 +152,7 @@ def test_strategy_leaves_the_stock_selection_alone(app: AppTest, tmp_path):
     assert library.load_template("Logic only", directory=tmp_path).stocks is None
 
     chosen = ["ABBV", "JNJ"]
-    app.session_state["forge_constituents"] = chosen
+    _set_names(app, chosen)
     app.run()
 
     app.session_state["lib_selected"] = "Logic only"
@@ -145,11 +160,11 @@ def test_strategy_leaves_the_stock_selection_alone(app: AppTest, tmp_path):
     app.button(key="lib_load").click().run()
 
     assert not app.exception, [e.value for e in app.exception]
-    assert app.session_state["forge_constituents"] == chosen
+    assert _held(app) == chosen
 
 
 def test_portfolio_naming_a_vanished_stock_loads_the_rest(app: AppTest, tmp_path):
-    app.session_state["forge_constituents"] = ["ABBV", "JNJ"]
+    _set_names(app, ["ABBV", "JNJ"])
     app.session_state["lib_save_stocks"] = True
     app.run()
     _save_as(app, "Partly gone")
@@ -165,7 +180,7 @@ def test_portfolio_naming_a_vanished_stock_loads_the_rest(app: AppTest, tmp_path
     app.button(key="lib_load").click().run()
 
     assert not app.exception, [e.value for e in app.exception]
-    assert app.session_state["forge_constituents"] == ["ABBV", "JNJ"]
+    assert _held(app) == ["ABBV", "JNJ"]
     assert any("DELISTED" in w.value for w in app.warning)
 
 
@@ -178,7 +193,7 @@ def test_portfolio_survives_the_stock_set_being_renamed(app: AppTest, tmp_path):
     """
     app.session_state["universe_key"] = "megacap"
     app.run()
-    app.session_state["forge_constituents"] = ["AAPL", "MSFT"]
+    _set_names(app, ["AAPL", "MSFT"])
     app.session_state["lib_save_stocks"] = True
     app.run()
     _save_as(app, "Before rename")
@@ -204,7 +219,7 @@ def test_portfolio_survives_the_stock_set_being_renamed(app: AppTest, tmp_path):
 
         assert not after.exception, [e.value for e in after.exception]
         assert after.session_state["universe_key"] == "megacap"
-        assert after.session_state["forge_constituents"] == ["AAPL", "MSFT"]
+        assert _held(after) == ["AAPL", "MSFT"]
     finally:
         UNIVERSES["megacap"] = original
 
@@ -212,7 +227,7 @@ def test_portfolio_survives_the_stock_set_being_renamed(app: AppTest, tmp_path):
 def test_portfolio_from_a_deleted_stock_set_keeps_the_current_one(
     app: AppTest, tmp_path
 ):
-    app.session_state["forge_constituents"] = ["ABBV", "JNJ"]
+    _set_names(app, ["ABBV", "JNJ"])
     app.session_state["lib_save_stocks"] = True
     app.run()
     _save_as(app, "Orphan")

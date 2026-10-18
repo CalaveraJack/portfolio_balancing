@@ -9,193 +9,30 @@ info button rather than a paragraph on the page.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import replace
+from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from index_lib import allocation, diagnostics, library, runner, runs
-from index_lib.config import (
-    ASSET_CLASSES,
-    asset_class_label,
-    asset_class_of,
-    classes_present,
-    currency_of,
-    describe,
-    universe_label,
-    universe_tickers,
-)
-from index_lib.config.fx import BASE_CURRENCIES
+from index_lib.core.backtest import BOND_METHODS
 from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.loaders.fx_cache import FXData
 from index_lib.strategy import (
-    COV_ESTIMATORS,
-    METHODS,
-    MODES,
-    OPTIMIZER_FORMS,
-    REBALANCE_FREQUENCIES,
     MonteCarloConfig,
     OverlayConfig,
     StrategyConfig,
     UniverseSelection,
-    is_optimizer_method,
-    method_label,
     method_name,
-    method_uses_lookback,
 )
-from index_lib.ui import cache, figures, session, tables
+from index_lib.ui import cache, figures, session, sleeves, tables
+from index_lib.ui.help_text import HELP, MC_METHOD_HELP
 from index_lib.ui.theme import SERIES_COLORS, note, screen, section
-
-DEFAULT_CONSTITUENT_COUNT = 6
 
 MC_SESSION_KEY = "mc_result"
 OPEN_RUN_KEY = "_open_run"
-
-HELP: Dict[str, str] = {
-    "mode": (
-        "Strategy: one construction method over one pool of names. "
-        "Allocation: a share of the book per asset class, a method inside each "
-        "class, and how foreign currencies are handled - the way multi-asset "
-        "portfolios are built."
-    ),
-    "allocation": (
-        "Each row is an asset class. Budget: its share of the invested book, "
-        "restored at every rebalance. Method: how the names inside it are "
-        "weighted. Hedged: how much of its non-base-currency holdings is "
-        "hedged with rolling forwards."
-    ),
-    "hedge": (
-        "Share of the foreign-currency value sold forward, rolled daily. 100% "
-        "removes the currency move and earns or pays the interest-rate "
-        "differential instead; 0% keeps the full currency exposure."
-    ),
-    "hedge_cost": (
-        "Cost of hedging above the rate differential: the cross-currency basis "
-        "and dealing costs, in basis points a year on the hedged amount."
-    ),
-    "base_ccy": (
-        "The currency results are measured in. Holdings in other currencies "
-        "are converted at ECB reference rates; cash earns this currency's "
-        "overnight rate (SOFR or €STR)."
-    ),
-    "band": (
-        "Also rebalance on any day a class drifts further than this from its "
-        "budget, between scheduled dates. 0 turns it off."
-    ),
-    "method": (
-        "Passive rules (CM.0.x) weight by a fixed rule. PM classics (CM.1.x) "
-        "solve an optimisation on the covariance of returns."
-    ),
-    "rebalance": (
-        "How often weights are reset to target. In between they drift with prices."
-    ),
-    "lookback": (
-        "Days of price history the rule looks at (inverse volatility). "
-        "Optimizers use the covariance lookback in Optimizer options instead."
-    ),
-    "cap": (
-        "The most any one name may hold, for every method. Anything above it is "
-        "shared out over the other names. With class budgets it applies within "
-        "each class. If PM max weight is also set, the stricter of the two binds."
-    ),
-    "net": (
-        "Share of the book in the strategy; the rest sits in cash earning SOFR. "
-        "For a long/short book this is net exposure (longs minus shorts); gross "
-        "is limited separately in Optimizer options."
-    ),
-    "form": (
-        "Long-only cannot short. Long/short can, paying SOFR plus the short "
-        "financing spread on the short positions."
-    ),
-    "cov_lookback": "Days of returns used to estimate the covariance matrix.",
-    "min_weight": (
-        "The least any name may hold. Below zero allows shorting, in the "
-        "long/short form only."
-    ),
-    "pm_max": (
-        "An upper bound inside the optimizer only. Unlike the weight cap it is a "
-        "constraint the solver works to, not a trim afterwards. The stricter of "
-        "this and the weight cap binds."
-    ),
-    "gross": "Upper limit on longs plus shorts. Shorting needs gross above net.",
-    "short_spread": (
-        "What borrowing stock to short costs above SOFR, charged on the short "
-        "positions. Zero still pays SOFR."
-    ),
-    "estimator": (
-        "Sample: the plain estimate. EWMA: recent days count more. Ledoit-Wolf "
-        "and OAS: shrunk towards a structured target, steadier with many names "
-        "and little history."
-    ),
-    "rf": "The rate the Sharpe ratio is measured against.",
-    "budgets": (
-        "A fixed share of the invested book per asset class, restored at every "
-        "rebalance. The construction method then runs inside each class on its "
-        "own. Budgets are scaled to add up to 100%."
-    ),
-    "vol": (
-        "Scales the whole strategy up or down to aim at a target volatility. "
-        "Below 1x the rest earns SOFR; above 1x the extra is borrowed at SOFR "
-        "plus the leverage spread."
-    ),
-    "target_vol": "The annualised volatility the overlay aims for.",
-    "vol_lookback": "Days of strategy returns used to estimate current volatility.",
-    "max_lev": "The most the overlay may scale the strategy up.",
-    "min_lev": "The least it may scale it down to. Zero allows going fully to cash.",
-    "lev_spread": "What borrowing to lever up costs above SOFR.",
-    "backtest": (
-        "No trading costs, slippage or taxes. Rebalances use only data from "
-        "before the rebalance date."
-    ),
-    "record": (
-        "Keeps these numbers as they are now, with the holdings, the dates and "
-        "which data produced them, so they can be reopened and compared later."
-    ),
-    "mc_funding": (
-        "Fixed to last: SOFR stays at its last value. Monte Carlo: simulated "
-        "SOFR paths, mean-reverting (OU) or resampled from history (bootstrap)."
-    ),
-    "mc_alpha": (
-        "The tail shown in the fan chart and the summary: 5 shows the 5th and "
-        "95th percentiles."
-    ),
-    "concentration": (
-        "top_5 is the weight in the five largest positions; hhi is the "
-        "Herfindahl index, whose reciprocal is the effective number of equally "
-        "weighted holdings."
-    ),
-    "class_mix": (
-        "Budgets are restored at each rebalance and drift in between, so the gap "
-        "between target and latest weight is the drift since the last one."
-    ),
-    "optimizer": (
-        "What the solver reported at each rebalance: the return and volatility "
-        "it expected from the weights it chose, and whether it solved. Expected "
-        "figures come from its estimates, not from what was realised."
-    ),
-}
-
-MC_METHOD_HELP: Dict[str, str] = {
-    "optimizer": (
-        "Optimizers are simulated by bootstrapping the realised strategy "
-        "returns; re-optimising inside every simulated path is not implemented."
-    ),
-    "class_budgets": (
-        "A book built class by class is simulated by bootstrapping its realised "
-        "returns: the constituent engines apply one rule across every name and "
-        "cannot hold the budgets."
-    ),
-    "cap_weight": (
-        "Cap weight uses the constituent block bootstrap with historical market "
-        "caps. GBM is off: it does not simulate shares outstanding."
-    ),
-    "passive": (
-        "Bootstrap resamples blocks of historical constituent returns; GBM "
-        "simulates correlated constituent paths."
-    ),
-}
-
 
 # ---------------------------------------------------------------------------
 # Saved work: library and recorded runs
@@ -203,7 +40,12 @@ MC_METHOD_HELP: Dict[str, str] = {
 
 
 def _mc_engines(cfg: StrategyConfig) -> Dict[str, str]:
-    if cfg.uses_optimizer or cfg.has_class_budgets or cfg.base_currency != "USD":
+    if (
+        cfg.uses_optimizer
+        or cfg.has_sleeves
+        or cfg.method in BOND_METHODS
+        or cfg.base_currency != "USD"
+    ):
         return {"strategy_bootstrap": "Strategy Return Bootstrap"}
     if cfg.method == "cap_weight":
         return {"bootstrap": "Constituent Bootstrap with Historical Caps"}
@@ -214,8 +56,8 @@ def _mc_engines(cfg: StrategyConfig) -> Dict[str, str]:
 
 
 def _mc_kind(cfg: StrategyConfig) -> str:
-    if cfg.has_class_budgets:
-        return "class_budgets"
+    if cfg.has_sleeves:
+        return "sleeves"
     if cfg.uses_optimizer:
         return "optimizer"
     if cfg.method == "cap_weight":
@@ -223,9 +65,17 @@ def _mc_kind(cfg: StrategyConfig) -> str:
     return "passive"
 
 
+def _construction_name(cfg: StrategyConfig) -> str:
+    """The method, or for a book of sleeves its budgets in short."""
+    if not cfg.has_sleeves:
+        return method_name(cfg.method)
+    shares = "/".join(f"{v * 100:.0f}" for v in cfg.budgets.values())
+    return f"{len(cfg.budgets)} sleeves {shares}"
+
+
 def _describe(saved: library.SavedStrategy) -> str:
     """One line for the dropdown: a portfolio says how many names it carries."""
-    label = f"{saved.name} — {method_name(saved.config.method)}"
+    label = f"{saved.name} — {_construction_name(saved.config)}"
     if saved.stocks is not None:
         label += f" · {len(saved.stocks)} names"
     return label
@@ -239,65 +89,69 @@ def _describe_run(saved: Sequence[runs.RunRecord], run_id: str) -> str:
     return run_id
 
 
-def _library_popover(selection: UniverseSelection) -> None:
+def _saved_popover(selection: UniverseSelection) -> None:
+    """Strategies and recorded runs: everything kept, in one place."""
+    with st.popover("Saved", icon=":material/folder_open:", width="stretch"):
+        strategies_tab, runs_tab = st.tabs(["Strategies", "Runs"])
+        with strategies_tab:
+            _library_panel(selection)
+        with runs_tab:
+            _runs_panel()
+
+
+def _library_panel(selection: UniverseSelection) -> None:
     saved = library.list_templates()
-
-    with st.popover("Library", icon=":material/folder_open:", width="stretch"):
-        if saved:
-            st.selectbox(
-                "Saved",
-                key="lib_selected",
-                options=[s.name for s in saved],
-                format_func=lambda n: next(
-                    (_describe(s) for s in saved if s.name == n), n
-                ),
-            )
-            load_btn, delete_btn = st.columns(2)
-            load_btn.button("Open", key="lib_load", width="stretch")
-            delete_btn.button("Delete", key="lib_delete", width="stretch")
-            st.divider()
-
-        st.text_input("Name", key="lib_name", placeholder="e.g. Sixty-forty")
-        st.text_input(
-            "Description (optional)",
-            key="lib_description",
-            placeholder="What is this for?",
-        )
-        keep_stocks = st.toggle(
-            f"Also save the {len(selection)} selected names",
-            key="lib_save_stocks",
-            help=(
-                "Off: a strategy, the settings alone, which runs on any stock "
-                "set. On: a portfolio, the settings plus these names; reopening "
-                "it restores both. Neither keeps the dates."
-            ),
-        )
-        st.button(
-            "Save portfolio" if keep_stocks else "Save strategy",
-            key="lib_save",
-            width="stretch",
-            type="primary",
-        )
-
-
-def _runs_popover() -> None:
-    saved = runs.list_runs()
-
-    with st.popover("Recorded runs", icon=":material/history:", width="stretch"):
-        if not saved:
-            st.caption("No runs yet. Record one under the backtest.")
-            return
-
+    if saved:
         st.selectbox(
-            "Recorded runs",
-            key="run_selected",
-            options=[r.run_id for r in saved],
-            format_func=lambda rid: _describe_run(saved, rid),
-            label_visibility="collapsed",
+            "Saved",
+            key="lib_selected",
+            options=[s.name for s in saved],
+            format_func=lambda n: next((_describe(s) for s in saved if s.name == n), n),
         )
-        open_btn, drop_btn = st.columns(2)
-        open_btn.button("Open", key="run_open", width="stretch")
-        drop_btn.button("Delete", key="run_delete", width="stretch")
+        load_btn, delete_btn = st.columns(2)
+        load_btn.button("Open", key="lib_load", width="stretch")
+        delete_btn.button("Delete", key="lib_delete", width="stretch")
+        st.divider()
+
+    st.text_input("Name", key="lib_name", placeholder="e.g. Sixty-forty")
+    st.text_input(
+        "Description (optional)",
+        key="lib_description",
+        placeholder="What is this for?",
+    )
+    keep_stocks = st.toggle(
+        f"Also save the {len(selection)} selected names",
+        key="lib_save_stocks",
+        help=(
+            "Off: a strategy, the settings alone, which runs on any stock "
+            "set. On: a portfolio, the settings plus these names; reopening "
+            "it restores both. Neither keeps the dates."
+        ),
+    )
+    st.button(
+        "Save portfolio" if keep_stocks else "Save strategy",
+        key="lib_save",
+        width="stretch",
+        type="primary",
+    )
+
+
+def _runs_panel() -> None:
+    saved = runs.list_runs()
+    if not saved:
+        st.caption("No runs yet. Record one under the backtest.")
+        return
+
+    st.selectbox(
+        "Recorded runs",
+        key="run_selected",
+        options=[r.run_id for r in saved],
+        format_func=lambda rid: _describe_run(saved, rid),
+        label_visibility="collapsed",
+    )
+    open_btn, drop_btn = st.columns(2)
+    open_btn.button("Open", key="run_open", width="stretch")
+    drop_btn.button("Delete", key="run_delete", width="stretch")
 
 
 def _handle_library_actions(
@@ -358,8 +212,44 @@ def _handle_library_actions(
         st.rerun()
 
 
+def _positional(cfg: StrategyConfig) -> Tuple[StrategyConfig, Dict[str, str]]:
+    """
+    The config with sleeves named by position, for the backtest cache.
+
+    Renaming a sleeve changes nothing that is computed, so it must not cost a
+    recalculation; the real names go back on afterwards.
+    """
+    if not cfg.sleeves:
+        return cfg, {}
+    keyed = tuple(replace(s, name=f"#{i}") for i, s in enumerate(cfg.sleeves))
+    return replace(cfg, sleeves=keyed), {
+        f"#{i}": s.name for i, s in enumerate(cfg.sleeves)
+    }
+
+
+def _renamed(result: runner.BacktestResult, names: Dict[str, str]):
+    if not names:
+        return result
+    holdings = result.sleeve_holdings
+    if holdings is not None and not holdings.empty:
+        holdings = holdings.rename(columns=names, level=0)
+    optimizer = result.optimizer
+    if "sleeve" in optimizer.columns:
+        optimizer = optimizer.assign(sleeve=optimizer["sleeve"].map(names))
+    return replace(
+        result,
+        sleeve_weights=(
+            result.sleeve_weights.rename(columns=names)
+            if result.sleeve_weights is not None
+            else None
+        ),
+        sleeve_holdings=holdings,
+        optimizer=optimizer,
+    )
+
+
 def _default_run_name(cfg: StrategyConfig) -> str:
-    base = session.loaded_name() or method_name(cfg.method)
+    base = session.loaded_name() or _construction_name(cfg)
     return f"{base} · {cfg.start} to {cfg.end}"
 
 
@@ -461,732 +351,6 @@ def _resolve_open_run(
 
 
 # ---------------------------------------------------------------------------
-# Holdings
-# ---------------------------------------------------------------------------
-
-
-def _default_constituents(available: Sequence[str], universe_key: str) -> List[str]:
-    """
-    Open with the first few names in the stock set's own order.
-
-    Each set is declared largest/most representative first. A set spanning
-    several asset classes opens with all of its names, since the first few
-    would cover only a class or two.
-    """
-    ordered = universe_tickers(universe_key)
-
-    if len(classes_present(ordered)) > 1:
-        return [t for t in ordered if t in available] or list(available)
-
-    picks = [t for t in ordered if t in available][:DEFAULT_CONSTITUENT_COUNT]
-    return picks or list(available[:DEFAULT_CONSTITUENT_COUNT])
-
-
-def _drop_unavailable_constituents(available: Sequence[str]) -> None:
-    """
-    Keep the stored pick to names the loaded data actually has.
-
-    A restored portfolio can name stocks that have since left the data;
-    Streamlit rejects a selection that is not among the options, so they are
-    dropped and reported.
-    """
-    stored = st.session_state.get(session.CONSTITUENTS_KEY)
-    if not stored:
-        return
-
-    missing = [t for t in stored if t not in available]
-    if not missing:
-        return
-
-    st.session_state[session.CONSTITUENTS_KEY] = [t for t in stored if t in available]
-    st.warning(
-        f"Not in the loaded stock set, so left out: {', '.join(missing)}.",
-        icon="⚠️",
-    )
-
-
-def _holding_label(ticker: str) -> str:
-    """ETFs carry a short description; single stocks are just their ticker."""
-    text = describe(ticker)
-    return ticker if text == "Single stock" else f"{ticker} · {text}"
-
-
-def _sync_constituents_to_classes(available: Sequence[str]) -> None:
-    """
-    Keep the holdings in step with the asset classes picked.
-
-    Removing a class removes its holdings; adding one adds all of its holdings.
-    Holdings in classes that stay picked are left as they were.
-    """
-    chosen = set(st.session_state.get(session.ASSET_CLASSES_KEY) or ())
-    before = set(st.session_state.get(session.PREVIOUS_CLASSES_KEY) or ())
-
-    kept = [
-        t
-        for t in st.session_state.get(session.CONSTITUENTS_KEY) or ()
-        if asset_class_of(t) in chosen
-    ]
-    added = [
-        t for t in available if asset_class_of(t) in chosen - before and t not in kept
-    ]
-    st.session_state[session.CONSTITUENTS_KEY] = kept + added
-
-
-def _holdings_controls(universe_key: str, available: List[str]) -> UniverseSelection:
-    section("1 · Holdings")
-
-    _drop_unavailable_constituents(available)
-
-    present = classes_present(available)
-
-    # Seeded through session state rather than a widget default, because the
-    # stored pick is also corrected here.
-    stored_classes = st.session_state.get(session.ASSET_CLASSES_KEY)
-    st.session_state[session.ASSET_CLASSES_KEY] = (
-        present
-        if stored_classes is None
-        else [c for c in stored_classes if c in present]
-    )
-
-    class_col, names_col = st.columns([1, 2])
-
-    chosen_classes = class_col.multiselect(
-        "Asset classes",
-        key=session.ASSET_CLASSES_KEY,
-        options=present,
-        format_func=asset_class_label,
-        on_change=_sync_constituents_to_classes,
-        args=(available,),
-        help=(
-            "Pick the classes first, then the names within them. Adding a class "
-            "adds all of its names; removing one removes them."
-        ),
-    )
-    st.session_state[session.PREVIOUS_CLASSES_KEY] = list(chosen_classes)
-
-    options = [t for t in available if asset_class_of(t) in chosen_classes]
-
-    stored = st.session_state.get(session.CONSTITUENTS_KEY)
-    st.session_state[session.CONSTITUENTS_KEY] = (
-        _default_constituents(options, universe_key)
-        if stored is None
-        else [t for t in stored if t in options]
-    )
-
-    constituents = names_col.multiselect(
-        "Names",
-        key=session.CONSTITUENTS_KEY,
-        options=options,
-        format_func=_holding_label,
-        help=(
-            "Which names from the stock set this strategy holds. The stock set "
-            f"is {universe_label(universe_key)}; change it in the sidebar."
-        ),
-    )
-
-    return UniverseSelection.from_ui(universe=universe_key, constituents=constituents)
-
-
-# ---------------------------------------------------------------------------
-# Construction
-# ---------------------------------------------------------------------------
-
-
-#: Starting points for an allocation, class key -> budget in percent. Scaled
-#: to 100% over the classes the book holds.
-ALLOCATION_PRESETS: Dict[str, Dict[str, float]] = {
-    "Conservative": {
-        "equity": 25.0,
-        "govt_bonds": 40.0,
-        "inflation_linked": 10.0,
-        "credit": 10.0,
-        "real_estate": 5.0,
-        "commodities": 5.0,
-        "gold": 5.0,
-    },
-    "Balanced": {
-        "equity": 45.0,
-        "govt_bonds": 25.0,
-        "inflation_linked": 5.0,
-        "credit": 10.0,
-        "real_estate": 5.0,
-        "commodities": 5.0,
-        "gold": 5.0,
-    },
-    "Growth": {
-        "equity": 65.0,
-        "govt_bonds": 10.0,
-        "credit": 10.0,
-        "real_estate": 7.5,
-        "commodities": 2.5,
-        "gold": 5.0,
-    },
-    "All weather": {
-        "equity": 30.0,
-        "govt_bonds": 55.0,
-        "commodities": 7.5,
-        "gold": 7.5,
-    },
-}
-
-
-def _preset_budgets(values: Dict[str, float], classes: List[str]) -> Dict[str, float]:
-    """A preset over the classes held, scaled to 100%; equal if none match."""
-    held = {k: float(values.get(k, 0.0)) for k in classes}
-    total = sum(held.values())
-    if total <= 0:
-        return {k: 100.0 / len(classes) for k in classes}
-    return {k: v / total * 100.0 for k, v in held.items()}
-
-
-#: Bonds are usually held hedged, growth assets usually not.
-DEFAULT_HEDGED = {"govt_bonds": 100.0, "inflation_linked": 100.0, "credit": 100.0}
-
-METHOD_OPTIONS = {method_label(m): m for m in METHODS}
-
-
-def _allocation_rows(classes: List[str]) -> Dict[str, Dict[str, object]]:
-    """The allocation table's rows, from session state or sensible defaults."""
-    stored = dict(st.session_state.get(session.ALLOCATION_KEY) or {})
-    rows = {}
-    for k in classes:
-        row = dict(stored.get(k) or {})
-        rows[k] = {
-            "budget": float(
-                row.get("budget", 100.0 / len(classes) if not stored else 0.0)
-            ),
-            "method": row.get("method", "equal"),
-            "hedge": float(row.get("hedge", DEFAULT_HEDGED.get(k, 0.0))),
-        }
-    return rows
-
-
-def _allocation_table(
-    selection: UniverseSelection,
-) -> Optional[Dict[str, Dict[str, object]]]:
-    """
-    One table for the whole allocation: per class, its budget, the method used
-    inside it, and how much of its foreign-currency holdings are hedged.
-    """
-    picked = st.session_state.get(session.ASSET_CLASSES_KEY) or []
-    classes = [k for k in ASSET_CLASSES if k in picked]
-    if len(classes) < 2:
-        st.info("An allocation needs names in at least two asset classes.")
-        return None
-
-    rows = _allocation_rows(classes)
-
-    preset_cols = st.columns(len(ALLOCATION_PRESETS) + 1)
-    presets = {"Equal": {k: 100.0 / len(classes) for k in classes}}
-    presets.update(ALLOCATION_PRESETS)
-    for column, (label, values) in zip(preset_cols, presets.items()):
-        if column.button(label, key=f"forge_preset_{label}", width="stretch"):
-            for k, budget in _preset_budgets(values, classes).items():
-                rows[k]["budget"] = budget
-            session.bump_budget_version()
-
-    frame = pd.DataFrame(
-        {
-            "Asset class": [asset_class_label(k) for k in classes],
-            "Budget (%)": [round(rows[k]["budget"], 1) for k in classes],
-            "Method": [method_label(rows[k]["method"]) for k in classes],
-            "Hedged (%)": [round(rows[k]["hedge"], 0) for k in classes],
-        }
-    )
-    version = st.session_state.get(session.BUDGET_VERSION_KEY, 0)
-    edited = st.data_editor(
-        frame,
-        key=f"forge_alloc_table_{version}",
-        hide_index=True,
-        width="stretch",
-        disabled=["Asset class"],
-        column_config={
-            "Budget (%)": st.column_config.NumberColumn(
-                min_value=0.0,
-                max_value=100.0,
-                step=0.1,
-                format="%.1f",
-                help=HELP["budgets"],
-            ),
-            "Method": st.column_config.SelectboxColumn(
-                options=list(METHOD_OPTIONS), required=True, help=HELP["method"]
-            ),
-            "Hedged (%)": st.column_config.NumberColumn(
-                min_value=0.0,
-                max_value=100.0,
-                step=5.0,
-                format="%.0f",
-                help=HELP["hedge"],
-            ),
-        },
-    )
-
-    rows = {
-        k: {
-            "budget": float(b) if pd.notna(b) else 0.0,
-            "method": METHOD_OPTIONS.get(m, "equal"),
-            "hedge": float(h) if pd.notna(h) else 0.0,
-        }
-        for k, b, m, h in zip(
-            classes, edited["Budget (%)"], edited["Method"], edited["Hedged (%)"]
-        )
-    }
-    st.session_state[session.ALLOCATION_KEY] = rows
-
-    total = sum(r["budget"] for r in rows.values())
-    if total <= 0:
-        st.warning("Every budget is zero; give at least one class a share.")
-        return None
-    if abs(total - 100.0) > 0.5:
-        st.caption(f":orange[Total {total:.1f}%, scaled to 100%.]")
-    else:
-        st.caption(f"Total {total:.1f}%")
-
-    plan = allocation.resolve_sleeves(
-        {k: r["budget"] / 100.0 for k, r in rows.items()}, selection.constituents
-    )
-    for message in plan.notes:
-        st.warning(message, icon="⚠️")
-
-    return rows
-
-
-def _currency_controls(
-    selection: UniverseSelection, *, single_hedge: bool
-) -> Dict[str, object]:
-    """Base currency and hedging cost; one hedge ratio in strategy mode."""
-    base_col, ratio_col, cost_col = st.columns(3)
-    base = (
-        base_col.segmented_control(
-            "Base currency",
-            options=list(BASE_CURRENCIES),
-            default=BASE_CURRENCIES[0],
-            key="forge_base_ccy",
-            help=HELP["base_ccy"],
-        )
-        or BASE_CURRENCIES[0]
-    )
-
-    foreign = [t for t in selection.constituents if currency_of(t) != base]
-    values: Dict[str, object] = {"base_currency": base, "hedge_cost_bp": 0.0}
-
-    if single_hedge:
-        ratio = ratio_col.number_input(
-            "Hedged (%)",
-            key="forge_hedge_single",
-            min_value=0.0,
-            max_value=100.0,
-            step=5.0,
-            value=0.0,
-            help=HELP["hedge"],
-            disabled=not foreign,
-        )
-        values["hedge_ratios_pct"] = {k: ratio for k in ASSET_CLASSES}
-
-    values["hedge_cost_bp"] = cost_col.number_input(
-        "Hedge cost (bp a year)",
-        key="forge_hedge_cost",
-        min_value=0.0,
-        step=5.0,
-        value=0.0,
-        help=HELP["hedge_cost"],
-        disabled=not foreign,
-    )
-
-    if foreign:
-        st.caption(
-            f"Not in {base}, so converted: {', '.join(foreign[:8])}"
-            + (f" and {len(foreign) - 8} more" if len(foreign) > 8 else "")
-            + "."
-        )
-    return values
-
-
-def _optimizer_controls(any_optimizer: bool, max_sharpe: bool) -> Dict[str, object]:
-    """Method-specific settings, out of the way until wanted."""
-    values: Dict[str, object] = dict(
-        cov_lookback=126,
-        optimizer_form="long_only",
-        min_weight_pct=0.0,
-        max_weight_pct=100.0,
-        max_gross_exposure_pct=150.0,
-        short_borrow_cost_pct=0.0,
-        rf_rate_pct=0.0,
-        cov_estimator="sample",
-    )
-    if not any_optimizer:
-        return values
-
-    with st.expander("Optimizer options"):
-        form_col, cov_col, estimator_col = st.columns(3)
-        values["optimizer_form"] = form_col.selectbox(
-            "Optimizer form",
-            key="forge_optimizer_form",
-            options=list(OPTIMIZER_FORMS),
-            format_func=lambda key: OPTIMIZER_FORMS[key],
-            help=HELP["form"],
-        )
-        values["cov_lookback"] = cov_col.number_input(
-            "Covariance lookback (days)",
-            key="forge_cov_lookback",
-            min_value=20,
-            step=1,
-            value=126,
-            help=HELP["cov_lookback"],
-        )
-        values["cov_estimator"] = estimator_col.selectbox(
-            "Covariance estimator",
-            key="forge_cov_estimator",
-            options=list(COV_ESTIMATORS),
-            format_func=lambda key: COV_ESTIMATORS[key],
-            help=HELP["estimator"],
-        )
-
-        min_col, max_col, rf_col = st.columns(3)
-        values["min_weight_pct"] = min_col.number_input(
-            "Min weight (%)",
-            key="forge_min_weight",
-            min_value=-100.0,
-            step=0.5,
-            value=0.0,
-            help=HELP["min_weight"],
-        )
-        values["max_weight_pct"] = max_col.number_input(
-            "PM max weight (%)",
-            key="forge_max_weight",
-            step=0.5,
-            value=100.0,
-            help=HELP["pm_max"],
-        )
-        if max_sharpe:
-            values["rf_rate_pct"] = rf_col.number_input(
-                "Risk-free rate (% p.a.)",
-                key="forge_rf_rate",
-                step=0.25,
-                value=0.0,
-                help=HELP["rf"],
-            )
-
-        if values["optimizer_form"] == "long_short":
-            gross_col, spread_col, _ = st.columns(3)
-            values["max_gross_exposure_pct"] = gross_col.number_input(
-                "Max gross exposure (%)",
-                key="forge_max_gross",
-                min_value=0.0,
-                step=5.0,
-                value=150.0,
-                help=HELP["gross"],
-            )
-            values["short_borrow_cost_pct"] = spread_col.number_input(
-                "Short financing spread (% over SOFR)",
-                key="forge_short_borrow",
-                min_value=0.0,
-                step=0.25,
-                value=0.0,
-                help=HELP["short_spread"],
-            )
-
-    return values
-
-
-def _net_exposure_control(any_optimizer: bool) -> float:
-    """
-    One control for how much of the book is invested.
-
-    Its ceiling depends on whether the book can short.
-    """
-    long_short = (
-        any_optimizer and st.session_state.get("forge_optimizer_form") == "long_short"
-    )
-    ceiling = 300.0 if long_short else 100.0
-
-    current = st.session_state.get("forge_net_exposure")
-    if current is not None and current > ceiling:
-        st.session_state["forge_net_exposure"] = ceiling
-
-    return st.number_input(
-        "Net exposure (%)",
-        key="forge_net_exposure",
-        min_value=0.0,
-        max_value=ceiling,
-        step=5.0,
-        value=100.0,
-        help=HELP["net"],
-    )
-
-
-def _first_priced(
-    data: UniverseData, selection: UniverseSelection
-) -> Dict[str, pd.Timestamp]:
-    """Each selected name's first priced day in the loaded data."""
-    out = {}
-    for name in selection.constituents:
-        if name in data.close.columns:
-            first = data.close[name].first_valid_index()
-            if first is not None:
-                out[name] = pd.Timestamp(first)
-    return out
-
-
-def _date_controls(
-    data: UniverseData, selection: UniverseSelection, start_col, end_col
-):
-    first_day = data.close.index.min().date()
-    last_day = data.close.index.max().date()
-    first_priced = _first_priced(data, selection)
-    common_start = max(first_priced.values()).date() if first_priced else first_day
-    start = start_col.date_input(
-        "Start date",
-        key="forge_start",
-        value=common_start,
-        min_value=first_day,
-        max_value=last_day,
-        help=(
-            "Opens on the first day every selected name has a price. Earlier "
-            "is allowed: until a name's first price the book holds only the "
-            "others."
-        ),
-    )
-    end = end_col.date_input(
-        "End date",
-        key="forge_end",
-        value=last_day,
-        min_value=first_day,
-        max_value=last_day,
-    )
-
-    late = sorted((d, name) for name, d in first_priced.items() if d.date() > start)
-    if late:
-        listed = ", ".join(f"{name} ({d.date()})" for d, name in late[:6])
-        more = f" and {len(late) - 6} more" if len(late) > 6 else ""
-        st.caption(
-            f":orange[Not every name has prices from {start}: {listed}{more}. "
-            "Until then the book holds only those that do.]"
-        )
-    return start, end
-
-
-def _strategy_controls(
-    data: UniverseData, selection: UniverseSelection
-) -> StrategyConfig:
-    """One method over one pool of names."""
-    section("2 · Construction")
-
-    method_col, rebalance_col, lookback_col = st.columns(3)
-    method = method_col.selectbox(
-        "Construction method",
-        key="forge_method",
-        options=list(METHODS),
-        format_func=method_label,
-        help=HELP["method"],
-    )
-    rebalance = rebalance_col.selectbox(
-        "Rebalance",
-        key="forge_rebalance",
-        options=list(REBALANCE_FREQUENCIES),
-        format_func=lambda key: REBALANCE_FREQUENCIES[key],
-        help=HELP["rebalance"],
-    )
-    lookback = lookback_col.number_input(
-        "Lookback (days)",
-        key="forge_lookback",
-        min_value=20,
-        step=1,
-        value=126,
-        disabled=not method_uses_lookback(method) or is_optimizer_method(method),
-        help=HELP["lookback"],
-    )
-
-    cap_col, net_col, start_col, end_col = st.columns(4)
-    cap_pct = cap_col.number_input(
-        "Weight cap (%)",
-        key="forge_cap",
-        min_value=0.0,
-        step=0.5,
-        value=100.0,
-        help=HELP["cap"],
-    )
-    with net_col:
-        net_exposure_pct = _net_exposure_control(is_optimizer_method(method))
-    start, end = _date_controls(data, selection, start_col, end_col)
-
-    options = _optimizer_controls(
-        is_optimizer_method(method), max_sharpe=method == "max_sharpe"
-    )
-
-    currency = {"base_currency": "USD"}
-    if any(currency_of(t) != "USD" for t in selection.constituents) or (
-        st.session_state.get("forge_base_ccy", "USD") != "USD"
-    ):
-        with st.expander("Currency", expanded=True):
-            currency = _currency_controls(selection, single_hedge=True)
-
-    return StrategyConfig.from_ui(
-        method=method,
-        rebalance=rebalance,
-        lookback=lookback,
-        cap_pct=cap_pct,
-        start=str(start),
-        end=str(end),
-        net_exposure_pct=net_exposure_pct,
-        mode="strategy",
-        **options,
-        **currency,
-    )
-
-
-def _allocation_controls(
-    data: UniverseData, selection: UniverseSelection
-) -> StrategyConfig:
-    """A share per asset class, a method inside each, and currency handling."""
-    section("2 · Allocation", help=HELP["allocation"])
-    currency = _currency_controls(selection, single_hedge=False)
-    rows = _allocation_table(selection) or {}
-
-    methods = {k: r["method"] for k, r in rows.items()}
-    any_optimizer = any(is_optimizer_method(m) for m in methods.values())
-    any_lookback = any(
-        method_uses_lookback(m) and not is_optimizer_method(m) for m in methods.values()
-    )
-
-    section("3 · Rebalancing and risk")
-    rebalance_col, band_col, net_col, cap_col = st.columns(4)
-    rebalance = rebalance_col.selectbox(
-        "Rebalance",
-        key="forge_rebalance",
-        options=list(REBALANCE_FREQUENCIES),
-        format_func=lambda key: REBALANCE_FREQUENCIES[key],
-        help=HELP["rebalance"],
-    )
-    band_pct = band_col.number_input(
-        "Drift band (%)",
-        key="forge_band",
-        min_value=0.0,
-        max_value=50.0,
-        step=0.5,
-        value=0.0,
-        help=HELP["band"],
-    )
-    with net_col:
-        net_exposure_pct = _net_exposure_control(any_optimizer)
-    cap_pct = cap_col.number_input(
-        "Weight cap (%)",
-        key="forge_cap",
-        min_value=0.0,
-        step=0.5,
-        value=100.0,
-        help=HELP["cap"],
-    )
-
-    lookback_col, start_col, end_col = st.columns([1, 1, 1])
-    lookback = lookback_col.number_input(
-        "Lookback (days)",
-        key="forge_lookback",
-        min_value=20,
-        step=1,
-        value=126,
-        disabled=not any_lookback or any_optimizer,
-        help=HELP["lookback"],
-    )
-    start, end = _date_controls(data, selection, start_col, end_col)
-
-    options = _optimizer_controls(
-        any_optimizer, max_sharpe="max_sharpe" in methods.values()
-    )
-
-    default_method = next(iter(methods.values()), "equal")
-    return StrategyConfig.from_ui(
-        method=default_method,
-        rebalance=rebalance,
-        lookback=lookback,
-        cap_pct=cap_pct,
-        start=str(start),
-        end=str(end),
-        net_exposure_pct=net_exposure_pct,
-        class_budgets_pct={k: r["budget"] for k, r in rows.items()} or None,
-        class_methods=methods or None,
-        hedge_ratios_pct={k: r["hedge"] for k, r in rows.items()} or None,
-        rebalance_band_pct=band_pct or None,
-        mode="allocation",
-        **options,
-        **currency,
-    )
-
-
-def _construction_controls(
-    data: UniverseData, selection: UniverseSelection, mode: str
-) -> StrategyConfig:
-    if mode == "allocation":
-        return _allocation_controls(data, selection)
-    return _strategy_controls(data, selection)
-
-
-def _overlay_controls() -> OverlayConfig:
-    on_before = bool(st.session_state.get("forge_vol_on"))
-
-    with st.expander("Volatility target", expanded=on_before):
-        enabled = st.toggle(
-            "Vol target", key="forge_vol_on", value=False, help=HELP["vol"]
-        )
-
-        if not enabled:
-            return OverlayConfig.from_ui(
-                enabled=False,
-                target_vol_pct=None,
-                vol_lookback=None,
-                max_leverage=None,
-                min_leverage=None,
-                borrow_spread_pct=None,
-            )
-
-        target_col, lb_col, max_col, min_col, spread_col = st.columns(5)
-
-        return OverlayConfig.from_ui(
-            enabled=True,
-            target_vol_pct=target_col.number_input(
-                "Target vol (%)",
-                key="forge_target_vol",
-                min_value=1.0,
-                step=0.5,
-                value=10.0,
-                help=HELP["target_vol"],
-            ),
-            vol_lookback=lb_col.number_input(
-                "Vol lookback (days)",
-                key="forge_vol_lb",
-                min_value=10,
-                step=1,
-                value=63,
-                help=HELP["vol_lookback"],
-            ),
-            max_leverage=max_col.number_input(
-                "Max leverage",
-                key="forge_max_lev",
-                min_value=0.0,
-                step=0.1,
-                value=2.0,
-                help=HELP["max_lev"],
-            ),
-            min_leverage=min_col.number_input(
-                "Min leverage",
-                key="forge_min_lev",
-                min_value=0.0,
-                step=0.1,
-                value=0.0,
-                help=HELP["min_lev"],
-            ),
-            borrow_spread_pct=spread_col.number_input(
-                "Leverage financing spread (% over SOFR)",
-                key="forge_borrow_spread",
-                min_value=0.0,
-                step=0.1,
-                value=1.0,
-                help=HELP["lev_spread"],
-            ),
-        )
-
-
-# ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
 
@@ -1210,10 +374,7 @@ def _record_controls(cfg: StrategyConfig) -> None:
 
 
 def _render_backtest(
-    result: runner.BacktestResult,
-    overlay_cfg: OverlayConfig,
-    cfg: StrategyConfig,
-    recording: bool,
+    result: runner.BacktestResult, cfg: StrategyConfig, recording: bool
 ) -> None:
     section("Backtest", help=HELP["backtest"])
 
@@ -1223,17 +384,19 @@ def _render_backtest(
     stats_col, chart_col = st.columns([1, 3], gap="large")
 
     with stats_col:
+        leverage = (
+            result.overlay["leverage"]
+            if result.overlay is not None and "leverage" in result.overlay
+            else None
+        )
         st.dataframe(
-            tables.stats_frame(result.stats, include_obs=False),
+            tables.book_numbers_frame(
+                result.stats,
+                diagnostics.summary(result.daily_weights, result.index_level, leverage),
+            ),
             hide_index=True,
             width="stretch",
         )
-        if result.overlay is not None:
-            st.dataframe(
-                tables.overlay_stats_frame(result.overlay),
-                hide_index=True,
-                width="stretch",
-            )
 
     with chart_col:
         st.plotly_chart(
@@ -1243,63 +406,191 @@ def _render_backtest(
             width="stretch",
         )
 
-    st.plotly_chart(
-        figures.make_weight_fig(
-            result.daily_weights, "Top 20 Constituent Weights", top_n=20, height=360
-        ),
-        width="stretch",
+
+#: Colour follows the part, never its rank, so it keeps its colour whichever
+#: others are in the book.
+def _part_colors(labels) -> Dict[str, str]:
+    return {
+        label: SERIES_COLORS[i % len(SERIES_COLORS)] for i, label in enumerate(labels)
+    }
+
+
+#: More bars than this and they turn into a texture.
+MAX_BARS = 60
+#: Names shown by name in a bar chart; the rest are summed as Other.
+TOP_NAMES = 10
+
+
+def _bars(frame: pd.DataFrame) -> pd.DataFrame:
+    """Weights at rebalances, coarsened to months, quarters, years as needed."""
+    sampled = frame
+    for rule in ("ME", "QE", "YE"):
+        if len(sampled) <= MAX_BARS:
+            break
+        sampled = frame.resample(rule).last().dropna(how="all")
+    return sampled
+
+
+def _top(frame: pd.DataFrame) -> pd.DataFrame:
+    """The largest names by average weight; the rest as Other."""
+    if frame.shape[1] <= TOP_NAMES + 1:
+        return frame
+    top = frame.mean().sort_values(ascending=False).index[:TOP_NAMES]
+    return frame[top].assign(Other=frame.drop(columns=top).sum(axis=1))
+
+
+def _latest(frame: pd.DataFrame, label: str) -> pd.DataFrame:
+    last = frame.iloc[-1]
+    last = last[last.abs() > 1e-9].sort_values(ascending=False)
+    return pd.DataFrame({label: last.index, "Weight (%)": (last.values * 100).round(2)})
+
+
+def _render_currency(contrib: pd.DataFrame, base: str, by_sleeve: bool) -> None:
+    """Exposure per currency, hedged and not, and which sleeve it sits in."""
+    exposure = diagnostics.currency_exposure(contrib)
+    table = pd.DataFrame(
+        {
+            "Currency": exposure.index,
+            "Held %": (exposure["exposure"] * 100).round(1).values,
+            "Hedged %": [
+                "base" if c == base else f"{h * 100:.0f}"
+                for c, h in zip(exposure.index, exposure["hedged"])
+            ],
+            "Open %": [
+                0.0 if c == base else round(n * 100, 1)
+                for c, n in zip(exposure.index, exposure["net"])
+            ],
+        }
     )
-
-    if overlay_cfg.enabled and result.overlay is not None:
-        left, right = st.columns(2, gap="large")
-
-        with left:
-            st.plotly_chart(
-                figures.make_multi_line_fig(
-                    "Overlay Exposure",
-                    result.overlay,
-                    ["leverage", "borrowed_weight", "cash_weight"],
-                    "Weight / x",
-                ),
-                width="stretch",
+    table_col, chart_col = st.columns([1, 3], gap="large")
+    with table_col:
+        st.dataframe(table, hide_index=True, width="stretch")
+        if by_sleeve:
+            last = contrib[contrib["date"] == contrib["date"].max()]
+            where = (
+                last[last["currency"] != base]
+                .pivot_table(
+                    index="sleeve", columns="currency", values="weight", aggfunc="sum"
+                )
+                .mul(100)
+                .round(1)
+                .rename_axis(index="Sleeve", columns=None)
             )
+            if not where.empty:
+                st.caption("Where it sits (% of book)")
+                st.dataframe(where, width="stretch")
+    with chart_col:
+        bars = _bars(diagnostics.unhedged_history(contrib, base))
+        if bars.empty or bars.abs().to_numpy().max() < 1e-9:
+            st.caption(f"Every holding outside {base} is fully hedged.")
+            return
+        st.plotly_chart(
+            figures.make_stacked_bar_figure(
+                bars,
+                title=f"Unhedged exposure to currencies other than {base}",
+                colors=_part_colors(bars.columns),
+            ),
+            width="stretch",
+        )
 
-        with right:
-            annualized = result.overlay.assign(
-                cash_rate_ann=result.overlay["cash_rate"] * runner.DAY_COUNT,
-                borrow_rate_ann=result.overlay["borrow_rate"] * runner.DAY_COUNT,
+
+def _render_holdings(result: runner.BacktestResult, cfg: StrategyConfig) -> None:
+    """
+    What the book holds: now, and at every rebalance. The book as sleeves, or
+    one sleeve as its names; a single strategy shows its names.
+    """
+    section("Holdings", help=HELP["holdings"])
+    has_sleeves = result.sleeve_weights is not None and not result.sleeve_weights.empty
+
+    contrib = diagnostics.contributions(result, cfg)
+    foreign = not contrib.empty and (contrib["currency"] != cfg.base_currency).any()
+    options = ["Book", *(result.sleeve_weights.columns if has_sleeves else [])]
+    if foreign:
+        options.append("Currency")
+
+    view = "Book"
+    if len(options) > 1:
+        view = (
+            st.segmented_control(
+                "Holdings of",
+                options=options,
+                default="Book",
+                key="forge_holdings_view",
+                label_visibility="collapsed",
             )
-            st.plotly_chart(
-                figures.make_multi_line_fig(
-                    "Overlay Volatility + Funding",
-                    annualized,
-                    ["vol_est_ann", "cash_rate_ann", "borrow_rate_ann"],
-                    "Annualized level",
-                ),
-                width="stretch",
-            )
+            or "Book"
+        )
+
+    if view == "Currency":
+        _render_currency(contrib, cfg.base_currency, has_sleeves)
+        return
+
+    if view == "Book" and has_sleeves:
+        # At a rebalance every sleeve is back on budget, so the day before
+        # shows what there is to see: how far they had drifted.
+        shares = result.sleeve_weights
+        before = shares.index.get_indexer(
+            shares.index.intersection(result.weights_history.index)
+        )
+        history = shares.iloc[[i - 1 for i in before if i > 0]]
+        latest = _latest(shares, "Sleeve")
+        title = "Sleeves just before each rebalance"
+    elif view == "Book":
+        history = result.weights_history
+        latest = _latest(history, "Ticker")
+        title = "Weights at each rebalance"
+    else:
+        history = result.sleeve_holdings[view].dropna(how="all").fillna(0.0)
+        latest = _latest(history, "Ticker")
+        title = f"{view}: weights inside the sleeve"
+
+    table_col, chart_col = st.columns([1, 3], gap="large")
+    with table_col:
+        st.dataframe(
+            latest,
+            hide_index=True,
+            width="stretch",
+            height=min(38 + 35 * len(latest), 360),
+        )
+    with chart_col:
+        bars = _top(_bars(history))
+        st.plotly_chart(
+            figures.make_stacked_bar_figure(
+                bars, title=title, colors=_part_colors(bars.columns)
+            ),
+            width="stretch",
+        )
 
 
-#: Colour follows the class, never its rank, so a class keeps its colour
-#: whichever others are in the book.
-CLASS_COLORS = {asset_class_label(k): c for k, c in zip(ASSET_CLASSES, SERIES_COLORS)}
-
-
-def _render_class_mix(result: runner.BacktestResult, cfg: StrategyConfig) -> None:
-    mix = allocation.class_weights(result.daily_weights)
-    st.plotly_chart(
-        figures.make_stacked_area_figure(
-            mix, title="Weight by Asset Class", colors=CLASS_COLORS
-        ),
-        width="stretch",
-    )
+def _render_overlay(result: runner.BacktestResult) -> None:
     st.dataframe(
-        tables.class_mix_frame(mix, cfg.budgets, net_exposure=cfg.net_exposure),
-        hide_index=True,
-        width="stretch",
+        tables.overlay_stats_frame(result.overlay), hide_index=True, width="stretch"
     )
-    if cfg.has_class_budgets:
-        st.caption("Target vs latest", help=HELP["class_mix"])
+    left, right = st.columns(2, gap="large")
+    with left:
+        st.plotly_chart(
+            figures.make_multi_line_fig(
+                "Overlay exposure",
+                result.overlay,
+                ["leverage", "borrowed_weight", "cash_weight"],
+                "Weight / x",
+            ),
+            width="stretch",
+        )
+    with right:
+        annualized = result.overlay.assign(
+            cash_rate_ann=result.overlay["cash_rate"] * runner.DAY_COUNT,
+            borrow_rate_ann=result.overlay["borrow_rate"] * runner.DAY_COUNT,
+        )
+        st.plotly_chart(
+            figures.make_multi_line_fig(
+                "Volatility and funding",
+                annualized,
+                ["vol_est_ann", "cash_rate_ann", "borrow_rate_ann"],
+                "Annualized level",
+            ),
+            width="stretch",
+        )
 
 
 def _optimizer_summary(diagnostics_frame: pd.DataFrame) -> str:
@@ -1324,19 +615,33 @@ def _render_diagnostics(result: runner.BacktestResult, cfg: StrategyConfig) -> N
         note("No weights to inspect.")
         return
 
-    headline, charts = st.columns([1, 3], gap="large")
-
-    with headline:
-        st.dataframe(
-            tables.diagnostics_frame(summary), hide_index=True, width="stretch"
-        )
+    charts = st.container()
 
     with charts:
-        exposure_tab, classes_tab, concentration_tab, turnover_tab, drawdown_tab = (
-            st.tabs(
-                ["Exposure", "Asset classes", "Concentration", "Turnover", "Drawdowns"]
+        names = ["Exposure", "Asset classes", "Concentration", "Turnover", "Drawdowns"]
+        if result.overlay is not None:
+            names.append("Overlay")
+        tabs = dict(zip(names, st.tabs(names)))
+
+        with tabs["Asset classes"]:
+            mix = allocation.class_weights(result.daily_weights)
+            st.plotly_chart(
+                figures.make_stacked_area_figure(
+                    mix,
+                    title="Weight by asset class",
+                    colors=_part_colors(mix.columns),
+                ),
+                width="stretch",
             )
-        )
+
+        if "Overlay" in tabs:
+            with tabs["Overlay"]:
+                _render_overlay(result)
+
+        exposure_tab = tabs["Exposure"]
+        concentration_tab = tabs["Concentration"]
+        turnover_tab = tabs["Turnover"]
+        drawdown_tab = tabs["Drawdowns"]
 
         with exposure_tab:
             st.plotly_chart(
@@ -1348,9 +653,6 @@ def _render_diagnostics(result: runner.BacktestResult, cfg: StrategyConfig) -> N
                 ),
                 width="stretch",
             )
-
-        with classes_tab:
-            _render_class_mix(result, cfg)
 
         with concentration_tab:
             st.plotly_chart(
@@ -1580,37 +882,18 @@ def render(
     toolbar = st.container()
     banner = st.container()
 
-    mode = (
-        st.segmented_control(
-            "Mode",
-            options=list(MODES),
-            format_func=MODES.get,
-            default="strategy",
-            key="forge_mode",
-            help=HELP["mode"],
-        )
-        or "strategy"
-    )
-
-    controls, weights_panel = st.columns([3, 1], gap="large")
-
-    with controls:
-        selection = _holdings_controls(universe_key, available)
-        cfg = _construction_controls(data, selection, mode)
-        overlay_cfg = _overlay_controls()
+    selection, cfg, overlay_cfg = sleeves.render(data, universe_key, available)
 
     with toolbar:
-        library_col, runs_col, open_col = st.columns(
-            [1, 1, 3], vertical_alignment="center"
-        )
-        with library_col:
-            _library_popover(selection)
-        with runs_col:
-            _runs_popover()
+        saved_col, open_col = st.columns([1, 4], vertical_alignment="center")
+        with saved_col:
+            _saved_popover(selection)
         loaded = session.loaded_name()
         if loaded:
             open_col.caption(f"Open: **{loaded}**")
 
+    if cfg is None:
+        return
     _handle_library_actions(cfg, overlay_cfg, selection)
 
     if selection.is_empty:
@@ -1618,8 +901,18 @@ def render(
         return
 
     try:
-        live = cache.run_backtest(
-            data, rates, cfg, selection, overlay_cfg, cache.data_token(data), _fx=fx
+        keyed, names = _positional(cfg)
+        live = _renamed(
+            cache.run_backtest(
+                data,
+                rates,
+                keyed,
+                selection,
+                overlay_cfg,
+                cache.data_token(data),
+                _fx=fx,
+            ),
+            names,
         )
     except ValueError as exc:
         st.error(str(exc))
@@ -1628,22 +921,14 @@ def render(
     with banner:
         result, opened = _resolve_open_run(live, data.vintage)
 
-    with weights_panel:
-        section("Latest weights")
-        st.dataframe(
-            tables.latest_weights_frame(result.weights_history, by_class=True),
-            hide_index=True,
-            width="stretch",
-            height=420,
-        )
-
     if result.is_empty:
         st.warning("No index data. Check the names and the date range.")
         _handle_run_actions(cfg, overlay_cfg, selection, live, data_mode, data.vintage)
         return
 
-    _render_backtest(result, overlay_cfg, cfg, recording=opened is None)
+    _render_backtest(result, cfg, recording=opened is None)
     _handle_run_actions(cfg, overlay_cfg, selection, live, data_mode, data.vintage)
+    _render_holdings(result, opened.config if opened is not None else cfg)
 
     st.divider()
     _render_diagnostics(result, opened.config if opened is not None else cfg)
