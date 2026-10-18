@@ -79,12 +79,14 @@ Controls that need explaining carry an info button (ⓘ / ?).
 
 Pick a curve, **USD Treasury** (FRED), **EUR AAA government** (ECB) or **German
 Bunds** (Bundesbank), each with its funding rate (SOFR or €STR). Then one of
-five views:
+four views:
 
 - **Snapshot**: two dated curves, the change between them, and key levels.
-- **Surface**: the whole curve over time as a 3D surface or a heatmap of yields
-  or 21-day changes.
-- **History**: tenors, spreads and the funding rate.
+- **Over time**: the whole curve as a 3D surface or a heatmap (of yields, or of
+  changes over 21 trading days), and beneath it the same picks as slices: the
+  chosen tenors through time, the overnight rate as a dashed line, and one
+  spread shaded between its legs with a strip that turns blue when inverted.
+  The tenors picked are also drawn on the surface, with the Snapshot curve.
 
 - **Factors**: level, slope and curvature, either as principal
   components of yield changes (loadings, variance explained, cumulative factor

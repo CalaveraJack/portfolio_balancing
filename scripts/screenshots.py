@@ -252,7 +252,7 @@ def capture() -> None:
         pill("Rates")
         for view, filename in (
             ("Snapshot", "rates.png"),
-            ("Surface", "rates_surface.png"),
+            ("Over time", "rates_surface.png"),
             ("Factors", "rates_factors.png"),
             ("Moves", "rates_moves.png"),
         ):

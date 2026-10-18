@@ -12,7 +12,7 @@ from streamlit.testing.v1 import AppTest
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
 
 INSPECTION_VIEWS = {
-    "Rates": ("rates_view", ("Snapshot", "Surface", "History", "Factors", "Moves")),
+    "Rates": ("rates_view", ("Snapshot", "Over time", "Factors", "Moves")),
     "Universe": (
         "univ_view",
         ("Overview", "Performance", "Correlation", "Single name"),

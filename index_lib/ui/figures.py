@@ -351,6 +351,10 @@ DIVERGING_SCALE = [[0.0, DOWN_COLOR], [0.5, "#3b352b"], [1.0, UP_COLOR]]
 
 ZERO_LINE = dict(color=NEUTRAL, width=1)
 
+#: Change heatmaps clip their colour scale here, so one outlier cannot grey
+#: out every ordinary month.
+CHANGE_CLIP_PERCENTILE = 99
+
 #: 3D scenes do not take the 2D template's grid, so they are warmed here.
 SCENE_AXIS = dict(
     gridcolor="#3a3020", zerolinecolor="#3a3020", backgroundcolor="rgba(0,0,0,0)"
@@ -454,14 +458,48 @@ def make_curve_change_figure(
     return _layout(fig, title, "Maturity", "Change (bp)", height)
 
 
+#: Tenors are ordered, so they take an ordered ramp: pale for the short end,
+#: deep for the long end. A tenor keeps its colour whatever else is picked.
+TENOR_RAMP = ("#f3dfae", "#e9b45a", "#d9862c", "#b0611a", "#7d4312")
+
+
+def tenor_colors(all_tenors: Sequence[str]) -> dict:
+    """Each tenor's colour, spread along the ramp by log maturity."""
+    years = np.log10([tenor_years(t) for t in all_tenors])
+    span = (years.max() - years.min()) or 1.0
+    ramp = [_hex_rgb(c) for c in TENOR_RAMP]
+
+    def _at(pos: float) -> str:
+        scaled = pos * (len(ramp) - 1)
+        i = min(int(scaled), len(ramp) - 2)
+        f = scaled - i
+        rgb = [round(a + (b - a) * f) for a, b in zip(ramp[i], ramp[i + 1])]
+        return "#%02X%02X%02X" % tuple(rgb)
+
+    return {t: _at((y - years.min()) / span) for t, y in zip(all_tenors, years)}
+
+
+def _hex_rgb(color: str):
+    color = color.lstrip("#")
+    return [int(color[i : i + 2], 16) for i in (0, 2, 4)]
+
+
 def make_curve_surface_figure(
     curve: pd.DataFrame,
     columns: Sequence[str],
     *,
     title: str = "Curve Surface",
     height: int = 580,
+    slices: Sequence[str] = (),
+    snapshot: Optional[pd.Timestamp] = None,
 ) -> go.Figure:
-    """Yield by date and maturity, as a 3D surface coloured by yield."""
+    """
+    Yield by date and maturity, as a 3D surface coloured by yield.
+
+    ``slices`` draws those tenors along time (what History shows) and
+    ``snapshot`` draws the curve on that date (what Snapshot shows), so the
+    other views read as cuts through this one.
+    """
     data = curve[list(columns)].dropna(how="any") if columns else pd.DataFrame()
     if data.empty:
         return empty_fig(title=title, height=height)
@@ -481,11 +519,51 @@ def make_curve_surface_figure(
             colorscale=SEQUENTIAL_SCALE,
             colorbar=dict(title="Yield %"),
             hovertemplate="%{y|%Y-%m-%d} · %{text}: %{z:.3f}%<extra></extra>",
+            opacity=0.92,
+            showlegend=False,
         )
     )
+
+    colors = tenor_colors(columns)
+    for tenor in slices:
+        if tenor not in data.columns:
+            continue
+        x = np.log10(tenor_years(tenor))
+        fig.add_trace(
+            go.Scatter3d(
+                x=np.full(len(data), x),
+                y=data.index,
+                z=data[tenor].values,
+                mode="lines",
+                line=dict(width=5, color=colors[tenor]),
+                name=f"{tenor} slice",
+                hovertemplate="%{y|%Y-%m-%d} · " + tenor + ": %{z:.3f}%<extra></extra>",
+            )
+        )
+
+    if snapshot is not None:
+        on_date = data.loc[:snapshot]
+        if not on_date.empty:
+            row = on_date.iloc[-1]
+            fig.add_trace(
+                go.Scatter3d(
+                    x=positions,
+                    y=np.full(len(positions), on_date.index[-1]),
+                    z=row.values,
+                    mode="lines+markers",
+                    line=dict(width=6, color="#ffffff"),
+                    marker=dict(size=3, color="#ffffff"),
+                    name=f"Curve on {on_date.index[-1].date()}",
+                    text=labels,
+                    hovertemplate="%{text}: %{z:.3f}%<extra></extra>",
+                )
+            )
+
     fig.update_layout(
         title=title,
         height=height,
+        # Under the title, clear of the maturity axis at the bottom left.
+        legend=dict(orientation="h", x=0.0, y=1.0, yanchor="bottom"),
         scene=dict(
             xaxis=dict(
                 title="Maturity", tickvals=positions, ticktext=labels, **SCENE_AXIS
@@ -494,10 +572,144 @@ def make_curve_surface_figure(
             zaxis=dict(title="Yield (%)", **SCENE_AXIS),
             aspectmode="manual",
             aspectratio=dict(x=1.1, y=2.0, z=0.8),
-            camera=dict(eye=dict(x=1.9, y=-1.3, z=0.9)),
+            camera=dict(
+                eye=dict(x=1.75, y=-1.3, z=0.55), center=dict(x=0, y=0, z=-0.28)
+            ),
             bgcolor="rgba(0,0,0,0)",
         ),
-        margin=dict(l=0, r=0, t=50, b=0),
+        margin=dict(l=0, r=0, t=80, b=0),
+    )
+    return fig
+
+
+def make_curve_slices_figure(
+    curve: pd.DataFrame,
+    tenors: Sequence[str],
+    *,
+    funding: Optional[pd.Series],
+    funding_label: str,
+    spread: Optional[tuple],
+    title: str,
+    height: int = 600,
+) -> go.Figure:
+    """
+    History as slices of the surface, with the overnight rate and one spread.
+
+    Top: the chosen tenors over time, the overnight rate as the curve's
+    zero-maturity point (dashed), and the band between the spread's two legs.
+    Bottom: that spread in bp, gold where the curve slopes up, blue where it is
+    inverted. Same units on the top axis, so no second axis is needed.
+    """
+    if curve.empty or not tenors:
+        return empty_fig(title=title, height=height)
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.68, 0.32],
+        vertical_spacing=0.06,
+    )
+    colors = tenor_colors(list(curve.columns))
+
+    if spread is not None:
+        short, long = spread
+        fig.add_trace(
+            go.Scatter(
+                x=curve.index,
+                y=curve[short],
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=curve.index,
+                y=curve[long],
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor="rgba(227, 163, 59, 0.10)",
+                name=f"{short}–{long} band",
+                hoverinfo="skip",
+            ),
+            row=1,
+            col=1,
+        )
+
+    if funding is not None and not funding.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=funding.index,
+                y=funding.values,
+                mode="lines",
+                line=dict(width=2, dash="dash", color="#cbbd9e", shape="hv"),
+                name=f"{funding_label} (overnight)",
+                hovertemplate="%{y:.2f}%<extra>" + funding_label + "</extra>",
+            ),
+            row=1,
+            col=1,
+        )
+
+    for tenor in tenors:
+        fig.add_trace(
+            go.Scatter(
+                x=curve.index,
+                y=curve[tenor],
+                mode="lines",
+                line=dict(width=2, color=colors.get(tenor)),
+                name=tenor,
+                hovertemplate="%{y:.2f}%<extra>" + tenor + "</extra>",
+            ),
+            row=1,
+            col=1,
+        )
+
+    if spread is not None:
+        short, long = spread
+        bp = (curve[long] - curve[short]) * 100.0
+        for part, color, label in (
+            (bp.clip(lower=0), UP_COLOR, "upward sloping"),
+            (bp.clip(upper=0), DOWN_COLOR, "inverted"),
+        ):
+            fig.add_trace(
+                go.Scatter(
+                    x=bp.index,
+                    y=part.values,
+                    mode="lines",
+                    line=dict(width=1, color=color),
+                    fill="tozeroy",
+                    name=f"{short}{long.lower()} {label}",
+                    customdata=bp.values,
+                    hovertemplate="%{customdata:+.0f} bp<extra>"
+                    + f"{short}/{long}"
+                    + "</extra>",
+                    showlegend=False,
+                ),
+                row=2,
+                col=1,
+            )
+        fig.add_hline(y=0.0, line=ZERO_LINE, row=2, col=1)
+        fig.update_yaxes(
+            title_text=f"{short}/{long} (bp)<br><sup>below 0 = inverted</sup>",
+            row=2,
+            col=1,
+        )
+
+    fig.update_yaxes(title_text="Yield (% p.a.)", row=1, col=1)
+    fig.update_layout(
+        title=title,
+        height=height,
+        hovermode="x unified",
+        # Below the title, not on it; in the order the traces were drawn.
+        legend=dict(
+            orientation="h", x=0.0, y=1.0, yanchor="bottom", traceorder="normal"
+        ),
+        margin=dict(t=90),
     )
     return fig
 
@@ -511,7 +723,14 @@ def make_curve_heatmap_figure(
     title: str = "Curve Heatmap",
     height: int = 420,
 ) -> go.Figure:
-    """Date across, maturity up, colour for the value: levels or changes."""
+    """
+    Date across, maturity up, colour for the value: levels or changes.
+
+    For changes the colour scale is symmetric and clipped at the 99th
+    percentile of absolute moves. Scaling to the single largest move let one
+    outlier (the 1-month bill in the 2023 debt-ceiling scare, +233 bp) turn
+    every ordinary month grey. Clipped cells keep their true value in the hover.
+    """
     data = frame[list(columns)].dropna(how="all") if columns else pd.DataFrame()
     if data.empty:
         return empty_fig(title=title, height=height)
@@ -519,16 +738,26 @@ def make_curve_heatmap_figure(
     z = data.T.values
 
     scale = dict(colorscale=SEQUENTIAL_SCALE)
+    colorbar = dict(title=value_label)
     if diverging:
-        bound = float(np.nanmax(np.abs(z))) or 1.0
+        moves = np.abs(z[np.isfinite(z)])
+        bound = (
+            float(np.percentile(moves, CHANGE_CLIP_PERCENTILE)) if moves.size else 1.0
+        )
+        bound = bound or 1.0
         scale = dict(colorscale=DIVERGING_SCALE, zmid=0.0, zmin=-bound, zmax=bound)
+        colorbar = dict(
+            title=f"{value_label}<br>±{bound:.0f} clip",
+            tickvals=[-bound, 0, bound],
+            ticktext=[f"≤ −{bound:.0f}", "0", f"≥ +{bound:.0f}"],
+        )
 
     fig = go.Figure(
         go.Heatmap(
             x=data.index,
             y=[tenor_label(c) for c in columns],
             z=z,
-            colorbar=dict(title=value_label),
+            colorbar=colorbar,
             hovertemplate="%{x|%Y-%m-%d} · %{y}: %{z:.2f}<extra></extra>",
             **scale,
         )

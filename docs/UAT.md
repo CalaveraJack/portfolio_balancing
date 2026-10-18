@@ -37,16 +37,16 @@ Each line: **what to do** → what should happen.
 - [ ] **C2** Change *Snapshot date* and *Compare with* → curves, bars and strip all move together; dates outside the data cannot be picked.
 - [ ] **C3** Curve = EUR AAA government → strip shows €STR; tenors 3M–30Y; numbers plausible (2–4%).
 - [ ] **C4** Curve = German Bunds → €STR; tenors 1Y–30Y; no 3M in the charts.
-- [ ] **C5** Surface → 3D surface rotates and zooms; maturities spread out (short end not squashed).
-- [ ] **C6** Surface → Heatmap → Yield, then 21-day change → change map is orange/blue around grey.
-- [ ] **C7** History → pick and remove tenors; yields, spreads (pp) and funding rate charts update.
+- [ ] **C5** Over time → 3D surface rotates and zooms; maturities spread out; the picked tenors are lines on the surface and the white line is the Snapshot date's curve.
+- [ ] **C6** Over time → Show as *Heatmap* → Colour *Yield*, then *Change* → gold/blue around grey; ordinary months clearly coloured; colour bar says ±N clip; hovering the May 2023 1M cell shows its true value (~+230 bp).
+- [ ] **C7** Over time → add and remove tenors → the surface lines and the slices chart change together; pick a spread → band between its legs and a strip below, blue while inverted (USD 2s10s: mid-2022 to late 2024); dashed overnight rate (SOFR / €STR).
 - [ ] **C8** Factors → Principal components, Daily / Weekly / Monthly → loadings, variance explained (Level ≫ Slope > Curvature), cumulative factor moves.
 - [ ] **C9** Factors → add 1M back into the tenors (USD) → Slope loading becomes dominated by 1M (expected; the reason it is excluded by default).
 - [ ] **C10** Factors → Spreads → Level chart and Slope/Curvature chart.
 - [ ] **C11** Moves → pair 2Y/10Y, window Weekly → sentence with the latest move and its kind; scatter, counts table, timeline. Shares add to 100%.
 - [ ] **C12** Moves → raise *Parallel band* to 10 bp → more *Parallel* moves in the table.
 - [ ] **C13** Moves on Bunds → pair list has no 3M/10Y.
-- [ ] **C14** Window 1Y / 3Y / 5Y / 10Y / Max → Surface, History, Factors and Moves cut accordingly; Snapshot dates unaffected.
+- [ ] **C14** Window 1Y / 3Y / 5Y / 10Y / Max → Over time, Factors and Moves cut accordingly; Snapshot dates unaffected.
 - [ ] **C15** Every ⓘ / ? on Rates explains its control (Curve, Show as, Method, Horizon, Tenors, Pair, Band, the moves legend).
 
 ## D. Data Inspection — Universe

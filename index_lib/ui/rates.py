@@ -17,7 +17,7 @@ from index_lib.config.curves import CURVES, FUNDING, CurveSpec
 from index_lib.core.rates import (
     HORIZONS,
     MOVE_DESCRIPTIONS,
-    compute_curve_spreads,
+    SPREADS,
     curve_at,
     curve_moves,
     move_summary,
@@ -30,7 +30,7 @@ from index_lib.ui import figures, tables
 from index_lib.ui.theme import note
 from index_lib.ui.window import cut
 
-VIEWS = ("Snapshot", "Surface", "History", "Factors", "Moves")
+VIEWS = ("Snapshot", "Over time", "Factors", "Moves")
 
 DEFAULT_TENORS = ("3M", "2Y", "10Y", "30Y")
 HEADLINE_TENORS = ("2Y", "10Y", "30Y")
@@ -46,8 +46,12 @@ HELP = {
         "Bundesbank. Each comes with its overnight rate: SOFR for USD, €STR for EUR."
     ),
     "surface": (
-        "Surface: height and colour are the yield; drag to rotate, scroll to "
-        "zoom. Heatmap: the same as a flat map, of yields or of 21-day changes."
+        "3D surface: height and colour are the yield; the tenors picked are drawn "
+        "on it as slices and the white line is the Snapshot curve. Drag to "
+        "rotate, scroll to "
+        "zoom. Heatmap: the same as a flat map, of yields or of changes over 21 "
+        "trading days, the colour clipped at the 99th percentile so one outlier "
+        "cannot grey out the rest; hover shows the true value."
     ),
     "method": (
         "**Principal components**: the statistical answer. Level moves every "
@@ -65,6 +69,15 @@ HELP = {
         "debt-ceiling news, and would otherwise take over the second factor."
     ),
     "pair": "The short and long end whose moves are classified.",
+    "slices": (
+        "Each line is a slice of the surface at one maturity, through time. The "
+        "dashed line is the overnight funding rate, the curve's zero-maturity "
+        "point. Tenors are coloured pale (short) to deep (long)."
+    ),
+    "spread": (
+        "Shaded between its two legs above; below, in bp, gold where the curve "
+        "slopes up and blue where it is inverted."
+    ),
     "band": (
         "Moves where the spread changed by less than this count as parallel "
         "shifts rather than steepeners or flatteners."
@@ -173,38 +186,91 @@ def _snapshot(
         )
 
 
-def _surface(spec: CurveSpec, panel: pd.DataFrame) -> None:
-    columns = list(panel.columns)
+def _slice_tenors(spec: CurveSpec, columns: List[str]) -> List[str]:
+    """The tenors drawn as slices: on the surface and in the chart below it."""
+    stored = st.session_state.get(f"rates_tenors_{spec.key}")
+    if stored is not None:
+        return [c for c in stored if c in columns]
+    return [c for c in DEFAULT_TENORS if c in columns] or columns[:3]
 
-    shape_col, colour_col = st.columns(2)
-    shape = shape_col.radio(
-        "Show as",
-        ["3D surface", "Heatmap"],
-        key="rates_shape_view",
-        horizontal=True,
-        help=HELP["surface"],
+
+def _over_time(
+    spec: CurveSpec, panel: pd.DataFrame, funding: Optional[pd.Series]
+) -> None:
+    """
+    The whole curve through time, and slices of it, in one view.
+
+    One set of controls drives both charts: the tenors picked are the lines on
+    the surface and the lines in the slices chart, so nothing has to be chosen
+    twice and the two always agree.
+    """
+    columns = list(panel.columns)
+    spreads = {
+        name: legs for name, legs in SPREADS.items() if set(legs) <= set(columns)
+    }
+
+    tenor_col, spread_col, shape_col, colour_col = st.columns(
+        [3, 2, 2, 2], vertical_alignment="bottom"
     )
+    selected = tenor_col.multiselect(
+        "Tenors",
+        key=f"rates_tenors_{spec.key}",
+        options=columns,
+        default=_slice_tenors(spec, columns),
+        help=HELP["slices"],
+    )
+    spread_name = None
+    if spreads:
+        spread_name = spread_col.segmented_control(
+            "Spread",
+            options=list(spreads),
+            default=next(iter(spreads)),
+            key=f"rates_spread_{spec.key}",
+            help=HELP["spread"],
+        )
+    shape = (
+        shape_col.segmented_control(
+            "Show as",
+            options=["3D surface", "Heatmap"],
+            default="3D surface",
+            key="rates_shape_view",
+            help=HELP["surface"],
+        )
+        or "3D surface"
+    )
+    colour = "Yield"
+    if shape == "Heatmap":
+        colour = (
+            colour_col.segmented_control(
+                "Colour shows",
+                options=["Yield", "Change"],
+                default="Yield",
+                key="rates_heatmap_value",
+                help=(
+                    f"Change is over {HEATMAP_CHANGE_DAYS} trading days, gold up "
+                    "and blue down."
+                ),
+            )
+            or "Yield"
+        )
 
     if shape == "3D surface":
+        snapshot = st.session_state.get(f"rates_snapshot_{spec.key}")
         st.plotly_chart(
             figures.make_curve_surface_figure(
-                panel, columns, title=f"{spec.label} over time"
+                panel,
+                columns,
+                title=f"{spec.label} over time",
+                slices=selected,
+                snapshot=pd.Timestamp(snapshot) if snapshot else panel.index.max(),
+                height=580,
             ),
             width="stretch",
         )
-        return
-
-    colour = colour_col.radio(
-        "Colour shows",
-        ["Yield", f"{HEATMAP_CHANGE_DAYS}-day change"],
-        key="rates_heatmap_value",
-        horizontal=True,
-    )
-
-    if colour == "Yield":
+    elif colour == "Yield":
         st.plotly_chart(
             figures.make_curve_heatmap_figure(
-                panel, columns, title=f"{spec.label} by maturity"
+                panel, columns, title=f"{spec.label} by maturity", height=380
             ),
             width="stretch",
         )
@@ -215,50 +281,27 @@ def _surface(spec: CurveSpec, panel: pd.DataFrame) -> None:
                 columns,
                 diverging=True,
                 value_label="bp",
-                title=f"{HEATMAP_CHANGE_DAYS}-day yield changes (orange up, blue down)",
+                title=(
+                    f"Yield changes over {HEATMAP_CHANGE_DAYS} trading days "
+                    "(gold up, blue down)"
+                ),
+                height=380,
             ),
             width="stretch",
         )
 
-
-def _history(
-    spec: CurveSpec, panel: pd.DataFrame, funding: Optional[pd.Series]
-) -> None:
-    columns = list(panel.columns)
-    selected = st.multiselect(
-        "Tenors",
-        key=f"rates_tenors_{spec.key}",
-        options=columns,
-        default=[c for c in DEFAULT_TENORS if c in columns] or columns[:3],
+    st.plotly_chart(
+        figures.make_curve_slices_figure(
+            panel,
+            selected,
+            funding=funding,
+            funding_label=FUNDING[spec.funding].label,
+            spread=spreads.get(spread_name) if spread_name else None,
+            title=f"{spec.label}: maturity slices",
+            height=540,
+        ),
+        width="stretch",
     )
-
-    left, right = st.columns(2, gap="large")
-    with left:
-        st.plotly_chart(
-            figures.make_curve_history_figure(
-                panel, columns=selected, title=f"{spec.label} yields"
-            ),
-            width="stretch",
-        )
-    with right:
-        spreads = compute_curve_spreads(panel)
-        st.plotly_chart(
-            figures.make_curve_history_figure(
-                spreads, columns=list(spreads.columns), title="Spreads (pp)"
-            ),
-            width="stretch",
-        )
-
-    label = FUNDING[spec.funding].label
-    if funding is not None and not funding.empty:
-        st.plotly_chart(
-            figures.make_funding_history_figure(
-                funding.to_frame(label),
-                columns=[label],
-                title=f"Funding rate ({label})",
-            ),
-            width="stretch",
-        )
 
 
 def _factors(panel: pd.DataFrame) -> None:
@@ -458,10 +501,8 @@ def render(curves: CurveData, window: str) -> None:
 
     if view == "Snapshot":
         _snapshot(spec, full, funding)
-    elif view == "Surface":
-        _surface(spec, panel)
-    elif view == "History":
-        _history(spec, panel, funding_window)
+    elif view == "Over time":
+        _over_time(spec, panel, funding_window)
     elif view == "Factors":
         _factors(panel)
     else:
