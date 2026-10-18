@@ -177,3 +177,67 @@ def summary(
         "max_daily_turnover": float(turnover.max()),
         "n_drawdowns": int(len(drawdown_periods(index_level, top=1000))),
     }
+
+
+def contributions(result, cfg) -> pd.DataFrame:
+    """
+    Every holding's weight in the book at each rebalance, by the sleeve that
+    holds it, with the share of it hedged: columns date, sleeve, ticker,
+    currency, weight, hedged. A name in two sleeves appears twice.
+    """
+    from index_lib.config import currency_of
+
+    frames = []
+    if not cfg.sleeves:
+        parts = [("Book", result.weights_history, None, cfg)]
+    else:
+        holdings = result.sleeve_holdings
+        held = (
+            set(holdings.columns.get_level_values(0)) if holdings is not None else set()
+        )
+        parts = [
+            (s.name, holdings[s.name], result.sleeve_weights[s.name], cfg.for_sleeve(s))
+            for s in cfg.sleeves
+            if not s.cash and s.name in held
+        ]
+
+    for name, inner, share, config in parts:
+        weights = inner.fillna(0.0)
+        if share is not None:
+            weights = weights.mul(share.reindex(weights.index).ffill(), axis=0)
+        long = weights.stack().rename("weight").reset_index()
+        long.columns = ["date", "ticker", "weight"]
+        long = long[long["weight"].abs() > 1e-12]
+        long["sleeve"] = name
+        long["currency"] = long["ticker"].map(currency_of)
+        long["hedged"] = long["currency"].map(config.hedge_for)
+        frames.append(long)
+
+    columns = ["date", "sleeve", "ticker", "currency", "weight", "hedged"]
+    if not frames:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(frames, ignore_index=True)[columns]
+
+
+def currency_exposure(contrib: pd.DataFrame) -> pd.DataFrame:
+    """At the last rebalance, per currency: exposure, share hedged, what is left."""
+    if contrib.empty:
+        return pd.DataFrame(columns=["exposure", "hedged", "net"])
+    last = contrib[contrib["date"] == contrib["date"].max()]
+    hedged_weight = (last["weight"] * last["hedged"]).groupby(last["currency"]).sum()
+    exposure = last.groupby("currency")["weight"].sum()
+    out = pd.DataFrame({"exposure": exposure})
+    out["hedged"] = (hedged_weight / exposure).fillna(0.0)
+    out["net"] = exposure - hedged_weight
+    return out.sort_values("exposure", ascending=False)
+
+
+def unhedged_history(contrib: pd.DataFrame, base: str) -> pd.DataFrame:
+    """Foreign-currency exposure left after hedging, per currency, at rebalances."""
+    foreign = contrib[contrib["currency"] != base]
+    if foreign.empty:
+        return pd.DataFrame()
+    net = foreign["weight"] * (1.0 - foreign["hedged"])
+    return (
+        net.groupby([foreign["date"], foreign["currency"]]).sum().unstack().fillna(0.0)
+    )

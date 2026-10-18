@@ -8,6 +8,7 @@ from .asset_classes import (
     currency_of,
     describe,
     group_by_class,
+    is_synthetic,
 )
 from .universes import (
     BASE_10,
@@ -46,6 +47,7 @@ __all__ = [
     "classes_present",
     "currency_of",
     "describe",
+    "is_synthetic",
     "group_by_class",
     "resolve_universe_key",
     "universe_label",

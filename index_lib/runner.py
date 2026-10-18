@@ -9,19 +9,21 @@ a script, or a different front end.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
-from index_lib.allocation import SleevePlan, resolve_sleeves
-from index_lib.config import asset_class_of, currency_of
+from index_lib.config import currency_of
 from index_lib.core import (
     apply_vol_target_overlay,
     build_index_series,
     compute_stats_from_price_series,
 )
+from index_lib.core.backtest import BOND_METHODS
 from index_lib.core.fx import convert_prices
+from index_lib.core.rebalancing import rebalance_dates
+from index_lib.core.sleeves import combine_sleeves
 from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.loaders import build_daily_funding_series
 from index_lib.loaders.fx_cache import FXData
@@ -66,6 +68,10 @@ class BacktestResult:
     stats: dict
     #: One row per rebalance when an optimizer ran; empty otherwise.
     optimizer: pd.DataFrame = field(default_factory=pd.DataFrame)
+    #: Each sleeve's daily share of the book; None for a single strategy.
+    sleeve_weights: Optional[pd.DataFrame] = None
+    #: Each sleeve's own weights at its rebalances, columns (sleeve, ticker).
+    sleeve_holdings: Optional[pd.DataFrame] = None
 
     @property
     def is_empty(self) -> bool:
@@ -73,25 +79,11 @@ class BacktestResult:
 
 
 def _market_caps_for(
-    data: UniverseData, cfg: StrategyConfig, selection: UniverseSelection
+    data: UniverseData, cfg: StrategyConfig, names: Sequence[str]
 ) -> Optional[pd.DataFrame]:
-    if "cap_weight" not in cfg.methods_in_use or selection.is_empty:
+    if cfg.method != "cap_weight" or not names:
         return None
-    return data.market_caps.reindex(columns=list(selection.constituents))
-
-
-def sleeve_plan(
-    cfg: StrategyConfig, selection: UniverseSelection
-) -> Optional[SleevePlan]:
-    """The class budgets resolved against the selected holdings, if any are set."""
-    if not cfg.has_class_budgets:
-        return None
-    return resolve_sleeves(cfg.budgets, selection.constituents)
-
-
-def _sleeves_for(cfg: StrategyConfig, selection: UniverseSelection):
-    plan = sleeve_plan(cfg, selection)
-    return plan.sleeves if plan is not None else None
+    return data.market_caps.reindex(columns=list(names))
 
 
 def short_rate(
@@ -111,7 +103,7 @@ def short_rate(
     return None
 
 
-def foreign_holdings(cfg: StrategyConfig, selection: UniverseSelection) -> list:
+def foreign_holdings(cfg: StrategyConfig, selection: UniverseSelection) -> List[str]:
     return [t for t in selection.constituents if currency_of(t) != cfg.base_currency]
 
 
@@ -120,15 +112,15 @@ def base_currency_close(
     rates: RatesInspectorData,
     fx: Optional[FXData],
     cfg: StrategyConfig,
-    selection: UniverseSelection,
+    names: Sequence[str],
 ) -> pd.DataFrame:
     """
     The price panel restated in the strategy's base currency.
 
     Holdings already in the base currency pass through; foreign ones are
-    converted at the ECB rate and hedged by their class's hedge ratio.
+    converted at the ECB rate, hedged by the ratio set for their currency.
     """
-    foreign = foreign_holdings(cfg, selection)
+    foreign = [t for t in names if currency_of(t) != cfg.base_currency]
     if not foreign:
         return data.close
     if fx is None or fx.is_empty:
@@ -147,7 +139,7 @@ def base_currency_close(
             fx.rate(cfg.base_currency, currency),
             base_rate if base_rate is not None else pd.Series(dtype=float),
             foreign_rate if foreign_rate is not None else pd.Series(dtype=float),
-            hedge_ratio=cfg.hedge_ratio_for(asset_class_of(ticker)),
+            hedge_ratio=cfg.hedge_for(currency),
             cost_bp=cfg.hedge_cost_bp,
         ).reindex(close.index)
     return close
@@ -167,6 +159,113 @@ def _funding(rates, fx, cfg, index, spread_pct):
     )
 
 
+def _strategy_series(data, rates, fx, cfg: StrategyConfig, names: List[str]):
+    """One strategy over one pool of names: build_index_series' five outputs."""
+    close = base_currency_close(data, rates, fx, cfg, names)
+    index = close.loc[cfg.start : cfg.end].index
+    funding = _funding(rates, fx, cfg, index, 0.0)
+
+    # Shorting is financed at the overnight rate plus the configured spread,
+    # exactly as the overlay finances leverage. The config holds the spread as
+    # a fraction; the funding loader expects annual percent.
+    short_rates = None
+    if cfg.optimizer_form == "long_short":
+        short_rates = _funding(rates, fx, cfg, index, cfg.short_borrow_cost * 100.0)[
+            "borrow_rate"
+        ]
+
+    return build_index_series(
+        close=close,
+        constituents=names,
+        start=cfg.start,
+        end=cfg.end,
+        base_level=BASE_LEVEL,
+        market_caps=_market_caps_for(data, cfg, names),
+        cash_rates=funding["cash_rate"],
+        short_rates=short_rates,
+        bond_durations=data.bond_durations,
+        bond_carry=data.bond_carry,
+        **cfg.index_kwargs(),
+    )
+
+
+def _cash_series(data, rates, fx, cfg: StrategyConfig):
+    """A cash sleeve: the base currency's overnight rate, nothing held."""
+    index = data.close.loc[cfg.start : cfg.end].index
+    returns = _funding(rates, fx, cfg, index, 0.0)["cash_rate"].rename("base_return")
+    level = ((1.0 + returns).cumprod() * BASE_LEVEL).rename("index_level")
+    return level, pd.DataFrame(), returns, pd.DataFrame(), pd.DataFrame()
+
+
+def _book(data, rates, fx, cfg: StrategyConfig, selection: UniverseSelection):
+    """
+    The book before any overlay: level, weights at rebalances, daily return,
+    daily weights, optimizer reports, each sleeve's share and each sleeve's own
+    weights (both None for one strategy).
+
+    Sleeves are backtested one by one on their own construction, then held at
+    their budgets; a name held by two sleeves carries both weights.
+    """
+    if not cfg.sleeves:
+        level, history, returns, daily, optimizer = _strategy_series(
+            data, rates, fx, cfg, list(selection.constituents)
+        )
+        return level, history, returns, daily, optimizer, None, None
+
+    parts = {}
+    for sleeve in cfg.sleeves:
+        if sleeve.budget <= 0:
+            continue
+        if sleeve.cash:
+            parts[sleeve.name] = _cash_series(data, rates, fx, cfg)
+            continue
+        names = [t for t in sleeve.constituents if t in data.close.columns]
+        if names:
+            parts[sleeve.name] = _strategy_series(
+                data, rates, fx, cfg.for_sleeve(sleeve), names
+            )
+    parts = {k: v for k, v in parts.items() if not v[2].empty}
+    if not parts:
+        empty = pd.Series(dtype=float)
+        return empty, pd.DataFrame(), empty, pd.DataFrame(), pd.DataFrame(), None, None
+
+    returns = pd.DataFrame({k: v[2] for k, v in parts.items()}).sort_index()
+    rebalance_on = rebalance_dates(returns.index, cfg.rebalance)
+    book_returns, shares = combine_sleeves(
+        returns,
+        {k: cfg.budgets[k] for k in parts},
+        rebalance_on,
+        band=cfg.rebalance_band,
+    )
+
+    daily = pd.DataFrame(index=returns.index)
+    for name, part in parts.items():
+        weights = part[3].reindex(returns.index).ffill().fillna(0.0)
+        daily = daily.add(weights.mul(shares[name], axis=0), fill_value=0.0)
+    daily = daily.fillna(0.0)
+    daily.index.name = "date"
+
+    history = daily.loc[daily.index.intersection(rebalance_on)]
+    history.index.name = "rebalance_date"
+
+    optimizer = [
+        part[4].assign(sleeve=name) for name, part in parts.items() if not part[4].empty
+    ]
+    level = ((1.0 + book_returns).cumprod() * BASE_LEVEL).rename("index_level")
+    return (
+        level,
+        history,
+        book_returns,
+        daily,
+        pd.concat(optimizer).sort_index() if optimizer else pd.DataFrame(),
+        shares,
+        pd.concat(
+            {name: part[1] for name, part in parts.items() if not part[1].empty},
+            axis=1,
+        ),
+    )
+
+
 def run_backtest(
     data: UniverseData,
     rates: RatesInspectorData,
@@ -175,50 +274,16 @@ def run_backtest(
     overlay_cfg: OverlayConfig,
     fx: Optional[FXData] = None,
 ) -> BacktestResult:
-    """Build the index series and, when enabled, apply the vol-target overlay."""
-    close = base_currency_close(data, rates, fx, cfg, selection)
-
-    # The uninvested part of the book earns the cash rate, so the backtest needs
-    # it even when the volatility overlay is switched off.
-    funding = _funding(
-        rates,
-        fx,
-        cfg,
-        close.loc[cfg.start : cfg.end].index,
-        overlay_cfg.borrow_spread_ann,
-    )
-
-    # Shorting is financed at SOFR plus the configured spread, exactly as the
-    # overlay finances leverage. The config holds the spread as a fraction; the
-    # funding loader expects annual percent.
-    short_rates = None
-    if cfg.optimizer_form == "long_short":
-        short_rates = _funding(
-            rates,
-            fx,
-            cfg,
-            close.loc[cfg.start : cfg.end].index,
-            cfg.short_borrow_cost * 100.0,
-        )["borrow_rate"]
-
+    """Build the book and, when enabled, apply the vol-target overlay."""
     (
         index_level,
         weights_history,
         base_returns,
         daily_weights,
-        optimizer_diagnostics,
-    ) = build_index_series(
-        close=close,
-        constituents=list(selection.constituents),
-        start=cfg.start,
-        end=cfg.end,
-        base_level=BASE_LEVEL,
-        market_caps=_market_caps_for(data, cfg, selection),
-        cash_rates=funding["cash_rate"],
-        short_rates=short_rates,
-        sleeves=_sleeves_for(cfg, selection),
-        **cfg.index_kwargs(),
-    )
+        optimizer,
+        shares,
+        holdings,
+    ) = _book(data, rates, fx, cfg, selection)
 
     overlay_df = None
 
@@ -247,7 +312,9 @@ def run_backtest(
         base_returns=base_returns,
         overlay=overlay_df,
         stats=compute_stats_from_price_series(index_level),
-        optimizer=optimizer_diagnostics,
+        optimizer=optimizer,
+        sleeve_weights=shares,
+        sleeve_holdings=holdings,
     )
 
 
@@ -342,21 +409,17 @@ def run_monte_carlo(
         f" / {mc.funding_method}" if mc.funding_model == "mc" else ""
     )
 
-    if cfg.uses_optimizer or cfg.has_class_budgets or foreign_holdings(cfg, selection):
-        # Bootstrap the realized strategy returns rather than pretending we
+    if (
+        cfg.uses_optimizer
+        or cfg.has_sleeves
+        or cfg.method in BOND_METHODS
+        or foreign_holdings(cfg, selection)
+    ):
+        # Bootstrap the realized book returns rather than pretending we
         # re-optimize on every simulated constituent path. The constituent
-        # engines apply one weighting rule across every name, so a book built
-        # class by class takes this route too.
-        _, _, base_returns, _, _ = build_index_series(
-            close=base_currency_close(data, rates, fx, cfg, selection),
-            constituents=list(selection.constituents),
-            start=cfg.start,
-            end=cfg.end,
-            base_level=BASE_LEVEL,
-            market_caps=_market_caps_for(data, cfg, selection),
-            sleeves=_sleeves_for(cfg, selection),
-            **cfg.index_kwargs(),
-        )
+        # engines apply one rule across every name, so a book of sleeves, or one
+        # converted from another currency, takes this route too.
+        base_returns = _book(data, rates, fx, cfg, selection)[2]
 
         if base_returns.empty:
             raise ValueError("No base strategy returns available for Monte Carlo.")

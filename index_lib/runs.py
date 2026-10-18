@@ -49,7 +49,25 @@ _FRAME_FILES = {
     "daily_weights": "daily_weights.parquet",
     "overlay": "overlay.parquet",
     "optimizer": "optimizer.parquet",
+    "sleeve_weights": "sleeve_weights.parquet",
+    "sleeve_holdings": "sleeve_holdings.parquet",
 }
+
+#: Joins a sleeve and a ticker into one column name; parquet wants flat names.
+_PAIR = " :: "
+
+
+def _flatten(frame: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    if frame is None or not isinstance(frame.columns, pd.MultiIndex):
+        return frame
+    return frame.set_axis([_PAIR.join(c) for c in frame.columns], axis=1)
+
+
+def _unflatten(frame: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    if frame is None or frame.empty:
+        return frame
+    pairs = [tuple(c.split(_PAIR, 1)) for c in frame.columns]
+    return frame.set_axis(pd.MultiIndex.from_tuples(pairs), axis=1)
 
 
 class RunError(RuntimeError):
@@ -128,10 +146,13 @@ def _record_from_dict(payload: Dict[str, object]) -> RunRecord:
     return RunRecord(
         run_id=str(payload.get("run_id", "")),
         name=str(payload.get("name", "")),
-        config=StrategyConfig(
-            start=window.get("start"),
-            end=window.get("end"),
-            **(payload.get("config") or {}),
+        config=StrategyConfig.from_saved(
+            {
+                **(payload.get("config") or {}),
+                "start": window.get("start"),
+                "end": window.get("end"),
+            },
+            tuple(stocks.get("constituents", ())),
         ),
         overlay=OverlayConfig(**(payload.get("overlay") or {})),
         selection=UniverseSelection(
@@ -196,7 +217,7 @@ def save_run(
         series.to_frame(series.name or attribute).to_parquet(path / filename)
 
     for attribute, filename in _FRAME_FILES.items():
-        frame = getattr(result, attribute)
+        frame = _flatten(getattr(result, attribute))
         if frame is not None and not frame.empty:
             frame.to_parquet(path / filename)
 
@@ -248,6 +269,8 @@ def load_result(run_id: str, *, directory: Optional[Path] = None) -> BacktestRes
         overlay=_frame("overlay"),
         stats=record.stats,
         optimizer=_frame_or_empty("optimizer"),
+        sleeve_weights=_frame("sleeve_weights"),
+        sleeve_holdings=_unflatten(_frame("sleeve_holdings")),
     )
 
 

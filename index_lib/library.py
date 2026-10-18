@@ -158,7 +158,10 @@ def from_dict(payload: Dict[str, object]) -> SavedStrategy:
     # one when the strategy is actually run.
     return SavedStrategy(
         name=str(payload.get("name", "")),
-        config=StrategyConfig(start=None, end=None, **config_fields),
+        config=StrategyConfig.from_saved(
+            {**config_fields, "start": None, "end": None},
+            stocks.constituents if stocks is not None else (),
+        ),
         overlay=OverlayConfig(**overlay_fields),
         stocks=stocks,
         description=str(payload.get("description", "")),

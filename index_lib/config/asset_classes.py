@@ -105,6 +105,13 @@ def asset_class_label(key: str) -> str:
     return ASSET_CLASSES.get(key, key)
 
 
+def is_synthetic(ticker: str) -> bool:
+    """Priced from a model (a yield curve), not traded: shown as beta."""
+    from index_lib.config.curves import is_synthetic_bond
+
+    return is_synthetic_bond(ticker)
+
+
 def describe(ticker: str) -> str:
     instrument = INSTRUMENTS.get(ticker)
     return instrument.description if instrument else "Single stock"

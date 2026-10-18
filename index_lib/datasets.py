@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Sequence, TypeVar
 
 import pandas as pd
@@ -18,7 +18,10 @@ from index_lib.loaders.market_caps import (
     align_market_caps_to_prices,
     load_market_caps,
 )
-from index_lib.loaders.synthetic_bonds import synthetic_bond_prices
+from index_lib.loaders.synthetic_bonds import (
+    synthetic_bond_analytics,
+    synthetic_bond_prices,
+)
 
 CACHE_MODES = ("refresh", "cache", "auto")
 
@@ -34,6 +37,9 @@ class UniverseData:
     close: pd.DataFrame
     volume: pd.DataFrame
     market_caps: pd.DataFrame
+    #: Synthetic bonds' modified duration (years) and carry (% a year), daily.
+    bond_durations: pd.DataFrame = field(default_factory=pd.DataFrame)
+    bond_carry: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     @property
     def vintage(self) -> str:
@@ -137,11 +143,14 @@ def load_data(
                 "No curve data for the synthetic bonds. Reload with a refreshing "
                 "data mode to fetch the yield curves."
             )
+        durations, carry = synthetic_bond_analytics(list(prices.columns), curves)
         parts.append(
             UniverseData(
                 close=prices,
                 volume=pd.DataFrame(index=prices.index, columns=prices.columns),
                 market_caps=pd.DataFrame(index=prices.index, columns=prices.columns),
+                bond_durations=durations,
+                bond_carry=carry,
             )
         )
 
@@ -160,6 +169,8 @@ def load_data(
         market_caps=pd.concat([p.market_caps for p in parts], axis=1, sort=True)
         .reindex(close.index)
         .ffill(),
+        bond_durations=parts[-1].bond_durations,
+        bond_carry=parts[-1].bond_carry,
     )
 
 

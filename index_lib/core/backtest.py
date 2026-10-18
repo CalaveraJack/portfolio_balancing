@@ -4,8 +4,6 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
-from index_lib.config import asset_class_label
-
 from .rebalancing import rebalance_dates
 from .weighting import compute_weights
 
@@ -23,6 +21,8 @@ OPTIMIZER_METHODS = {
     "max_sharpe",
     "max_diversification",
 }
+
+BOND_METHODS = {"duration_parity", "target_duration", "carry_tilt"}
 
 # What the optimizer reports about each solve. The full payload also carries the
 # covariance matrix and the expected-return vector, which are far too large to
@@ -115,127 +115,22 @@ def _solve(
     return compute_weights(hist, method, **weight_kwargs), None
 
 
-def _combine_reports(
-    reports: Dict[str, Tuple[float, Dict[str, object]]], invested: float
-) -> Dict[str, object]:
-    """
-    One diagnostics row for a rebalance solved class by class.
+def _bond_inputs(method, durations, carry, target, *, before) -> Dict[str, object]:
+    """A bond rule's inputs as last known before the rebalance date."""
+    if method not in BOND_METHODS:
+        return {}
 
-    Returns and exposures add up across classes, weighted by their budgets;
-    volatility and Sharpe do not, since they depend on how the classes co-move,
-    so they are left blank rather than misstated.
-    """
-    row: Dict[str, object] = dict.fromkeys(OPTIMIZER_DIAGNOSTIC_FIELDS)
-    row["success"] = all(bool(r.get("success")) for _, r in reports.values())
-    row["message"] = "; ".join(
-        f"{asset_class_label(k)}: {r.get('message')}" for k, (_, r) in reports.items()
+    def last(frame):
+        if frame is None or frame.empty:
+            return None
+        known = frame.loc[: before - pd.Timedelta(days=1)]
+        return known.ffill().iloc[-1] if not known.empty else frame.bfill().iloc[0]
+
+    return dict(
+        bond_duration=last(durations),
+        bond_carry=last(carry),
+        target_duration=target,
     )
-
-    for name in (
-        "solution_return",
-        "net_exposure",
-        "gross_exposure",
-        "short_notional",
-    ):
-        values = [(b, r.get(name)) for b, r in reports.values()]
-        if all(v is not None for _, v in values):
-            row[name] = invested * sum(b * float(v) for b, v in values)
-
-    return row
-
-
-def _target_weights(
-    hist: pd.DataFrame,
-    method: str,
-    *,
-    lookback: int,
-    weight_kwargs: Dict[str, object],
-    sleeves: Optional[Dict[str, Tuple[Sequence[str], float]]],
-    initial: bool = False,
-    sleeve_methods: Optional[Dict[str, str]] = None,
-) -> Tuple[pd.Series, Optional[Dict[str, object]]]:
-    """
-    Target weights for the whole book.
-
-    Without class budgets the method runs on every holding at once. With them it
-    runs inside each class on its own, as though that class were the whole book,
-    and the result is scaled to the class's share of the invested fraction. Caps
-    and limits therefore apply within a class. ``sleeve_methods`` gives a class
-    its own method; classes not in it use ``method``.
-    """
-    if not sleeves:
-        return _solve(
-            hist,
-            method,
-            lookback=lookback,
-            weight_kwargs=weight_kwargs,
-            initial=initial,
-        )
-
-    invested = float(weight_kwargs["net_exposure"])
-    gross = float(weight_kwargs["max_gross_exposure"])
-    sleeve_kwargs = dict(
-        weight_kwargs,
-        net_exposure=1.0,
-        max_gross_exposure=gross / invested if invested > 0 else 1.0,
-    )
-
-    parts: List[pd.Series] = []
-    reports: Dict[str, Tuple[float, Dict[str, object]]] = {}
-
-    for asset_class, (names, budget) in sleeves.items():
-        columns = [c for c in names if c in hist.columns]
-        if not columns or budget <= 0:
-            continue
-        class_method = (sleeve_methods or {}).get(asset_class, method)
-
-        if len(columns) == 1:
-            # One holding takes the whole budget; there is nothing to optimise.
-            w = pd.Series(1.0, index=columns)
-            report = None
-            if class_method in OPTIMIZER_METHODS and not initial:
-                report = _blank_diagnostics("one holding; no optimisation needed")
-                report.update(success=True, net_exposure=1.0, gross_exposure=1.0)
-        else:
-            w, report = _solve(
-                hist[columns],
-                class_method,
-                lookback=lookback,
-                weight_kwargs=sleeve_kwargs,
-                initial=initial,
-            )
-
-        parts.append(w * budget * invested)
-        if report is not None:
-            reports[asset_class] = (budget, report)
-
-    weights = pd.concat(parts) if parts else pd.Series(dtype=float)
-    return weights, (_combine_reports(reports, invested) if reports else None)
-
-
-def _drifted(
-    current: pd.Series,
-    target: pd.Series,
-    sleeves: Optional[Dict[str, Tuple[Sequence[str], float]]],
-    band: float,
-) -> bool:
-    """
-    Has the book drifted further than ``band`` from its last target?
-
-    Measured per class when the book is built by class (that is what a budget
-    promises), per holding otherwise.
-    """
-    if target is None or target.empty or current.empty:
-        return False
-    if sleeves:
-        for names, _ in sleeves.values():
-            have = float(current.reindex(names).fillna(0.0).sum())
-            want = float(target.reindex(names).fillna(0.0).sum())
-            if abs(have - want) > band:
-                return True
-        return False
-    gap = (current.reindex(target.index).fillna(0.0) - target).abs()
-    return bool((gap > band).any())
 
 
 def build_index_series(
@@ -260,9 +155,9 @@ def build_index_series(
     cov_estimator: str = "sample",
     cash_rates: Optional[pd.Series] = None,
     short_rates: Optional[pd.Series] = None,
-    sleeves: Optional[Dict[str, Tuple[Sequence[str], float]]] = None,
-    sleeve_methods: Optional[Dict[str, str]] = None,
-    rebalance_band: Optional[float] = None,
+    target_duration: float = 7.0,
+    bond_durations: Optional[pd.DataFrame] = None,
+    bond_carry: Optional[pd.DataFrame] = None,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Backtest a long-only strategy with periodic rebalancing and daily weight drift.
@@ -274,16 +169,10 @@ def build_index_series(
     - Those target weights are then used for the return on t.
     - Missing returns are handled by dropping unavailable names and
       renormalizing weights.
-    - With ``sleeves`` (class -> (holdings, share of the invested book)) the
-      method runs inside each class and holdings outside every sleeve get no
-      weight. ``sleeve_methods`` sets a method per class.
-    - ``rebalance_band`` also rebalances on any day a class (or, without
-      sleeves, a holding) has drifted further than that from its target.
     """
-    methods_used = {method, *(sleeve_methods or {}).values()}
-    any_optimizer = bool(methods_used & OPTIMIZER_METHODS)
-    any_lookback = bool(methods_used & LOOKBACK_METHODS)
-    any_cap_weight = "cap_weight" in methods_used
+    any_optimizer = method in OPTIMIZER_METHODS
+    any_lookback = method in LOOKBACK_METHODS
+    any_cap_weight = method == "cap_weight"
     if optimizer_form not in {"long_only", "long_short"}:
         raise ValueError("optimizer_form must be 'long_only' or 'long_short'.")
 
@@ -330,7 +219,7 @@ def build_index_series(
                 caps_series_init = market_caps.loc[available_dates[-1]]
     # Initial state before the first rebalance.
     # Optimizers require historical returns, so they must not be called on px.iloc[:1].
-    w, _ = _target_weights(
+    w, _ = _solve(
         px.iloc[:1],
         method,
         lookback=lookback,
@@ -338,6 +227,9 @@ def build_index_series(
             lookback=lookback,
             cap=cap,
             market_caps=caps_series_init,
+            **_bond_inputs(
+                method, bond_durations, bond_carry, target_duration, before=px.index[0]
+            ),
             optimizer_form=optimizer_form,
             min_weight=min_weight,
             max_weight=max_weight,
@@ -347,21 +239,15 @@ def build_index_series(
             risk_free_rate=risk_free_rate,
             cov_estimator=cov_estimator,
         ),
-        sleeves=sleeves,
         initial=True,
-        sleeve_methods=sleeve_methods,
     )
-    target = w.copy()
 
     level = float(base_level)
     levels: List[Tuple[pd.Timestamp, float]] = []
     base_ret_list: List[Tuple[pd.Timestamp, float]] = []
 
     for dt in px.index:
-        drifted = rebalance_band is not None and _drifted(
-            w, target, sleeves, rebalance_band
-        )
-        if dt in rb_dates or drifted:
+        if dt in rb_dates:
             hist_end = px.index.get_loc(dt)
 
             if hist_end == 0:
@@ -396,6 +282,9 @@ def build_index_series(
                 lookback=lookback,
                 cap=cap,
                 market_caps=caps_series,
+                **_bond_inputs(
+                    method, bond_durations, bond_carry, target_duration, before=dt
+                ),
                 optimizer_form=optimizer_form,
                 min_weight=min_weight,
                 max_weight=max_weight,
@@ -406,15 +295,13 @@ def build_index_series(
                 cov_estimator=cov_estimator,
             )
 
-            w, report = _target_weights(
+            w, report = _solve(
                 hist,
                 method,
                 lookback=lookback,
                 weight_kwargs=weight_kwargs,
-                sleeves=sleeves,
-                sleeve_methods=sleeve_methods,
+                initial=False,
             )
-            target = w.copy()
             if any_optimizer:
                 optimizer_records[dt] = report or _blank_diagnostics(
                     "no holdings to optimise"

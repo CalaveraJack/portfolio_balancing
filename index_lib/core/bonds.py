@@ -136,3 +136,30 @@ def bond_returns_from_curve(
         frequency,
         slope_pct_per_year=rolldown_slope(curve_pct, tenor, tenor_years),
     )
+
+
+def par_modified_duration(
+    yields_pct: pd.Series, maturity_years: float, frequency: int = 2
+) -> pd.Series:
+    """
+    Modified duration of a par bond, in years, from its yield in percent.
+
+    For a bond priced at par the closed form is (1 - (1 + y/f)^(-n f)) / y; it
+    tends to the maturity as the yield goes to zero.
+    """
+    y = yields_pct.astype(float) / 100.0
+    periods = frequency * maturity_years
+    near_zero = y.abs() < 1e-6
+    safe = y.where(~near_zero, 1.0)
+    duration = (1.0 - (1.0 + safe / frequency) ** (-periods)) / safe
+    return duration.where(~near_zero, float(maturity_years))
+
+
+def carry_pct(
+    yields_pct: pd.Series, slope_pct_per_year: pd.Series, duration: pd.Series
+) -> pd.Series:
+    """
+    A year's carry in percent if the curve stays put: the yield, plus the
+    roll-down as the bond ages down the curve (duration times the slope).
+    """
+    return yields_pct + duration * slope_pct_per_year.reindex(yields_pct.index)

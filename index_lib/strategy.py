@@ -8,11 +8,12 @@ percent-to-fraction conversions or the long-only guard rails.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
+from dataclasses import dataclass, replace
+from dataclasses import fields as dataclass_fields
+from typing import Callable, Dict, Mapping, Optional, Sequence, Tuple
 
-from index_lib.config import ASSET_CLASSES
-from index_lib.core.backtest import LOOKBACK_METHODS, OPTIMIZER_METHODS
+from index_lib.config import asset_class_label, describe, group_by_class
+from index_lib.core.backtest import BOND_METHODS, LOOKBACK_METHODS, OPTIMIZER_METHODS
 
 COV_ESTIMATORS: Dict[str, str] = {
     "sample": "Sample covariance",
@@ -45,6 +46,9 @@ METHODS: Dict[str, str] = {
     "risk_parity": "Risk Parity / ERC · CM.1.1",
     "max_sharpe": "Maximum Sharpe · CM.1.2",
     "max_diversification": "Maximum Diversification · CM.1.3",
+    "duration_parity": "Equal Duration Risk · CM.2.0",
+    "target_duration": "Target Duration · CM.2.1",
+    "carry_tilt": "Carry Tilt · CM.2.2",
 }
 
 DEFAULT_METHOD = "equal"
@@ -72,63 +76,16 @@ CONFIG_FIELDS = (
 # Settings added after files were first written. Saved like the rest, but a file
 # without them still loads, falling back to the field's default.
 OPTIONAL_CONFIG_FIELDS = (
-    "class_budgets",
-    "mode",
     "base_currency",
-    "hedge_ratios",
+    "currency_hedges",
+    "hedge_override",
     "hedge_cost_bp",
-    "class_methods",
     "rebalance_band",
+    "target_duration",
+    "sleeves",
 )
 
-#: The two ways of using the Forge. A strategy runs one method over one pool
-#: of names; an allocation sets a share per asset class, a method inside each,
-#: and how currencies are handled.
-MODES: Dict[str, str] = {"strategy": "Strategy", "allocation": "Allocation"}
-
 SAVED_CONFIG_FIELDS = CONFIG_FIELDS + OPTIONAL_CONFIG_FIELDS
-
-#: Class key -> share of the invested book, as held on the config: a tuple of
-#: pairs, so the config stays hashable for caching.
-ClassBudgets = Tuple[Tuple[str, float], ...]
-
-
-def normalize_class_budgets(
-    budgets: Union[None, Mapping[str, float], Sequence[Sequence[object]]],
-) -> Optional[ClassBudgets]:
-    """
-    Budgets in a canonical form: known classes, positive shares, menu order.
-
-    Accepts a mapping, or the list of pairs JSON gives back. Shares are kept as
-    given; resolving them against the selected holdings rescales them.
-    """
-    if not budgets:
-        return None
-
-    pairs = budgets.items() if isinstance(budgets, Mapping) else budgets
-    shares = {str(k): float(v) for k, v in pairs}
-
-    ordered = tuple(
-        (k, shares[k]) for k in ASSET_CLASSES if k in shares and shares[k] > 0.0
-    )
-    return ordered or None
-
-
-def _class_pairs(
-    pairs: Union[None, Mapping[str, object], Sequence[Sequence[object]]],
-    cast,
-    keep=lambda v: True,
-) -> Optional[Tuple[Tuple[str, object], ...]]:
-    """Per-class settings in canonical form: known classes, menu order."""
-    if not pairs:
-        return None
-    items = pairs.items() if isinstance(pairs, Mapping) else pairs
-    values = {str(k): cast(v) for k, v in items}
-    ordered = tuple(
-        (k, values[k]) for k in ASSET_CLASSES if k in values and keep(values[k])
-    )
-    return ordered or None
-
 
 OVERLAY_FIELDS = (
     "enabled",
@@ -138,6 +95,23 @@ OVERLAY_FIELDS = (
     "min_leverage",
     "borrow_spread_ann",
 )
+
+
+def unavailable_methods(
+    names: Sequence[str],
+    has_caps: Callable[[str], bool],
+    has_duration: Callable[[str], bool],
+) -> Dict[str, str]:
+    """Methods that do not apply to these names, and why."""
+    out: Dict[str, str] = {}
+    if names and not all(has_caps(t) for t in names):
+        out["cap_weight"] = "needs a market cap for every name"
+    if any(describe(t) != "Single stock" for t in names):
+        out["price_weight"] = "only means something for single stocks"
+    if not names or not all(has_duration(t) for t in names):
+        for method in BOND_METHODS:
+            out[method] = "needs every name to be a bond with a known duration"
+    return out
 
 
 def method_label(method: str) -> str:
@@ -194,7 +168,10 @@ class StrategyConfig:
     """
     Construction logic only — the reusable part of a strategy.
 
-    Carries no stock set; pair it with a UniverseSelection to run it.
+    Carries no stock set; pair it with a UniverseSelection to run it. With
+    ``sleeves`` it is a portfolio of semi-portfolios: each sleeve brings its own
+    names and construction, and this config holds what they share (currency,
+    rebalance dates, period, drift band).
     """
 
     method: str
@@ -212,34 +189,37 @@ class StrategyConfig:
     short_borrow_cost: float
     risk_free_rate: float
     cov_estimator: str
-    #: Optional share of the invested book per asset class. None runs the method
-    #: across every holding at once, as before class budgets existed.
-    class_budgets: Optional[ClassBudgets] = None
-    #: "strategy" or "allocation"; see MODES.
-    mode: str = "strategy"
     #: The currency returns are measured in. Foreign holdings are converted.
     base_currency: str = "USD"
-    #: Per asset class, the share of foreign-currency holdings hedged (0 to 1).
-    hedge_ratios: Optional[Tuple[Tuple[str, float], ...]] = None
+    #: Per currency, the share of holdings in it hedged with rolling forwards.
+    currency_hedges: Optional[Tuple[Tuple[str, float], ...]] = None
+    #: A sleeve's own hedge ratio for all its foreign holdings; None follows
+    #: the book's per-currency ratios.
+    hedge_override: Optional[float] = None
     #: Hedging cost above the rate differential, bp a year.
     hedge_cost_bp: float = 0.0
-    #: Per asset class, the construction method used inside it.
-    class_methods: Optional[Tuple[Tuple[str, str], ...]] = None
-    #: Rebalance also whenever a class drifts this far from its target (fraction).
+    #: Rebalance the sleeves also whenever one drifts this far from its budget.
     rebalance_band: Optional[float] = None
+    #: For the Target Duration method: the duration aimed at, in years.
+    target_duration: float = 7.0
+    #: Two or more semi-portfolios held at their budgets; None for one strategy.
+    sleeves: Optional[Tuple["Sleeve", ...]] = None
 
     def __post_init__(self) -> None:
-        # JSON hands these back as lists; held canonical so equal configs hash
-        # equal and the backtest cache recognises them.
-        object.__setattr__(
-            self, "class_budgets", normalize_class_budgets(self.class_budgets)
+        # JSON hands sleeves back as dicts; held canonical so equal configs
+        # hash equal and the backtest cache recognises them.
+        sleeves = tuple(
+            s if isinstance(s, Sleeve) else Sleeve.from_saved(s)
+            for s in (self.sleeves or ())
         )
-        object.__setattr__(self, "hedge_ratios", _class_pairs(self.hedge_ratios, float))
-        object.__setattr__(
-            self,
-            "class_methods",
-            _class_pairs(self.class_methods, str, keep=lambda m: m in METHODS),
-        )
+        object.__setattr__(self, "sleeves", sleeves if len(sleeves) > 1 else None)
+        hedges = self.currency_hedges
+        if hedges:
+            items = hedges.items() if isinstance(hedges, Mapping) else hedges
+            kept = tuple(sorted((str(c), float(r)) for c, r in items if float(r) > 0))
+            object.__setattr__(self, "currency_hedges", kept or None)
+        else:
+            object.__setattr__(self, "currency_hedges", None)
         band = self.rebalance_band
         object.__setattr__(
             self, "rebalance_band", float(band) if band and band > 0 else None
@@ -264,13 +244,13 @@ class StrategyConfig:
         short_borrow_cost_pct: Optional[float],
         rf_rate_pct: Optional[float],
         cov_estimator: Optional[str],
-        class_budgets_pct: Optional[Mapping[str, float]] = None,
-        mode: str = "strategy",
         base_currency: str = "USD",
-        hedge_ratios_pct: Optional[Mapping[str, float]] = None,
+        currency_hedges_pct: Optional[Mapping[str, float]] = None,
+        hedge_override_pct: Optional[float] = None,
         hedge_cost_bp: float = 0.0,
-        class_methods: Optional[Mapping[str, str]] = None,
         rebalance_band_pct: Optional[float] = None,
+        target_duration: Optional[float] = None,
+        sleeves: Optional[Sequence["Sleeve"]] = None,
     ) -> "StrategyConfig":
         method = method if method in METHODS else DEFAULT_METHOD
         form = optimizer_form if optimizer_form in OPTIMIZER_FORMS else "long_only"
@@ -307,22 +287,71 @@ class StrategyConfig:
             cov_estimator=(
                 cov_estimator if cov_estimator in COV_ESTIMATORS else "sample"
             ),
-            class_budgets=(
-                {k: float(v) / 100.0 for k, v in class_budgets_pct.items()}
-                if class_budgets_pct
+            base_currency=base_currency or "USD",
+            currency_hedges=(
+                {c: float(v) / 100.0 for c, v in currency_hedges_pct.items()}
+                if currency_hedges_pct
                 else None
             ),
-            mode=mode if mode in MODES else "strategy",
-            base_currency=base_currency or "USD",
-            hedge_ratios=(
-                {k: float(v) / 100.0 for k, v in hedge_ratios_pct.items()}
-                if hedge_ratios_pct
+            hedge_override=(
+                _pct(hedge_override_pct, 0.0)
+                if hedge_override_pct is not None
                 else None
             ),
             hedge_cost_bp=float(hedge_cost_bp or 0.0),
-            class_methods=dict(class_methods) if class_methods else None,
             rebalance_band=_pct(rebalance_band_pct, 0.0) or None,
+            target_duration=float(target_duration) if target_duration else 7.0,
+            sleeves=tuple(sleeves) if sleeves else None,
         )
+
+    @classmethod
+    def from_saved(
+        cls,
+        fields: Mapping[str, object],
+        constituents: Sequence[str] = (),
+    ) -> "StrategyConfig":
+        """
+        A config from a saved file, whatever version wrote it.
+
+        Drafts of v0.4 budgeted asset classes; those become one sleeve per
+        class, holding the saved names of that class.
+        """
+        fields = dict(fields)
+        budgets = dict(fields.pop("class_budgets", None) or {})
+        methods = dict(fields.pop("class_methods", None) or {})
+        hedges = dict(fields.pop("hedge_ratios", None) or {})
+        fields.pop("mode", None)
+        fields.setdefault("start", None)
+        fields.setdefault("end", None)
+        known = {f.name for f in dataclass_fields(cls)}
+        config = cls(**{k: v for k, v in fields.items() if k in known})
+
+        if hedges and not budgets:
+            config = replace(
+                config, hedge_override=max(float(v) for v in hedges.values())
+            )
+        if not budgets:
+            return config
+
+        groups = group_by_class(constituents)
+        sleeves = [
+            Sleeve(
+                name=asset_class_label(k),
+                constituents=tuple(groups[k]),
+                budget=float(share),
+                config=replace(
+                    config,
+                    method=str(methods.get(k, config.method)),
+                    hedge_override=float(hedges.get(k, 0.0)),
+                    sleeves=None,
+                ),
+            )
+            for k, share in budgets.items()
+            if groups.get(k)
+        ]
+        if len(sleeves) == 1:
+            return sleeves[0].config
+        return replace(config, sleeves=tuple(sleeves))
 
     @property
     def is_optimizer(self) -> bool:
@@ -332,50 +361,73 @@ class StrategyConfig:
     def uses_lookback(self) -> bool:
         return method_uses_lookback(self.method)
 
-    def saved_fields(self) -> Dict[str, object]:
-        """The settings as written to disk; per-class settings as plain mappings."""
-        fields: Dict[str, object] = {f: getattr(self, f) for f in CONFIG_FIELDS}
-        fields["class_budgets"] = self.budgets or None
-        fields["mode"] = self.mode
-        fields["base_currency"] = self.base_currency
-        fields["hedge_ratios"] = dict(self.hedge_ratios or ()) or None
-        fields["hedge_cost_bp"] = self.hedge_cost_bp
-        fields["class_methods"] = dict(self.class_methods or ()) or None
-        fields["rebalance_band"] = self.rebalance_band
-        return fields
+    @property
+    def has_sleeves(self) -> bool:
+        return bool(self.sleeves)
 
-    def hedge_ratio_for(self, asset_class: str) -> float:
-        return float(dict(self.hedge_ratios or ()).get(asset_class, 0.0))
-
-    def method_for(self, asset_class: str) -> str:
-        return dict(self.class_methods or ()).get(asset_class, self.method)
+    @property
+    def parts(self) -> Tuple["StrategyConfig", ...]:
+        """The construction of every sleeve, or this config alone."""
+        if not self.sleeves:
+            return (self,)
+        return tuple(s.config for s in self.sleeves)
 
     @property
     def methods_in_use(self) -> Tuple[str, ...]:
-        """Every construction method this strategy runs, the default first."""
-        extra = [m for _, m in (self.class_methods or ()) if m != self.method]
-        return tuple(dict.fromkeys([self.method, *extra]))
+        return tuple(dict.fromkeys(c.method for c in self.parts))
 
     @property
     def uses_optimizer(self) -> bool:
         return any(is_optimizer_method(m) for m in self.methods_in_use)
 
     @property
-    def has_class_budgets(self) -> bool:
-        return bool(self.class_budgets)
-
-    @property
     def budgets(self) -> Dict[str, float]:
-        return dict(self.class_budgets or ())
+        """Sleeve name -> share of the book, summing to one."""
+        if not self.sleeves:
+            return {}
+        total = sum(s.budget for s in self.sleeves) or 1.0
+        return {s.name: s.budget / total for s in self.sleeves}
 
     @property
     def effective_lookback(self) -> int:
-        """
-        Optimizers estimate on the covariance window, simple rules on their own.
+        """Optimizers estimate on the covariance window, simple rules on their own."""
+        return self.cov_lookback if self.is_optimizer else self.lookback
 
-        When classes mix the two, every class uses the covariance window.
-        """
-        return self.cov_lookback if self.uses_optimizer else self.lookback
+    def hedge_for(self, currency: str) -> float:
+        """Share of holdings in ``currency`` hedged: the override, else the book's."""
+        if currency == self.base_currency:
+            return 0.0
+        if self.hedge_override is not None:
+            return float(self.hedge_override)
+        return float(dict(self.currency_hedges or ()).get(currency, 0.0))
+
+    def for_sleeve(self, sleeve: "Sleeve") -> "StrategyConfig":
+        """A sleeve's construction on this book's dates, rebalance and currency."""
+        return replace(
+            sleeve.config,
+            rebalance=self.rebalance,
+            start=self.start,
+            end=self.end,
+            base_currency=self.base_currency,
+            currency_hedges=self.currency_hedges,
+            hedge_cost_bp=self.hedge_cost_bp,
+            rebalance_band=None,
+            sleeves=None,
+        )
+
+    def saved_fields(self) -> Dict[str, object]:
+        """The settings as written to disk."""
+        fields: Dict[str, object] = {f: getattr(self, f) for f in CONFIG_FIELDS}
+        fields["base_currency"] = self.base_currency
+        fields["currency_hedges"] = dict(self.currency_hedges or ()) or None
+        fields["hedge_override"] = self.hedge_override
+        fields["hedge_cost_bp"] = self.hedge_cost_bp
+        fields["rebalance_band"] = self.rebalance_band
+        fields["target_duration"] = self.target_duration
+        fields["sleeves"] = (
+            [s.saved_fields() for s in self.sleeves] if self.sleeves else None
+        )
+        return fields
 
     def index_kwargs(self) -> Dict[str, object]:
         """Construction arguments for build_index_series, minus stocks and dates."""
@@ -392,8 +444,56 @@ class StrategyConfig:
             "short_borrow_cost": self.short_borrow_cost,
             "risk_free_rate": self.risk_free_rate,
             "cov_estimator": self.cov_estimator,
-            "sleeve_methods": dict(self.class_methods) if self.class_methods else None,
-            "rebalance_band": self.rebalance_band,
+            "target_duration": self.target_duration,
+        }
+
+
+@dataclass(frozen=True)
+class Sleeve:
+    """
+    One semi-portfolio: its names, its construction and its share of the book.
+
+    The construction's dates, rebalance and currency are the book's; see
+    StrategyConfig.for_sleeve.
+    """
+
+    name: str
+    constituents: Tuple[str, ...]
+    budget: float
+    config: StrategyConfig
+    #: Holds no names: earns the base currency's overnight rate.
+    cash: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "constituents", tuple(self.constituents))
+        object.__setattr__(self, "budget", float(self.budget))
+        # Dates and nesting belong to the book; kept out so equal sleeves
+        # compare equal however they were built.
+        object.__setattr__(
+            self, "config", replace(self.config, start=None, end=None, sleeves=None)
+        )
+
+    @classmethod
+    def from_saved(cls, payload: Mapping[str, object]) -> "Sleeve":
+        return cls(
+            name=str(payload["name"]),
+            constituents=tuple(payload.get("constituents") or ()),
+            budget=float(payload.get("budget", 0.0)),
+            config=StrategyConfig.from_saved(
+                {**dict(payload["config"]), "start": None, "end": None}
+            ),
+            cash=bool(payload.get("cash", False)),
+        )
+
+    def saved_fields(self) -> Dict[str, object]:
+        config = self.config.saved_fields()
+        config.pop("sleeves", None)
+        return {
+            "name": self.name,
+            "constituents": list(self.constituents),
+            "budget": self.budget,
+            "config": config,
+            "cash": self.cash,
         }
 
 
