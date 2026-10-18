@@ -71,7 +71,20 @@ CONFIG_FIELDS = (
 
 # Settings added after files were first written. Saved like the rest, but a file
 # without them still loads, falling back to the field's default.
-OPTIONAL_CONFIG_FIELDS = ("class_budgets",)
+OPTIONAL_CONFIG_FIELDS = (
+    "class_budgets",
+    "mode",
+    "base_currency",
+    "hedge_ratios",
+    "hedge_cost_bp",
+    "class_methods",
+    "rebalance_band",
+)
+
+#: The two ways of using the Forge. A strategy runs one method over one pool
+#: of names; an allocation sets a share per asset class, a method inside each,
+#: and how currencies are handled.
+MODES: Dict[str, str] = {"strategy": "Strategy", "allocation": "Allocation"}
 
 SAVED_CONFIG_FIELDS = CONFIG_FIELDS + OPTIONAL_CONFIG_FIELDS
 
@@ -97,6 +110,22 @@ def normalize_class_budgets(
 
     ordered = tuple(
         (k, shares[k]) for k in ASSET_CLASSES if k in shares and shares[k] > 0.0
+    )
+    return ordered or None
+
+
+def _class_pairs(
+    pairs: Union[None, Mapping[str, object], Sequence[Sequence[object]]],
+    cast,
+    keep=lambda v: True,
+) -> Optional[Tuple[Tuple[str, object], ...]]:
+    """Per-class settings in canonical form: known classes, menu order."""
+    if not pairs:
+        return None
+    items = pairs.items() if isinstance(pairs, Mapping) else pairs
+    values = {str(k): cast(v) for k, v in items}
+    ordered = tuple(
+        (k, values[k]) for k in ASSET_CLASSES if k in values and keep(values[k])
     )
     return ordered or None
 
@@ -186,12 +215,34 @@ class StrategyConfig:
     #: Optional share of the invested book per asset class. None runs the method
     #: across every holding at once, as before class budgets existed.
     class_budgets: Optional[ClassBudgets] = None
+    #: "strategy" or "allocation"; see MODES.
+    mode: str = "strategy"
+    #: The currency returns are measured in. Foreign holdings are converted.
+    base_currency: str = "USD"
+    #: Per asset class, the share of foreign-currency holdings hedged (0 to 1).
+    hedge_ratios: Optional[Tuple[Tuple[str, float], ...]] = None
+    #: Hedging cost above the rate differential, bp a year.
+    hedge_cost_bp: float = 0.0
+    #: Per asset class, the construction method used inside it.
+    class_methods: Optional[Tuple[Tuple[str, str], ...]] = None
+    #: Rebalance also whenever a class drifts this far from its target (fraction).
+    rebalance_band: Optional[float] = None
 
     def __post_init__(self) -> None:
-        # JSON hands budgets back as lists; held canonical so equal configs hash
+        # JSON hands these back as lists; held canonical so equal configs hash
         # equal and the backtest cache recognises them.
         object.__setattr__(
             self, "class_budgets", normalize_class_budgets(self.class_budgets)
+        )
+        object.__setattr__(self, "hedge_ratios", _class_pairs(self.hedge_ratios, float))
+        object.__setattr__(
+            self,
+            "class_methods",
+            _class_pairs(self.class_methods, str, keep=lambda m: m in METHODS),
+        )
+        band = self.rebalance_band
+        object.__setattr__(
+            self, "rebalance_band", float(band) if band and band > 0 else None
         )
 
     @classmethod
@@ -214,6 +265,12 @@ class StrategyConfig:
         rf_rate_pct: Optional[float],
         cov_estimator: Optional[str],
         class_budgets_pct: Optional[Mapping[str, float]] = None,
+        mode: str = "strategy",
+        base_currency: str = "USD",
+        hedge_ratios_pct: Optional[Mapping[str, float]] = None,
+        hedge_cost_bp: float = 0.0,
+        class_methods: Optional[Mapping[str, str]] = None,
+        rebalance_band_pct: Optional[float] = None,
     ) -> "StrategyConfig":
         method = method if method in METHODS else DEFAULT_METHOD
         form = optimizer_form if optimizer_form in OPTIMIZER_FORMS else "long_only"
@@ -255,6 +312,16 @@ class StrategyConfig:
                 if class_budgets_pct
                 else None
             ),
+            mode=mode if mode in MODES else "strategy",
+            base_currency=base_currency or "USD",
+            hedge_ratios=(
+                {k: float(v) / 100.0 for k, v in hedge_ratios_pct.items()}
+                if hedge_ratios_pct
+                else None
+            ),
+            hedge_cost_bp=float(hedge_cost_bp or 0.0),
+            class_methods=dict(class_methods) if class_methods else None,
+            rebalance_band=_pct(rebalance_band_pct, 0.0) or None,
         )
 
     @property
@@ -266,10 +333,32 @@ class StrategyConfig:
         return method_uses_lookback(self.method)
 
     def saved_fields(self) -> Dict[str, object]:
-        """The settings as written to disk; budgets as a plain mapping."""
+        """The settings as written to disk; per-class settings as plain mappings."""
         fields: Dict[str, object] = {f: getattr(self, f) for f in CONFIG_FIELDS}
         fields["class_budgets"] = self.budgets or None
+        fields["mode"] = self.mode
+        fields["base_currency"] = self.base_currency
+        fields["hedge_ratios"] = dict(self.hedge_ratios or ()) or None
+        fields["hedge_cost_bp"] = self.hedge_cost_bp
+        fields["class_methods"] = dict(self.class_methods or ()) or None
+        fields["rebalance_band"] = self.rebalance_band
         return fields
+
+    def hedge_ratio_for(self, asset_class: str) -> float:
+        return float(dict(self.hedge_ratios or ()).get(asset_class, 0.0))
+
+    def method_for(self, asset_class: str) -> str:
+        return dict(self.class_methods or ()).get(asset_class, self.method)
+
+    @property
+    def methods_in_use(self) -> Tuple[str, ...]:
+        """Every construction method this strategy runs, the default first."""
+        extra = [m for _, m in (self.class_methods or ()) if m != self.method]
+        return tuple(dict.fromkeys([self.method, *extra]))
+
+    @property
+    def uses_optimizer(self) -> bool:
+        return any(is_optimizer_method(m) for m in self.methods_in_use)
 
     @property
     def has_class_budgets(self) -> bool:
@@ -281,8 +370,12 @@ class StrategyConfig:
 
     @property
     def effective_lookback(self) -> int:
-        """Optimizers estimate on the covariance window, simple rules on their own."""
-        return self.cov_lookback if self.is_optimizer else self.lookback
+        """
+        Optimizers estimate on the covariance window, simple rules on their own.
+
+        When classes mix the two, every class uses the covariance window.
+        """
+        return self.cov_lookback if self.uses_optimizer else self.lookback
 
     def index_kwargs(self) -> Dict[str, object]:
         """Construction arguments for build_index_series, minus stocks and dates."""
@@ -299,6 +392,8 @@ class StrategyConfig:
             "short_borrow_cost": self.short_borrow_cost,
             "risk_free_rate": self.risk_free_rate,
             "cov_estimator": self.cov_estimator,
+            "sleeve_methods": dict(self.class_methods) if self.class_methods else None,
+            "rebalance_band": self.rebalance_band,
         }
 
 

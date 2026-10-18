@@ -369,7 +369,29 @@ def build_daily_funding_series(
     index: pd.Index,
     borrow_spread_ann: float = 0.0,
     day_count: int = 252,
+    rate: Optional[pd.Series] = None,
 ) -> pd.DataFrame:
+    """
+    Daily cash and borrow rates on ``index``.
+
+    USD by default (SOFR, fed funds before it). Pass ``rate`` (annual percent)
+    to fund in another currency, such as €STR for a EUR-based book.
+    """
+    if rate is not None:
+        target = pd.to_datetime(index)
+        base = rate.reindex(rate.index.union(target)).ffill().reindex(target).bfill()
+        return pd.concat(
+            [
+                _annual_percent_to_daily_decimal(base, basis=day_count).rename(
+                    "cash_rate"
+                ),
+                _annual_percent_to_daily_decimal(
+                    base + float(borrow_spread_ann), basis=day_count
+                ).rename("borrow_rate"),
+            ],
+            axis=1,
+        )
+
     base_col = "USD_SOFR"
 
     if base_col not in funding_df.columns:

@@ -30,7 +30,9 @@ class FundingSpec:
 
 
 def _ecb_aaa(tenor: str) -> str:
-    return f"ecb:YC/B.U2.EUR.4F.G_N_A.SV_C_YM.SR_{tenor}"
+    # Par yields (PY_), not spot rates (SR_): the synthetic bonds price par
+    # bonds, so a par curve is what they need.
+    return f"ecb:YC/B.U2.EUR.4F.G_N_A.SV_C_YM.PY_{tenor}"
 
 
 def _bund(code: str) -> str:

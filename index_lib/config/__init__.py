@@ -5,6 +5,7 @@ from .asset_classes import (
     asset_class_label,
     asset_class_of,
     classes_present,
+    currency_of,
     describe,
     group_by_class,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "asset_class_of",
     "benchmark_group",
     "classes_present",
+    "currency_of",
     "describe",
     "group_by_class",
     "resolve_universe_key",

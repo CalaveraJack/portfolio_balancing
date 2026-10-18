@@ -15,13 +15,17 @@ import numpy as np
 import pandas as pd
 
 from index_lib.allocation import SleevePlan, resolve_sleeves
+from index_lib.config import asset_class_of, currency_of
 from index_lib.core import (
     apply_vol_target_overlay,
     build_index_series,
     compute_stats_from_price_series,
 )
+from index_lib.core.fx import convert_prices
 from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.loaders import build_daily_funding_series
+from index_lib.loaders.fx_cache import FXData
+from index_lib.loaders.rates_cache import FEDFUNDS_COLUMN
 from index_lib.simulation import (
     build_mc_funding_fixed_last_matrix,
     simulate_bootstrap_funding_paths,
@@ -71,7 +75,7 @@ class BacktestResult:
 def _market_caps_for(
     data: UniverseData, cfg: StrategyConfig, selection: UniverseSelection
 ) -> Optional[pd.DataFrame]:
-    if cfg.method != "cap_weight" or selection.is_empty:
+    if "cap_weight" not in cfg.methods_in_use or selection.is_empty:
         return None
     return data.market_caps.reindex(columns=list(selection.constituents))
 
@@ -90,21 +94,98 @@ def _sleeves_for(cfg: StrategyConfig, selection: UniverseSelection):
     return plan.sleeves if plan is not None else None
 
 
+def short_rate(
+    currency: str, rates: RatesInspectorData, fx: Optional[FXData]
+) -> Optional[pd.Series]:
+    """A currency's overnight rate in annual percent, or None when not loaded."""
+    if currency == "USD":
+        funding = rates.funding
+        if "USD_SOFR" not in funding.columns:
+            return None
+        rate = funding["USD_SOFR"]
+        if FEDFUNDS_COLUMN in funding.columns:
+            rate = rate.combine_first(funding[FEDFUNDS_COLUMN])
+        return rate.dropna()
+    if currency == "EUR" and fx is not None and not fx.eur_rate.empty:
+        return fx.eur_rate
+    return None
+
+
+def foreign_holdings(cfg: StrategyConfig, selection: UniverseSelection) -> list:
+    return [t for t in selection.constituents if currency_of(t) != cfg.base_currency]
+
+
+def base_currency_close(
+    data: UniverseData,
+    rates: RatesInspectorData,
+    fx: Optional[FXData],
+    cfg: StrategyConfig,
+    selection: UniverseSelection,
+) -> pd.DataFrame:
+    """
+    The price panel restated in the strategy's base currency.
+
+    Holdings already in the base currency pass through; foreign ones are
+    converted at the ECB rate and hedged by their class's hedge ratio.
+    """
+    foreign = foreign_holdings(cfg, selection)
+    if not foreign:
+        return data.close
+    if fx is None or fx.is_empty:
+        raise ValueError(
+            f"{', '.join(foreign)} are not in {cfg.base_currency}, and no FX data "
+            "is loaded. Reload with a refreshing data mode to fetch it."
+        )
+
+    base_rate = short_rate(cfg.base_currency, rates, fx)
+    close = data.close.copy()
+    for ticker in foreign:
+        currency = currency_of(ticker)
+        foreign_rate = short_rate(currency, rates, fx)
+        close[ticker] = convert_prices(
+            data.close[ticker],
+            fx.rate(cfg.base_currency, currency),
+            base_rate if base_rate is not None else pd.Series(dtype=float),
+            foreign_rate if foreign_rate is not None else pd.Series(dtype=float),
+            hedge_ratio=cfg.hedge_ratio_for(asset_class_of(ticker)),
+            cost_bp=cfg.hedge_cost_bp,
+        ).reindex(close.index)
+    return close
+
+
+def _funding(rates, fx, cfg, index, spread_pct):
+    """Cash and borrow rates in the strategy's base currency."""
+    rate = (
+        None if cfg.base_currency == "USD" else short_rate(cfg.base_currency, rates, fx)
+    )
+    return build_daily_funding_series(
+        funding_df=rates.funding,
+        index=index,
+        borrow_spread_ann=spread_pct,
+        day_count=DAY_COUNT,
+        rate=rate,
+    )
+
+
 def run_backtest(
     data: UniverseData,
     rates: RatesInspectorData,
     cfg: StrategyConfig,
     selection: UniverseSelection,
     overlay_cfg: OverlayConfig,
+    fx: Optional[FXData] = None,
 ) -> BacktestResult:
     """Build the index series and, when enabled, apply the vol-target overlay."""
+    close = base_currency_close(data, rates, fx, cfg, selection)
+
     # The uninvested part of the book earns the cash rate, so the backtest needs
     # it even when the volatility overlay is switched off.
-    funding = build_daily_funding_series(
-        funding_df=rates.funding,
-        index=data.close.loc[cfg.start : cfg.end].index,
-        borrow_spread_ann=overlay_cfg.borrow_spread_ann,
-        day_count=DAY_COUNT,
+    funding = _funding(
+        rates,
+        fx,
+        cfg,
+        close.loc[cfg.start : cfg.end].index,
+        overlay_cfg.borrow_spread_ann,
     )
 
     # Shorting is financed at SOFR plus the configured spread, exactly as the
@@ -112,11 +193,12 @@ def run_backtest(
     # funding loader expects annual percent.
     short_rates = None
     if cfg.optimizer_form == "long_short":
-        short_rates = build_daily_funding_series(
-            funding_df=rates.funding,
-            index=data.close.loc[cfg.start : cfg.end].index,
-            borrow_spread_ann=cfg.short_borrow_cost * 100.0,
-            day_count=DAY_COUNT,
+        short_rates = _funding(
+            rates,
+            fx,
+            cfg,
+            close.loc[cfg.start : cfg.end].index,
+            cfg.short_borrow_cost * 100.0,
         )["borrow_rate"]
 
     (
@@ -126,7 +208,7 @@ def run_backtest(
         daily_weights,
         optimizer_diagnostics,
     ) = build_index_series(
-        close=data.close,
+        close=close,
         constituents=list(selection.constituents),
         start=cfg.start,
         end=cfg.end,
@@ -141,11 +223,8 @@ def run_backtest(
     overlay_df = None
 
     if not index_level.empty and overlay_cfg.enabled:
-        funding_daily = build_daily_funding_series(
-            funding_df=rates.funding,
-            index=base_returns.index,
-            borrow_spread_ann=overlay_cfg.borrow_spread_ann,
-            day_count=DAY_COUNT,
+        funding_daily = _funding(
+            rates, fx, cfg, base_returns.index, overlay_cfg.borrow_spread_ann
         )
 
         vc_returns, _, _, overlay_df = apply_vol_target_overlay(
@@ -235,6 +314,7 @@ def run_monte_carlo(
     selection: UniverseSelection,
     overlay_cfg: OverlayConfig,
     mc: MonteCarloConfig,
+    fx: Optional[FXData] = None,
 ) -> MonteCarloResult:
     """
     Forward-simulate the configured strategy.
@@ -262,13 +342,13 @@ def run_monte_carlo(
         f" / {mc.funding_method}" if mc.funding_model == "mc" else ""
     )
 
-    if cfg.is_optimizer or cfg.has_class_budgets:
+    if cfg.uses_optimizer or cfg.has_class_budgets or foreign_holdings(cfg, selection):
         # Bootstrap the realized strategy returns rather than pretending we
         # re-optimize on every simulated constituent path. The constituent
         # engines apply one weighting rule across every name, so a book built
         # class by class takes this route too.
         _, _, base_returns, _, _ = build_index_series(
-            close=data.close,
+            close=base_currency_close(data, rates, fx, cfg, selection),
             constituents=list(selection.constituents),
             start=cfg.start,
             end=cfg.end,

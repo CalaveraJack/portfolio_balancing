@@ -57,7 +57,7 @@ def test_bund_maturity_codes_are_zero_padded():
 
 def test_curves_assemble_into_panels_and_failures_are_reported(tmp_path, monkeypatch):
     def _stub(source, frequency):
-        if "SR_30Y" in source:
+        if "PY_30Y" in source:
             raise ValueError("provider down")
         return _daily([1.0, 1.1, 1.2])
 

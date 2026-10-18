@@ -152,6 +152,7 @@ def _target_weights(
     weight_kwargs: Dict[str, object],
     sleeves: Optional[Dict[str, Tuple[Sequence[str], float]]],
     initial: bool = False,
+    sleeve_methods: Optional[Dict[str, str]] = None,
 ) -> Tuple[pd.Series, Optional[Dict[str, object]]]:
     """
     Target weights for the whole book.
@@ -159,7 +160,8 @@ def _target_weights(
     Without class budgets the method runs on every holding at once. With them it
     runs inside each class on its own, as though that class were the whole book,
     and the result is scaled to the class's share of the invested fraction. Caps
-    and limits therefore apply within a class.
+    and limits therefore apply within a class. ``sleeve_methods`` gives a class
+    its own method; classes not in it use ``method``.
     """
     if not sleeves:
         return _solve(
@@ -185,18 +187,19 @@ def _target_weights(
         columns = [c for c in names if c in hist.columns]
         if not columns or budget <= 0:
             continue
+        class_method = (sleeve_methods or {}).get(asset_class, method)
 
         if len(columns) == 1:
             # One holding takes the whole budget; there is nothing to optimise.
             w = pd.Series(1.0, index=columns)
             report = None
-            if method in OPTIMIZER_METHODS and not initial:
+            if class_method in OPTIMIZER_METHODS and not initial:
                 report = _blank_diagnostics("one holding; no optimisation needed")
                 report.update(success=True, net_exposure=1.0, gross_exposure=1.0)
         else:
             w, report = _solve(
                 hist[columns],
-                method,
+                class_method,
                 lookback=lookback,
                 weight_kwargs=sleeve_kwargs,
                 initial=initial,
@@ -208,6 +211,31 @@ def _target_weights(
 
     weights = pd.concat(parts) if parts else pd.Series(dtype=float)
     return weights, (_combine_reports(reports, invested) if reports else None)
+
+
+def _drifted(
+    current: pd.Series,
+    target: pd.Series,
+    sleeves: Optional[Dict[str, Tuple[Sequence[str], float]]],
+    band: float,
+) -> bool:
+    """
+    Has the book drifted further than ``band`` from its last target?
+
+    Measured per class when the book is built by class (that is what a budget
+    promises), per holding otherwise.
+    """
+    if target is None or target.empty or current.empty:
+        return False
+    if sleeves:
+        for names, _ in sleeves.values():
+            have = float(current.reindex(names).fillna(0.0).sum())
+            want = float(target.reindex(names).fillna(0.0).sum())
+            if abs(have - want) > band:
+                return True
+        return False
+    gap = (current.reindex(target.index).fillna(0.0) - target).abs()
+    return bool((gap > band).any())
 
 
 def build_index_series(
@@ -233,6 +261,8 @@ def build_index_series(
     cash_rates: Optional[pd.Series] = None,
     short_rates: Optional[pd.Series] = None,
     sleeves: Optional[Dict[str, Tuple[Sequence[str], float]]] = None,
+    sleeve_methods: Optional[Dict[str, str]] = None,
+    rebalance_band: Optional[float] = None,
 ) -> Tuple[pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
     """
     Backtest a long-only strategy with periodic rebalancing and daily weight drift.
@@ -246,8 +276,14 @@ def build_index_series(
       renormalizing weights.
     - With ``sleeves`` (class -> (holdings, share of the invested book)) the
       method runs inside each class and holdings outside every sleeve get no
-      weight.
+      weight. ``sleeve_methods`` sets a method per class.
+    - ``rebalance_band`` also rebalances on any day a class (or, without
+      sleeves, a holding) has drifted further than that from its target.
     """
+    methods_used = {method, *(sleeve_methods or {}).values()}
+    any_optimizer = bool(methods_used & OPTIMIZER_METHODS)
+    any_lookback = bool(methods_used & LOOKBACK_METHODS)
+    any_cap_weight = "cap_weight" in methods_used
     if optimizer_form not in {"long_only", "long_short"}:
         raise ValueError("optimizer_form must be 'long_only' or 'long_short'.")
 
@@ -283,7 +319,7 @@ def build_index_series(
 
     caps_series_init = None
 
-    if method == "cap_weight" and market_caps is not None:
+    if any_cap_weight and market_caps is not None:
         first_date = px.index[0]
 
         if first_date in market_caps.index:
@@ -313,14 +349,19 @@ def build_index_series(
         ),
         sleeves=sleeves,
         initial=True,
+        sleeve_methods=sleeve_methods,
     )
+    target = w.copy()
 
     level = float(base_level)
     levels: List[Tuple[pd.Timestamp, float]] = []
     base_ret_list: List[Tuple[pd.Timestamp, float]] = []
 
     for dt in px.index:
-        if dt in rb_dates:
+        drifted = rebalance_band is not None and _drifted(
+            w, target, sleeves, rebalance_band
+        )
+        if dt in rb_dates or drifted:
             hist_end = px.index.get_loc(dt)
 
             if hist_end == 0:
@@ -328,14 +369,14 @@ def build_index_series(
             else:
                 hist_px = px.iloc[:hist_end]
 
-                if method in LOOKBACK_METHODS:
+                if any_lookback:
                     hist = hist_px.tail(max(lookback + 1, 2))
                 else:
                     hist = hist_px
 
             caps_series = None
 
-            if method == "cap_weight" and market_caps is not None:
+            if any_cap_weight and market_caps is not None:
                 if dt in market_caps.index:
                     caps_series = market_caps.loc[dt]
                 else:
@@ -371,8 +412,10 @@ def build_index_series(
                 lookback=lookback,
                 weight_kwargs=weight_kwargs,
                 sleeves=sleeves,
+                sleeve_methods=sleeve_methods,
             )
-            if method in OPTIMIZER_METHODS:
+            target = w.copy()
+            if any_optimizer:
                 optimizer_records[dt] = report or _blank_diagnostics(
                     "no holdings to optimise"
                 )

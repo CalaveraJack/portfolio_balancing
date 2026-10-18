@@ -31,6 +31,9 @@ DEFAULT_ASSET_CLASS = "equity"
 class Instrument:
     asset_class: str
     description: str
+    #: The currency it is priced in. Every Yahoo ticker in the shipped sets is
+    #: a US listing; synthetic euro bonds are in EUR.
+    currency: str = "USD"
 
 
 INSTRUMENTS: Dict[str, Instrument] = {
@@ -82,7 +85,7 @@ INSTRUMENTS: Dict[str, Instrument] = {
     "GLD": Instrument("gold", "Gold"),
     # Synthetic constant-maturity government bonds, priced from yield curves.
     **{
-        bond.id: Instrument("govt_bonds", bond.label)
+        bond.id: Instrument("govt_bonds", bond.label, bond.currency)
         for bond in SYNTHETIC_BONDS.values()
     },
 }
@@ -91,6 +94,11 @@ INSTRUMENTS: Dict[str, Instrument] = {
 def asset_class_of(ticker: str) -> str:
     instrument = INSTRUMENTS.get(ticker)
     return instrument.asset_class if instrument else DEFAULT_ASSET_CLASS
+
+
+def currency_of(ticker: str) -> str:
+    instrument = INSTRUMENTS.get(ticker)
+    return instrument.currency if instrument else "USD"
 
 
 def asset_class_label(key: str) -> str:
