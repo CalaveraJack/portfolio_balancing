@@ -23,6 +23,7 @@ from index_lib.datasets import (
     load_rates_data,
 )
 from index_lib.loaders.curve_cache import CurveData
+from index_lib.loaders.fx_cache import FXData, load_fx_cached
 from index_lib.loaders.macro_cache import MacroData
 from index_lib.strategy import OverlayConfig, StrategyConfig, UniverseSelection
 
@@ -83,8 +84,14 @@ def run_backtest(
     selection: UniverseSelection,
     overlay_cfg: OverlayConfig,
     token: str,
+    _fx: Optional[FXData] = None,
 ) -> runner.BacktestResult:
-    return runner.run_backtest(_data, _rates, cfg, selection, overlay_cfg)
+    return runner.run_backtest(_data, _rates, cfg, selection, overlay_cfg, fx=_fx)
+
+
+@st.cache_resource(show_spinner="Loading FX rates...")
+def get_fx_data(*, data_dir: str, cache_mode: str) -> FXData:
+    return load_fx_cached(data_dir=data_dir, cache_mode=cache_mode)
 
 
 @st.cache_resource(show_spinner="Loading benchmarks...")

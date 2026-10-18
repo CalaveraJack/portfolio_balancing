@@ -15,6 +15,7 @@ import streamlit as st
 from index_lib.config.macro import macro_catalogue
 from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.loaders.curve_cache import CurveData
+from index_lib.loaders.fx_cache import FXData
 from index_lib.loaders.macro_cache import MacroData
 
 DATA_MODE_LABELS = {
@@ -61,6 +62,7 @@ def status_frame(
     rates: RatesInspectorData,
     curves: CurveData,
     macro: MacroData,
+    fx: FXData,
 ) -> pd.DataFrame:
     """
     One row per source: its latest observation, and a mark for failures.
@@ -79,6 +81,11 @@ def status_frame(
             _state(len(curves.failures())),
         ),
         (
+            "FX",
+            _date(fx.per_eur.index.max()) if not fx.is_empty else "-",
+            _state(len(fx.failures())),
+        ),
+        (
             f"Macro {len(macro.series)}/{total_macro}",
             _date(_latest(list(macro.series.values()))),
             _state(len(macro.failures)),
@@ -92,16 +99,17 @@ def render_status(
     rates: RatesInspectorData,
     curves: CurveData,
     macro: MacroData,
+    fx: FXData,
 ) -> None:
     st.dataframe(
-        status_frame(data, rates, curves, macro),
+        status_frame(data, rates, curves, macro, fx),
         hide_index=True,
         width="stretch",
     )
 
     refreshed = macro.last_refresh or curves.last_refresh
     st.caption(
-        f"Prices: Yahoo · SOFR: FRED · Curves: FRED, ECB, Bundesbank · "
+        f"Prices: Yahoo · SOFR: FRED · Curves: FRED, ECB, Bundesbank · FX: ECB · "
         f"Macro: FRED, ECB, Eurostat, Bundesbank. Last refresh {refreshed or 'never'}."
     )
 

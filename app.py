@@ -60,7 +60,7 @@ def sidebar() -> Sidebar:
         st.markdown("### Working set")
 
         universe_key = st.selectbox(
-            "Stock set",
+            "Asset set",
             key="universe_key",
             options=list(UNIVERSES),
             index=list(UNIVERSES).index(DEFAULT_UNIVERSE_KEY),
@@ -128,6 +128,7 @@ def main() -> None:
     # Curves first: the synthetic bonds in a stock set are priced from them.
     curve_data = cache.get_curve_data(data_dir=DATA_DIR, cache_mode=side.cache_mode)
     macro_data = cache.get_macro_data(data_dir=DATA_DIR, cache_mode=side.cache_mode)
+    fx_data = cache.get_fx_data(data_dir=DATA_DIR, cache_mode=side.cache_mode)
 
     try:
         data = cache.get_universe_data(
@@ -148,17 +149,19 @@ def main() -> None:
 
     side.range_slot.caption(settings.range_caption(data))
     with side.status_slot:
-        settings.render_status(data, rates_data, curve_data, macro_data)
+        settings.render_status(data, rates_data, curve_data, macro_data, fx_data)
 
     inspection_tab, forge_tab, compare_tab = st.tabs(
         ["Data Inspection", "Strategy Forge", "Compare"]
     )
 
     with inspection_tab:
-        inspection.render(data, curve_data, macro_data, side.cache_mode)
+        inspection.render(
+            data, curve_data, macro_data, side.cache_mode, fx_data, rates_data
+        )
 
     with forge_tab:
-        forge.render(data, rates_data, side.universe_key, side.cache_mode)
+        forge.render(data, rates_data, side.universe_key, side.cache_mode, fx_data)
 
     with compare_tab:
         comparison.render(

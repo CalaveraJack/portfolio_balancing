@@ -9,18 +9,25 @@ from __future__ import annotations
 
 import streamlit as st
 
-from index_lib.datasets import UniverseData
+from index_lib.datasets import RatesInspectorData, UniverseData
 from index_lib.loaders.curve_cache import CurveData
+from index_lib.loaders.fx_cache import FXData
 from index_lib.loaders.macro_cache import MacroData
+from index_lib.ui import fx as fx_view
 from index_lib.ui import macro, rates, universe
 from index_lib.ui.theme import screen
 from index_lib.ui.window import DEFAULT_WINDOW, WINDOWS
 
-VIEWS = ("Rates", "Universe", "Macro")
+VIEWS = ("Rates", "FX", "Universe", "Macro")
 
 
 def render(
-    data: UniverseData, curves: CurveData, macro_data: MacroData, cache_mode: str
+    data: UniverseData,
+    curves: CurveData,
+    macro_data: MacroData,
+    cache_mode: str,
+    fx: FXData,
+    rates_data: RatesInspectorData,
 ) -> None:
     screen("inspection")
 
@@ -47,6 +54,8 @@ def render(
 
     if view == "Rates":
         rates.render(curves, window)
+    elif view == "FX":
+        fx_view.render(fx, rates_data, curves, window)
     elif view == "Universe":
         universe.render(data, window)
     else:

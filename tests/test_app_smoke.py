@@ -17,6 +17,7 @@ INSPECTION_VIEWS = {
         "univ_view",
         ("Overview", "Performance", "Correlation", "Single name"),
     ),
+    "FX": (None, ()),
     "Macro": (None, ()),
 }
 
@@ -79,6 +80,20 @@ def test_settings_show_the_data_status(app: AppTest):
 def test_app_renders_charts_and_tables(app: AppTest):
     _clean(app)
     assert len(app.dataframe) >= 3
+
+
+def test_allocation_mode_builds_a_hedged_multi_asset_book():
+    """A fresh app on the long multi-asset set, in allocation mode, in EUR."""
+    at = AppTest.from_file(APP, default_timeout=300)
+    at.session_state["universe_key"] = "multi_asset_long"
+    at.session_state["forge_mode"] = "allocation"
+    at.run()
+    _clean(at)
+
+    at.session_state["forge_base_ccy"] = "EUR"
+    at.run()
+    _clean(at)
+    assert any("Allocation" in m.value for m in at.markdown)
 
 
 def test_monte_carlo_button_runs(app: AppTest):

@@ -21,14 +21,18 @@ from index_lib.config import (
     asset_class_label,
     asset_class_of,
     classes_present,
+    currency_of,
     describe,
     universe_label,
     universe_tickers,
 )
+from index_lib.config.fx import BASE_CURRENCIES
 from index_lib.datasets import RatesInspectorData, UniverseData
+from index_lib.loaders.fx_cache import FXData
 from index_lib.strategy import (
     COV_ESTIMATORS,
     METHODS,
+    MODES,
     OPTIMIZER_FORMS,
     REBALANCE_FREQUENCIES,
     MonteCarloConfig,
@@ -48,18 +52,37 @@ DEFAULT_CONSTITUENT_COUNT = 6
 MC_SESSION_KEY = "mc_result"
 OPEN_RUN_KEY = "_open_run"
 
-#: Simple presets for the budget table: class key -> percent.
-BUDGET_PRESETS: Dict[str, Dict[str, float]] = {
-    "60 / 40": {"equity": 60.0, "govt_bonds": 40.0},
-    "All weather": {
-        "equity": 30.0,
-        "govt_bonds": 55.0,
-        "commodities": 7.5,
-        "gold": 7.5,
-    },
-}
-
 HELP: Dict[str, str] = {
+    "mode": (
+        "Strategy: one construction method over one pool of names. "
+        "Allocation: a share of the book per asset class, a method inside each "
+        "class, and how foreign currencies are handled - the way multi-asset "
+        "portfolios are built."
+    ),
+    "allocation": (
+        "Each row is an asset class. Budget: its share of the invested book, "
+        "restored at every rebalance. Method: how the names inside it are "
+        "weighted. Hedged: how much of its non-base-currency holdings is "
+        "hedged with rolling forwards."
+    ),
+    "hedge": (
+        "Share of the foreign-currency value sold forward, rolled daily. 100% "
+        "removes the currency move and earns or pays the interest-rate "
+        "differential instead; 0% keeps the full currency exposure."
+    ),
+    "hedge_cost": (
+        "Cost of hedging above the rate differential: the cross-currency basis "
+        "and dealing costs, in basis points a year on the hedged amount."
+    ),
+    "base_ccy": (
+        "The currency results are measured in. Holdings in other currencies "
+        "are converted at ECB reference rates; cash earns this currency's "
+        "overnight rate (SOFR or €STR)."
+    ),
+    "band": (
+        "Also rebalance on any day a class drifts further than this from its "
+        "budget, between scheduled dates. 0 turns it off."
+    ),
     "method": (
         "Passive rules (CM.0.x) weight by a fixed rule. PM classics (CM.1.x) "
         "solve an optimisation on the covariance of returns."
@@ -180,7 +203,7 @@ MC_METHOD_HELP: Dict[str, str] = {
 
 
 def _mc_engines(cfg: StrategyConfig) -> Dict[str, str]:
-    if cfg.is_optimizer or cfg.has_class_budgets:
+    if cfg.uses_optimizer or cfg.has_class_budgets or cfg.base_currency != "USD":
         return {"strategy_bootstrap": "Strategy Return Bootstrap"}
     if cfg.method == "cap_weight":
         return {"bootstrap": "Constituent Bootstrap with Historical Caps"}
@@ -193,7 +216,7 @@ def _mc_engines(cfg: StrategyConfig) -> Dict[str, str]:
 def _mc_kind(cfg: StrategyConfig) -> str:
     if cfg.has_class_budgets:
         return "class_budgets"
-    if cfg.is_optimizer:
+    if cfg.uses_optimizer:
         return "optimizer"
     if cfg.method == "cap_weight":
         return "cap_weight"
@@ -510,7 +533,7 @@ def _sync_constituents_to_classes(available: Sequence[str]) -> None:
 
 
 def _holdings_controls(universe_key: str, available: List[str]) -> UniverseSelection:
-    section("Holdings")
+    section("1 · Holdings")
 
     _drop_unavailable_constituents(available)
 
@@ -569,92 +592,217 @@ def _holdings_controls(universe_key: str, available: List[str]) -> UniverseSelec
 # ---------------------------------------------------------------------------
 
 
-def _budget_controls(selection: UniverseSelection) -> Optional[Dict[str, float]]:
-    """
-    Optional fixed share per asset class, in percent, edited as one table.
+#: Starting points for an allocation, class key -> budget in percent. Scaled
+#: to 100% over the classes the book holds.
+ALLOCATION_PRESETS: Dict[str, Dict[str, float]] = {
+    "Conservative": {
+        "equity": 25.0,
+        "govt_bonds": 40.0,
+        "inflation_linked": 10.0,
+        "credit": 10.0,
+        "real_estate": 5.0,
+        "commodities": 5.0,
+        "gold": 5.0,
+    },
+    "Balanced": {
+        "equity": 45.0,
+        "govt_bonds": 25.0,
+        "inflation_linked": 5.0,
+        "credit": 10.0,
+        "real_estate": 5.0,
+        "commodities": 5.0,
+        "gold": 5.0,
+    },
+    "Growth": {
+        "equity": 65.0,
+        "govt_bonds": 10.0,
+        "credit": 10.0,
+        "real_estate": 7.5,
+        "commodities": 2.5,
+        "gold": 5.0,
+    },
+    "All weather": {
+        "equity": 30.0,
+        "govt_bonds": 55.0,
+        "commodities": 7.5,
+        "gold": 7.5,
+    },
+}
 
-    Offered for the classes picked, plus any class a loaded strategy budgeted
-    for, so loading a strategy never silently drops part of its rule.
+
+def _preset_budgets(values: Dict[str, float], classes: List[str]) -> Dict[str, float]:
+    """A preset over the classes held, scaled to 100%; equal if none match."""
+    held = {k: float(values.get(k, 0.0)) for k in classes}
+    total = sum(held.values())
+    if total <= 0:
+        return {k: 100.0 / len(classes) for k in classes}
+    return {k: v / total * 100.0 for k, v in held.items()}
+
+
+#: Bonds are usually held hedged, growth assets usually not.
+DEFAULT_HEDGED = {"govt_bonds": 100.0, "inflation_linked": 100.0, "credit": 100.0}
+
+METHOD_OPTIONS = {method_label(m): m for m in METHODS}
+
+
+def _allocation_rows(classes: List[str]) -> Dict[str, Dict[str, object]]:
+    """The allocation table's rows, from session state or sensible defaults."""
+    stored = dict(st.session_state.get(session.ALLOCATION_KEY) or {})
+    rows = {}
+    for k in classes:
+        row = dict(stored.get(k) or {})
+        rows[k] = {
+            "budget": float(
+                row.get("budget", 100.0 / len(classes) if not stored else 0.0)
+            ),
+            "method": row.get("method", "equal"),
+            "hedge": float(row.get("hedge", DEFAULT_HEDGED.get(k, 0.0))),
+        }
+    return rows
+
+
+def _allocation_table(
+    selection: UniverseSelection,
+) -> Optional[Dict[str, Dict[str, object]]]:
+    """
+    One table for the whole allocation: per class, its budget, the method used
+    inside it, and how much of its foreign-currency holdings are hedged.
     """
     picked = st.session_state.get(session.ASSET_CLASSES_KEY) or []
-    stored: Dict[str, float] = dict(st.session_state.get(session.BUDGETS_KEY) or {})
-    enabled_before = bool(st.session_state.get(session.BUDGETS_ON_KEY))
-    loaded = [k for k, v in stored.items() if enabled_before and v > 0]
-    classes = [k for k in ASSET_CLASSES if k in picked or k in loaded]
+    classes = [k for k in ASSET_CLASSES if k in picked]
+    if len(classes) < 2:
+        st.info("An allocation needs names in at least two asset classes.")
+        return None
 
-    with st.expander("Class budgets", expanded=enabled_before):
-        enabled = st.toggle(
-            "Fixed budget per asset class",
-            key=session.BUDGETS_ON_KEY,
-            value=False,
-            disabled=len(classes) < 2,
-            help=HELP["budgets"],
-        )
+    rows = _allocation_rows(classes)
 
-        if len(classes) < 2:
-            st.caption("Needs names in at least two asset classes.")
-            return None
-        if not enabled:
-            return None
+    preset_cols = st.columns(len(ALLOCATION_PRESETS) + 1)
+    presets = {"Equal": {k: 100.0 / len(classes) for k in classes}}
+    presets.update(ALLOCATION_PRESETS)
+    for column, (label, values) in zip(preset_cols, presets.items()):
+        if column.button(label, key=f"forge_preset_{label}", width="stretch"):
+            for k, budget in _preset_budgets(values, classes).items():
+                rows[k]["budget"] = budget
+            session.bump_budget_version()
 
-        preset_cols = st.columns(len(BUDGET_PRESETS) + 1)
-        presets = {"Equal": {k: 100.0 / len(classes) for k in classes}}
-        presets.update(BUDGET_PRESETS)
-        for column, (label, values) in zip(preset_cols, presets.items()):
-            if column.button(
-                label, key=f"forge_budget_preset_{label}", width="stretch"
-            ):
-                stored = {k: float(values.get(k, 0.0)) for k in classes}
-                session.bump_budget_version()
-
-        if not stored:
-            stored = {k: 100.0 / len(classes) for k in classes}
-
-        frame = pd.DataFrame(
-            {
-                "Asset class": [asset_class_label(k) for k in classes],
-                "Budget (%)": [round(float(stored.get(k, 0.0)), 1) for k in classes],
-            }
-        )
-        version = st.session_state.get(session.BUDGET_VERSION_KEY, 0)
-        edited = st.data_editor(
-            frame,
-            key=f"forge_budget_table_{version}",
-            hide_index=True,
-            width="stretch",
-            disabled=["Asset class"],
-            column_config={
-                "Budget (%)": st.column_config.NumberColumn(
-                    min_value=0.0, max_value=100.0, step=0.1, format="%.1f"
-                )
-            },
-        )
-
-        budgets = {
-            k: float(v) for k, v in zip(classes, edited["Budget (%)"].fillna(0.0))
+    frame = pd.DataFrame(
+        {
+            "Asset class": [asset_class_label(k) for k in classes],
+            "Budget (%)": [round(rows[k]["budget"], 1) for k in classes],
+            "Method": [method_label(rows[k]["method"]) for k in classes],
+            "Hedged (%)": [round(rows[k]["hedge"], 0) for k in classes],
         }
-        st.session_state[session.BUDGETS_KEY] = budgets
+    )
+    version = st.session_state.get(session.BUDGET_VERSION_KEY, 0)
+    edited = st.data_editor(
+        frame,
+        key=f"forge_alloc_table_{version}",
+        hide_index=True,
+        width="stretch",
+        disabled=["Asset class"],
+        column_config={
+            "Budget (%)": st.column_config.NumberColumn(
+                min_value=0.0,
+                max_value=100.0,
+                step=0.1,
+                format="%.1f",
+                help=HELP["budgets"],
+            ),
+            "Method": st.column_config.SelectboxColumn(
+                options=list(METHOD_OPTIONS), required=True, help=HELP["method"]
+            ),
+            "Hedged (%)": st.column_config.NumberColumn(
+                min_value=0.0,
+                max_value=100.0,
+                step=5.0,
+                format="%.0f",
+                help=HELP["hedge"],
+            ),
+        },
+    )
 
-        total = sum(budgets.values())
-        if total <= 0:
-            st.warning("Every budget is zero, so class budgets are off.")
-            return None
-
-        if abs(total - 100.0) > 0.5:
-            st.caption(f":orange[Total {total:.1f}%, scaled to 100%.]")
-        else:
-            st.caption(f"Total {total:.1f}%")
-
-        plan = allocation.resolve_sleeves(
-            {k: v / 100.0 for k, v in budgets.items()}, selection.constituents
+    rows = {
+        k: {
+            "budget": float(b) if pd.notna(b) else 0.0,
+            "method": METHOD_OPTIONS.get(m, "equal"),
+            "hedge": float(h) if pd.notna(h) else 0.0,
+        }
+        for k, b, m, h in zip(
+            classes, edited["Budget (%)"], edited["Method"], edited["Hedged (%)"]
         )
-        for message in plan.notes:
-            st.warning(message, icon="⚠️")
+    }
+    st.session_state[session.ALLOCATION_KEY] = rows
 
-    return budgets
+    total = sum(r["budget"] for r in rows.values())
+    if total <= 0:
+        st.warning("Every budget is zero; give at least one class a share.")
+        return None
+    if abs(total - 100.0) > 0.5:
+        st.caption(f":orange[Total {total:.1f}%, scaled to 100%.]")
+    else:
+        st.caption(f"Total {total:.1f}%")
+
+    plan = allocation.resolve_sleeves(
+        {k: r["budget"] / 100.0 for k, r in rows.items()}, selection.constituents
+    )
+    for message in plan.notes:
+        st.warning(message, icon="⚠️")
+
+    return rows
 
 
-def _optimizer_controls(method: str) -> Dict[str, object]:
+def _currency_controls(
+    selection: UniverseSelection, *, single_hedge: bool
+) -> Dict[str, object]:
+    """Base currency and hedging cost; one hedge ratio in strategy mode."""
+    base_col, ratio_col, cost_col = st.columns(3)
+    base = (
+        base_col.segmented_control(
+            "Base currency",
+            options=list(BASE_CURRENCIES),
+            default=BASE_CURRENCIES[0],
+            key="forge_base_ccy",
+            help=HELP["base_ccy"],
+        )
+        or BASE_CURRENCIES[0]
+    )
+
+    foreign = [t for t in selection.constituents if currency_of(t) != base]
+    values: Dict[str, object] = {"base_currency": base, "hedge_cost_bp": 0.0}
+
+    if single_hedge:
+        ratio = ratio_col.number_input(
+            "Hedged (%)",
+            key="forge_hedge_single",
+            min_value=0.0,
+            max_value=100.0,
+            step=5.0,
+            value=0.0,
+            help=HELP["hedge"],
+            disabled=not foreign,
+        )
+        values["hedge_ratios_pct"] = {k: ratio for k in ASSET_CLASSES}
+
+    values["hedge_cost_bp"] = cost_col.number_input(
+        "Hedge cost (bp a year)",
+        key="forge_hedge_cost",
+        min_value=0.0,
+        step=5.0,
+        value=0.0,
+        help=HELP["hedge_cost"],
+        disabled=not foreign,
+    )
+
+    if foreign:
+        st.caption(
+            f"Not in {base}, so converted: {', '.join(foreign[:8])}"
+            + (f" and {len(foreign) - 8} more" if len(foreign) > 8 else "")
+            + "."
+        )
+    return values
+
+
+def _optimizer_controls(any_optimizer: bool, max_sharpe: bool) -> Dict[str, object]:
     """Method-specific settings, out of the way until wanted."""
     values: Dict[str, object] = dict(
         cov_lookback=126,
@@ -666,7 +814,7 @@ def _optimizer_controls(method: str) -> Dict[str, object]:
         rf_rate_pct=0.0,
         cov_estimator="sample",
     )
-    if not is_optimizer_method(method):
+    if not any_optimizer:
         return values
 
     with st.expander("Optimizer options"):
@@ -710,7 +858,7 @@ def _optimizer_controls(method: str) -> Dict[str, object]:
             value=100.0,
             help=HELP["pm_max"],
         )
-        if method == "max_sharpe":
+        if max_sharpe:
             values["rf_rate_pct"] = rf_col.number_input(
                 "Risk-free rate (% p.a.)",
                 key="forge_rf_rate",
@@ -741,17 +889,14 @@ def _optimizer_controls(method: str) -> Dict[str, object]:
     return values
 
 
-def _net_exposure_control(method: str) -> float:
+def _net_exposure_control(any_optimizer: bool) -> float:
     """
     One control for how much of the book is invested.
 
-    It used to be two: an invested fraction, overridden by a net exposure input
-    for long/short books. Same quantity, so one control, whose ceiling depends
-    on whether the book can short.
+    Its ceiling depends on whether the book can short.
     """
     long_short = (
-        is_optimizer_method(method)
-        and st.session_state.get("forge_optimizer_form") == "long_short"
+        any_optimizer and st.session_state.get("forge_optimizer_form") == "long_short"
     )
     ceiling = 300.0 if long_short else 100.0
 
@@ -783,10 +928,49 @@ def _first_priced(
     return out
 
 
-def _construction_controls(
+def _date_controls(
+    data: UniverseData, selection: UniverseSelection, start_col, end_col
+):
+    first_day = data.close.index.min().date()
+    last_day = data.close.index.max().date()
+    first_priced = _first_priced(data, selection)
+    common_start = max(first_priced.values()).date() if first_priced else first_day
+    start = start_col.date_input(
+        "Start date",
+        key="forge_start",
+        value=common_start,
+        min_value=first_day,
+        max_value=last_day,
+        help=(
+            "Opens on the first day every selected name has a price. Earlier "
+            "is allowed: until a name's first price the book holds only the "
+            "others."
+        ),
+    )
+    end = end_col.date_input(
+        "End date",
+        key="forge_end",
+        value=last_day,
+        min_value=first_day,
+        max_value=last_day,
+    )
+
+    late = sorted((d, name) for name, d in first_priced.items() if d.date() > start)
+    if late:
+        listed = ", ".join(f"{name} ({d.date()})" for d, name in late[:6])
+        more = f" and {len(late) - 6} more" if len(late) > 6 else ""
+        st.caption(
+            f":orange[Not every name has prices from {start}: {listed}{more}. "
+            "Until then the book holds only those that do.]"
+        )
+    return start, end
+
+
+def _strategy_controls(
     data: UniverseData, selection: UniverseSelection
 ) -> StrategyConfig:
-    section("Construction")
+    """One method over one pool of names."""
+    section("2 · Construction")
 
     method_col, rebalance_col, lookback_col = st.columns(3)
     method = method_col.selectbox(
@@ -823,43 +1007,19 @@ def _construction_controls(
         help=HELP["cap"],
     )
     with net_col:
-        net_exposure_pct = _net_exposure_control(method)
+        net_exposure_pct = _net_exposure_control(is_optimizer_method(method))
+    start, end = _date_controls(data, selection, start_col, end_col)
 
-    first_day = data.close.index.min().date()
-    last_day = data.close.index.max().date()
-    first_priced = _first_priced(data, selection)
-    common_start = max(first_priced.values()).date() if first_priced else first_day
-    start = start_col.date_input(
-        "Start date",
-        key="forge_start",
-        value=common_start,
-        min_value=first_day,
-        max_value=last_day,
-        help=(
-            "Opens on the first day every selected name has a price. Earlier "
-            "is allowed: until a name's first price the book holds only the "
-            "others."
-        ),
-    )
-    end = end_col.date_input(
-        "End date",
-        key="forge_end",
-        value=last_day,
-        min_value=first_day,
-        max_value=last_day,
+    options = _optimizer_controls(
+        is_optimizer_method(method), max_sharpe=method == "max_sharpe"
     )
 
-    late = sorted((d, name) for name, d in first_priced.items() if d.date() > start)
-    if late:
-        listed = ", ".join(f"{name} ({d.date()})" for d, name in late[:6])
-        more = f" and {len(late) - 6} more" if len(late) > 6 else ""
-        st.caption(
-            f":orange[Not every name has prices from {start}: {listed}{more}. "
-            "Until then the book holds only those that do.]"
-        )
-
-    options = _optimizer_controls(method)
-    budgets_pct = _budget_controls(selection)
+    currency = {"base_currency": "USD"}
+    if any(currency_of(t) != "USD" for t in selection.constituents) or (
+        st.session_state.get("forge_base_ccy", "USD") != "USD"
+    ):
+        with st.expander("Currency", expanded=True):
+            currency = _currency_controls(selection, single_hedge=True)
 
     return StrategyConfig.from_ui(
         method=method,
@@ -869,9 +1029,96 @@ def _construction_controls(
         start=str(start),
         end=str(end),
         net_exposure_pct=net_exposure_pct,
-        class_budgets_pct=budgets_pct,
+        mode="strategy",
         **options,
+        **currency,
     )
+
+
+def _allocation_controls(
+    data: UniverseData, selection: UniverseSelection
+) -> StrategyConfig:
+    """A share per asset class, a method inside each, and currency handling."""
+    section("2 · Allocation", help=HELP["allocation"])
+    currency = _currency_controls(selection, single_hedge=False)
+    rows = _allocation_table(selection) or {}
+
+    methods = {k: r["method"] for k, r in rows.items()}
+    any_optimizer = any(is_optimizer_method(m) for m in methods.values())
+    any_lookback = any(
+        method_uses_lookback(m) and not is_optimizer_method(m) for m in methods.values()
+    )
+
+    section("3 · Rebalancing and risk")
+    rebalance_col, band_col, net_col, cap_col = st.columns(4)
+    rebalance = rebalance_col.selectbox(
+        "Rebalance",
+        key="forge_rebalance",
+        options=list(REBALANCE_FREQUENCIES),
+        format_func=lambda key: REBALANCE_FREQUENCIES[key],
+        help=HELP["rebalance"],
+    )
+    band_pct = band_col.number_input(
+        "Drift band (%)",
+        key="forge_band",
+        min_value=0.0,
+        max_value=50.0,
+        step=0.5,
+        value=0.0,
+        help=HELP["band"],
+    )
+    with net_col:
+        net_exposure_pct = _net_exposure_control(any_optimizer)
+    cap_pct = cap_col.number_input(
+        "Weight cap (%)",
+        key="forge_cap",
+        min_value=0.0,
+        step=0.5,
+        value=100.0,
+        help=HELP["cap"],
+    )
+
+    lookback_col, start_col, end_col = st.columns([1, 1, 1])
+    lookback = lookback_col.number_input(
+        "Lookback (days)",
+        key="forge_lookback",
+        min_value=20,
+        step=1,
+        value=126,
+        disabled=not any_lookback or any_optimizer,
+        help=HELP["lookback"],
+    )
+    start, end = _date_controls(data, selection, start_col, end_col)
+
+    options = _optimizer_controls(
+        any_optimizer, max_sharpe="max_sharpe" in methods.values()
+    )
+
+    default_method = next(iter(methods.values()), "equal")
+    return StrategyConfig.from_ui(
+        method=default_method,
+        rebalance=rebalance,
+        lookback=lookback,
+        cap_pct=cap_pct,
+        start=str(start),
+        end=str(end),
+        net_exposure_pct=net_exposure_pct,
+        class_budgets_pct={k: r["budget"] for k, r in rows.items()} or None,
+        class_methods=methods or None,
+        hedge_ratios_pct={k: r["hedge"] for k, r in rows.items()} or None,
+        rebalance_band_pct=band_pct or None,
+        mode="allocation",
+        **options,
+        **currency,
+    )
+
+
+def _construction_controls(
+    data: UniverseData, selection: UniverseSelection, mode: str
+) -> StrategyConfig:
+    if mode == "allocation":
+        return _allocation_controls(data, selection)
+    return _strategy_controls(data, selection)
 
 
 def _overlay_controls() -> OverlayConfig:
@@ -1279,6 +1526,7 @@ def _render_monte_carlo(
     selection: UniverseSelection,
     overlay_cfg: OverlayConfig,
     showing_recorded: bool,
+    fx: Optional[FXData] = None,
 ) -> None:
     with st.expander(
         "Monte Carlo simulation", expanded=MC_SESSION_KEY in st.session_state
@@ -1296,7 +1544,7 @@ def _render_monte_carlo(
                 try:
                     st.session_state[MC_SESSION_KEY] = {
                         "result": runner.run_monte_carlo(
-                            data, rates, cfg, selection, overlay_cfg, mc_cfg
+                            data, rates, cfg, selection, overlay_cfg, mc_cfg, fx=fx
                         ),
                         "config": mc_cfg,
                     }
@@ -1317,6 +1565,7 @@ def render(
     rates: RatesInspectorData,
     universe_key: str = "",
     data_mode: str = "",
+    fx: Optional[FXData] = None,
 ) -> None:
     screen("forge")
     session.show_flash()
@@ -1331,11 +1580,23 @@ def render(
     toolbar = st.container()
     banner = st.container()
 
+    mode = (
+        st.segmented_control(
+            "Mode",
+            options=list(MODES),
+            format_func=MODES.get,
+            default="strategy",
+            key="forge_mode",
+            help=HELP["mode"],
+        )
+        or "strategy"
+    )
+
     controls, weights_panel = st.columns([3, 1], gap="large")
 
     with controls:
         selection = _holdings_controls(universe_key, available)
-        cfg = _construction_controls(data, selection)
+        cfg = _construction_controls(data, selection, mode)
         overlay_cfg = _overlay_controls()
 
     with toolbar:
@@ -1356,9 +1617,13 @@ def render(
         st.warning("Select at least one name.")
         return
 
-    live = cache.run_backtest(
-        data, rates, cfg, selection, overlay_cfg, cache.data_token(data)
-    )
+    try:
+        live = cache.run_backtest(
+            data, rates, cfg, selection, overlay_cfg, cache.data_token(data), _fx=fx
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
 
     with banner:
         result, opened = _resolve_open_run(live, data.vintage)
@@ -1384,5 +1649,11 @@ def render(
     _render_diagnostics(result, opened.config if opened is not None else cfg)
 
     _render_monte_carlo(
-        data, rates, cfg, selection, overlay_cfg, showing_recorded=opened is not None
+        data,
+        rates,
+        cfg,
+        selection,
+        overlay_cfg,
+        showing_recorded=opened is not None,
+        fx=fx,
     )

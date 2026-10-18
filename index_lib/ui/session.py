@@ -28,9 +28,8 @@ CONSTITUENTS_KEY = "forge_constituents"
 ASSET_CLASSES_KEY = "forge_asset_classes"
 #: The classes picked on the previous run, so a change can tell what was added.
 PREVIOUS_CLASSES_KEY = "_forge_asset_classes_before"
-BUDGETS_ON_KEY = "forge_budgets_on"
-#: Class key -> budget in percent: what the budget table shows and edits.
-BUDGETS_KEY = "forge_budgets"
+#: Class key -> {"budget", "method", "hedge"}: the allocation table's rows.
+ALLOCATION_KEY = "forge_allocation"
 #: Bumped whenever the budgets are set from outside the table (a preset, a
 #: loaded strategy), so the table is drawn afresh rather than from its edits.
 BUDGET_VERSION_KEY = "_forge_budget_version"
@@ -149,13 +148,31 @@ def control_values(config: StrategyConfig, overlay: OverlayConfig) -> Dict[str, 
         "forge_max_lev": float(overlay.max_leverage),
         "forge_min_lev": float(overlay.min_leverage),
         "forge_borrow_spread": float(overlay.borrow_spread_ann),
-        BUDGETS_ON_KEY: config.has_class_budgets,
+        # Files from before the two modes carried budgets in strategy mode;
+        # budgets now mean an allocation.
+        "forge_mode": (
+            "allocation"
+            if config.mode == "allocation" or config.has_class_budgets
+            else "strategy"
+        ),
+        "forge_base_ccy": config.base_currency,
+        "forge_hedge_cost": float(config.hedge_cost_bp),
+        "forge_band": float((config.rebalance_band or 0.0) * 100.0),
     }
 
-    # A strategy without budgets leaves the budget table as it was, so
-    # switching budgets back on finds the last values used.
     if config.has_class_budgets:
-        values[BUDGETS_KEY] = {k: float(v * 100.0) for k, v in config.budgets.items()}
+        values[ALLOCATION_KEY] = {
+            k: {
+                "budget": float(v * 100.0),
+                "method": config.method_for(k),
+                "hedge": float(config.hedge_ratio_for(k) * 100.0),
+            }
+            for k, v in config.budgets.items()
+        }
+    elif config.hedge_ratios:
+        values["forge_hedge_single"] = float(
+            max(r for _, r in config.hedge_ratios) * 100.0
+        )
 
     return values
 

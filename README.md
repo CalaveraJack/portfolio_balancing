@@ -49,7 +49,7 @@ Open the URL Streamlit prints (by default <http://localhost:8501>).
 
 Only what applies to every tab:
 
-- **Working set**: the stock set Universe, Strategy Forge and Compare use, with
+- **Working set**: the asset set Universe, Strategy Forge and Compare use, with
   its real date range.
 - **Settings** (closed by default): data mode, **History from** (2022 to
   1990), reload, and **Data status**, the latest observation of every source
@@ -126,7 +126,7 @@ level changes in percent; a rate (unemployment, a yield) in percentage points.
 
 ![Macro](docs/screenshots/macro.png)
 
-### Stock sets
+### Asset sets
 
 The sidebar picks which stocks are loaded. Three ship with the app:
 
@@ -204,24 +204,42 @@ Pick asset classes first, then the holdings within them. Adding a class adds all
 of its holdings; removing one removes them. A set spanning several classes opens
 with all of its names selected.
 
-### Class budgets
+### Two modes: Strategy and Allocation
 
-An optional fixed share of the invested book per asset class, for example 60%
-equities, 30% government bonds, 10% gold. The construction method then runs
-*inside* each class on its own, as though that class were the whole book: equal
-weight among the equities, risk parity among the bonds, and so on. Caps and
-limits apply within a class.
+| Mode | What it builds | Controls |
+|---|---|---|
+| Strategy | one method over one pool of names | method, caps, optimizer settings |
+| Allocation | a share of the book per asset class, a method inside each | allocation table, currency, drift band |
 
-Budgets are restored at every rebalance and drift in between. They are scaled to
-add up to 100%. A class with a budget but no holdings has its budget shared out
-over the others, and a class with holdings but no budget gets no weight; the app
-says so in both cases.
+The allocation table has one row per asset class:
 
-A budget is a rule, so it is saved with a **strategy**, not only with a
-portfolio. Strategies saved before v0.4 load without budgets and behave exactly
-as before.
+| Column | Meaning |
+|---|---|
+| Budget (%) | share of the invested book, restored at every rebalance; scaled to 100% |
+| Method | how names inside the class are weighted (equal, inverse vol, risk parity, ...) |
+| Hedged (%) | share of non-base-currency holdings sold forward, rolled daily |
 
-![Class budgets](docs/screenshots/multi_asset_budgets.png)
+Presets: Equal, Conservative, Balanced, Growth, All weather. A class with a
+budget but no holdings has its budget shared out; holdings with no budget get
+no weight. The app says so in both cases. Strategies saved before v0.4 that
+carry budgets open in Allocation mode.
+
+### Currency and hedging
+
+| Setting | Meaning |
+|---|---|
+| Base currency | USD or EUR; results, cash and funding in that currency (SOFR or €STR) |
+| Hedged (%) | per class in Allocation, one ratio in Strategy |
+| Hedge cost (bp a year) | basis and dealing costs on the hedged amount |
+
+FX rates are ECB reference rates. The hedge is a forward rolled daily at the
+covered-interest-parity price, so a fully hedged holding swaps the currency move
+for the overnight rate differential. See *Methodology → FX hedging*.
+
+### Drift band
+
+Rebalance also on any day a class drifts further than the band from its
+budget. 0 turns it off; scheduled rebalances still run.
 
 ### How much is invested
 
@@ -459,6 +477,16 @@ $$
 
 where $w^{(k)}$ is what the construction method gives when run on class $k$
 alone.
+
+### FX hedging
+
+A foreign asset with local return $r_\ell$, spot return $r_{fx}$ (base per
+foreign), hedge ratio $h$, overnight rates $r_b$, $r_f$ and cost $c$:
+
+$$r = (1+r_\ell)(1+r_{fx}) - 1 + h\,\big((r_b - r_f)\,\Delta t - r_{fx}\big) - h\,c\,\Delta t$$
+
+At $h = 1$ the currency move cancels and the rate differential is earned or
+paid; at $h = 0$ the full currency move comes through.
 
 ### Curve factors
 

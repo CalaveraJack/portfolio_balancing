@@ -14,7 +14,7 @@ Each line: **what to do** → what should happen.
 
 ## A. Data and settings (sidebar)
 
-- [ ] **A1** Open the app → sidebar shows *Working set* with the stock set and a line `N names · start → end`; *Settings* is closed.
+- [ ] **A1** Open the app → sidebar shows *Working set* with the asset set and a line `N names · start → end`; *Settings* is closed.
 - [ ] **A2** Open *Settings* → Data mode, Reload data, Data status table (Prices, SOFR, Curves, Macro 34/34), each with a date and ✓; no clipped column.
 - [ ] **A3** Hover every ⓘ / ? in the sidebar → each has a readable explanation.
 - [ ] **A4** Switch Data mode to *Refresh, fall back to cache*, press Reload → app reloads, dates in Data status move to today or the last business day; nothing breaks.
@@ -22,7 +22,7 @@ Each line: **what to do** → what should happen.
 - [ ] **A6** Disconnect from the network, *Refresh, fall back to cache*, Reload → app still loads from cache; Curves / Macro show ⚠ with a count; a warning appears on Rates or Macro, not a crash.
 - [ ] **A7** Same offline, *Refresh, fail on errors* → a clear error for prices or rates that says a cache exists; macro and curve failures are listed, not fatal. Reconnect afterwards.
 - [ ] **A8** Open *Adding indicators* → shows the CSV path and the check command.
-- [ ] **A9** Switch the stock set (Pharma → Multi-asset → Mega-cap → Diversified) → range line updates each time, no error, no names from the previous set left anywhere.
+- [ ] **A9** Switch the asset set (Pharma → Multi-asset → Mega-cap → Diversified) → range line updates each time, no error, no names from the previous set left anywhere.
 
 ## B. Navigation
 
@@ -93,18 +93,25 @@ Each line: **what to do** → what should happen.
 - [ ] **F12** Start / End date → backtest window changes; End before Start → handled (no crash).
 - [ ] **F13** Every ⓘ in Construction explains its control; the two caps' texts say which one binds.
 
-## G. Strategy Forge — class budgets
+## G. Strategy Forge — Allocation mode
 
-- [ ] **G1** On Pharma → *Class budgets* toggle disabled with "Needs names in at least two asset classes".
-- [ ] **G2** On Multi-asset → open *Class budgets*, switch on → table with all picked classes, equal split, total ≈ 100%.
-- [ ] **G3** Preset *60 / 40* → Equities 60, Government bonds 40, others 0; Asset classes diagnostic shows targets 60/40.
-- [ ] **G4** Preset *All weather* → 30 / 55 / 7.5 / 7.5.
-- [ ] **G5** Edit a cell so the total is 90% → orange "Total 90.0%, scaled to 100%"; backtest uses the scaled shares.
-- [ ] **G6** Set every budget to 0 → warning, budgets off, backtest still runs.
-- [ ] **G7** Budget for Gold but remove the Gold class from holdings → warning that its budget was shared out.
-- [ ] **G8** Names in a class with budget 0 → warning that they get no weight.
-- [ ] **G9** Risk parity with budgets → Diagnostics → Asset classes: each class sits at its target at rebalances and drifts in between.
-- [ ] **G10** Monte Carlo with budgets on → only *Strategy Return Bootstrap* offered; its ⓘ explains why.
+- [ ] **G1** Mode pills *Strategy / Allocation* at the top of the Forge; Strategy is the default.
+- [ ] **G2** Multi-asset, long history → Allocation → table with one row per picked class, equal split, total 100%.
+- [ ] **G3** Preset *Balanced* on the long set → Equities 52.9, Govt bonds 29.4, Real estate, Commodities, Gold 5.9 each; total 100%.
+- [ ] **G4** Edit a budget so the total is 90% → caption says it is scaled to 100%; backtest uses the scaled shares.
+- [ ] **G5** Method column: set bonds to *Inverse Volatility* → Diagnostics → Asset classes still hits the budgets at rebalances.
+- [ ] **G6** Budget for Gold, then remove Gold from holdings → note that its budget was shared out.
+- [ ] **G7** Drift band 5% → more rebalance dates than with 0; 0 → only scheduled dates.
+- [ ] **G8** Monte Carlo in Allocation → only *Strategy Return Bootstrap* offered.
+- [ ] **G9** Save the strategy, switch to Strategy mode, reopen it → Allocation mode, table, methods, hedges and band restored.
+
+## G2. Currency
+
+- [ ] **G10** Data Inspection → *FX* pill → spot chart, hedge-carry chart, and for EUR a Bund shown local / unhedged / hedged.
+- [ ] **G11** Base USD, DE10Y in holdings, bonds Hedged 100% vs 0% → hedged line differs; hedged is smoother.
+- [ ] **G12** Base EUR → US holdings listed as converted; cash earns €STR.
+- [ ] **G13** Hedge cost 50 bp → hedged result slightly lower than at 0 bp.
+- [ ] **G14** Settings → Data status has an *FX* row with a date.
 
 ## H. Strategy Forge — results, saving, runs
 
