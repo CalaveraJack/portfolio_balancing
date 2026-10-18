@@ -86,32 +86,42 @@ Each line: **what to do** → what should happen.
 - [ ] **F5** Method list shows names first, codes after (e.g. "Minimum Variance · CM.1.0").
 - [ ] **F6** Equal weight → Lookback greyed out; Inverse volatility → Lookback active; an optimizer → Lookback greyed out and *Optimizer options* appears.
 - [ ] **F7** Weight cap 20% on 6 names, Equal → still equal (16.7%); cap 10% → warning-free, weights capped and redistributed as far as possible.
-- [ ] **F8** Net exposure 80% → latest weights sum to 80%; Exposure diagnostic shows 0.8.
-- [ ] **F9** Net exposure: long-only cannot go above 100; switch an optimizer to Long/short → can go above 100; back to Long-only → value clamps to 100.
-- [ ] **F10** Optimizer options: form, covariance lookback, estimator, min weight, PM max weight, (Max Sharpe) risk-free rate, (Long/short) max gross and short financing spread — each has a ⓘ explanation.
-- [ ] **F11** PM max weight 10% with Weight cap 30% on Minimum variance → no name above 10%.
+- [ ] **F8** *Add cash* at 20% → Avg net exposure ≈ 80%; Exposure diagnostic shows 0.8.
+- [ ] **F9** Net and gross exposure appear in a sleeve's ⚙ only when its optimizer is Long/short.
+- [ ] **F10** Optimizer settings: form, covariance lookback, estimator, min weight, (Max Sharpe) risk-free rate, (Long/short) net, gross and short spread — each has a ⓘ.
+- [ ] **F11** Weight cap 10% on Minimum variance → no name above 10%.
 - [ ] **F12** Start / End date → backtest window changes; End before Start → handled (no crash).
 - [ ] **F13** Every ⓘ in Construction explains its control; the two caps' texts say which one binds.
 
-## G. Strategy Forge — Allocation mode
+## G. Strategy Forge — portfolio and sleeves
 
-- [ ] **G1** Mode pills *Strategy / Allocation* at the top of the Forge; Strategy is the default.
-- [ ] **G2** Multi-asset, long history → Allocation → table with one row per picked class, equal split, total 100%.
-- [ ] **G3** Preset *Balanced* on the long set → Equities 52.9, Govt bonds 29.4, Real estate, Commodities, Gold 5.9 each; total 100%.
-- [ ] **G4** Edit a budget so the total is 90% → caption says it is scaled to 100%; backtest uses the scaled shares.
-- [ ] **G5** Method column: set bonds to *Inverse Volatility* → Diagnostics → Asset classes still hits the budgets at rebalances.
-- [ ] **G6** Budget for Gold, then remove Gold from holdings → note that its budget was shared out.
-- [ ] **G7** Drift band 5% → more rebalance dates than with 0; 0 → only scheduled dates.
-- [ ] **G8** Monte Carlo in Allocation → only *Strategy Return Bootstrap* offered.
-- [ ] **G9** Save the strategy, switch to Strategy mode, reopen it → Allocation mode, table, methods, hedges and band restored.
+- [ ] **G1** Pharma → one sleeve line: method, *6 names*, ⚙; no name, budget or delete.
+- [ ] **G2** *Add sleeve* → two lines with names and budgets 50/50; the new one says *0 names* and the note under the sleeves says so.
+- [ ] **G3** Open the new sleeve's *names*, filter "JNJ", tick → backtest named "2 sleeves 50/50".
+- [ ] **G4** Delete a sleeve → back to one line; budgets of the rest unchanged in ratio.
+- [ ] **G5** Multi-asset, long history → *By class* → five sleeves, equal budgets.
+- [ ] **G6** Government bonds sleeve: method list has no Cap Weight or Price Weight but offers the three bond rules; its ⓘ says why; the names button shows *beta*.
+- [ ] **G6a** Bonds sleeve → Target Duration, ⚙ target 7 → Holdings → the sleeve holds the two bonds either side of 7 years.
+- [ ] **G6b** A sleeve with SPY and UST10Y → no bond rules, no Cap Weight; Equal and Risk Parity offered.
+- [ ] **G7** Equities sleeve → Risk Parity; ⚙ shows optimizer settings; Inverse Volatility → ⚙ shows Lookback.
+- [ ] **G8** Budgets totalling 90% → orange note "scaled to 100%".
+- [ ] **G9** Put SPY in two sleeves → Holdings → Book shows SPY's weight as the sum.
+- [ ] **G10** Portfolio ⚙ → drift band 5% → orange note under the portfolio row.
+- [ ] **G11** Holdings → Book: sleeves just before each rebalance (bars show drift); pick a sleeve → its names.
+- [ ] **G12** Save the strategy, switch set and back, reopen → sleeves, methods and budgets restored.
+- [ ] **G13** Open the old "Test Multi Asset" strategy → five sleeves by class.
 
 ## G2. Currency
 
-- [ ] **G10** Data Inspection → *FX* pill → spot chart, hedge-carry chart, and for EUR a Bund shown local / unhedged / hedged.
-- [ ] **G11** Base USD, DE10Y in holdings, bonds Hedged 100% vs 0% → hedged line differs; hedged is smoother.
-- [ ] **G12** Base EUR → US holdings listed as converted; cash earns €STR.
-- [ ] **G13** Hedge cost 50 bp → hedged result slightly lower than at 0 bp.
-- [ ] **G14** Settings → Data status has an *FX* row with a date.
+- [ ] **G13a** Book with DE10Y → portfolio row shows *Currency hedge · EUR hedged (%)*; the bond sleeve's names button says *EUR*.
+- [ ] **G13b** Holdings → Currency → USD and EUR held, hedged, open; *Where it sits* names the bond sleeve; at 100% hedged the chart is replaced by "fully hedged".
+- [ ] **G13c** Bond sleeve ⚙ → *Own hedge ratio* 100% with the book at 0% → only that sleeve's EUR is hedged.
+
+- [ ] **G14** Data Inspection → *FX* pill → spot chart, hedge-carry chart, and for EUR a Bund shown local / unhedged / hedged.
+- [ ] **G15** Base USD, DE10Y in a sleeve → that sleeve's ⚙ shows Hedged; 100% vs 0% → the hedged book is smoother.
+- [ ] **G16** Base EUR → US sleeves show Hedged in their ⚙; cash earns €STR.
+- [ ] **G17** Portfolio ⚙ → Hedge cost 50 bp → hedged result slightly lower than at 0 bp.
+- [ ] **G18** Settings → Data status has an *FX* row with a date.
 
 ## H. Strategy Forge — results, saving, runs
 

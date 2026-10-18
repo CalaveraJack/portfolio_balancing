@@ -187,6 +187,24 @@ are total returns from the adjusted close.
 - Maximum Sharpe
 - Maximum Diversification
 
+#### Bond rules (synthetic government bonds)
+
+| Rule | Weights |
+|---|---|
+| Equal Duration Risk | inversely to modified duration: each bond adds the same sensitivity to a parallel rate move |
+| Target Duration | the two bonds either side of a target duration (years), blended to hit it |
+| Carry Tilt | by positive carry: yield plus roll-down over a year if the curve stays put |
+
+Duration and carry come from the same curve the bond is priced from, as known
+the day before each rebalance.
+
+#### Which methods a sleeve offers
+
+Only those that fit every name it holds. Cap Weight needs a market cap for each
+name (synthetic bonds have none); Price Weight only means something for single
+stocks; the bond rules need every name to be a synthetic bond. Equal, Inverse
+Volatility and the optimizers work for any mix, so a sleeve may span classes.
+
 Optimizers run **long-only or long/short**. Long/short exposes net exposure,
 maximum gross exposure and a short borrow spread. Shorting is financed at the
 loaded SOFR plus that spread, the same way the volatility overlay finances
@@ -198,56 +216,66 @@ net.
 
 Covariance estimators: **sample**, **EWMA**, **Ledoit-Wolf**, **OAS**.
 
-### Holdings and asset classes
+### Portfolio and sleeves
 
-Pick asset classes first, then the holdings within them. Adding a class adds all
-of its holdings; removing one removes them. A set spanning several classes opens
-with all of its names selected.
-
-### Two modes: Strategy and Allocation
-
-| Mode | What it builds | Controls |
+| Level | Holds | On screen |
 |---|---|---|
-| Strategy | one method over one pool of names | method, caps, optimizer settings |
-| Allocation | a share of the book per asset class, a method inside each | allocation table, currency, drift band |
+| Portfolio | what the sleeves share | base currency, rebalance, start, end; ⚙ drift band, hedge cost, volatility target |
+| Sleeve | a semi-portfolio | one line: name, budget, method, **Names** (filter and tick), ⚙ its own settings, delete |
 
-The allocation table has one row per asset class:
+The Forge opens with one sleeve, which is a plain strategy. **Add sleeve** adds
+an empty one; **By class** splits a sleeve into one per asset class of its names.
+Each sleeve is backtested on its own names and settings; the book holds the
+sleeves at their budgets and puts them back on every rebalance, or whenever one
+drifts further than the drift band. A name held by two sleeves carries both
+weights.
 
-| Column | Meaning |
+| In a sleeve's ⚙ | Shown when |
 |---|---|
-| Budget (%) | share of the invested book, restored at every rebalance; scaled to 100% |
-| Method | how names inside the class are weighted (equal, inverse vol, risk parity, ...) |
-| Hedged (%) | share of non-base-currency holdings sold forward, rolled daily |
+| Lookback | inverse volatility |
+| Weight cap | always: the optimizer's constraint and the simple rules' trim |
+| Target duration | Target Duration |
+| Own hedge ratio | it holds names in another currency |
+| Net and gross exposure | the optimizer is long/short |
+| Hedged (%) | it holds names in another currency |
+| Optimizer settings | its method is an optimizer |
 
-Presets: Equal, Conservative, Balanced, Growth, All weather. A class with a
-budget but no holdings has its budget shared out; holdings with no budget get
-no weight. The app says so in both cases. Strategies saved before v0.4 that
-carry budgets open in Allocation mode.
+Only methods that apply to a sleeve's names are offered: no cap weight without a
+market cap for every name (synthetic bonds have none), no price weight for funds
+or bonds. Settings that differ from their default are named in one line under
+the sleeves, so nothing changes out of sight.
+
+**Add cash** adds a sleeve holding no names that earns the base currency's
+overnight rate at its budget. Cash in a long-only book is held this way, not
+as a sleeve's net exposure.
+
+Names marked **beta** are synthetic: constant-maturity government bonds priced
+from the yield curve (see [docs/BONDS.md](docs/BONDS.md)). They give long
+history but are not funds you can buy.
+
+Strategies saved by v0.4 drafts with class budgets open as one sleeve per class.
 
 ### Currency and hedging
 
-| Setting | Meaning |
+Results, cash and funding are in the base currency (USD: SOFR, EUR: €STR).
+Foreign holdings are converted at ECB reference rates.
+
+| Where | What |
 |---|---|
-| Base currency | USD or EUR; results, cash and funding in that currency (SOFR or €STR) |
-| Hedged (%) | per class in Allocation, one ratio in Strategy |
-| Hedge cost (bp a year) | basis and dealing costs on the hedged amount |
-
-FX rates are ECB reference rates. The hedge is a forward rolled daily at the
-covered-interest-parity price, so a fully hedged holding swaps the currency move
-for the overnight rate differential. See *Methodology → FX hedging*.
-
-### Drift band
-
-Rebalance also on any day a class drifts further than the band from its
-budget. 0 turns it off; scheduled rebalances still run.
+| Portfolio row | one hedge ratio per currency the book holds besides the base |
+| A sleeve's ⚙ | *Own hedge ratio*, overriding the book's for that sleeve (bonds often fully hedged) |
+| Sleeve line | the foreign currencies it holds, e.g. *4 names · EUR* |
+| Holdings → Currency | per currency: held, hedged, open; which sleeve it sits in; open exposure over time |
+ The hedge is a forward
+rolled daily at the covered-interest-parity price, so a fully hedged holding
+swaps the currency move for the overnight rate differential. See *Methodology
+→ FX hedging*.
 
 ### How much is invested
 
-**Net exposure** decides how much of the book is in the strategy; the rest sits
-in cash earning SOFR. At 100% there is no cash leg and nothing changes. It is one
-control for both forms: for long-only it is the invested fraction (up to 100%),
-for long/short it is longs minus shorts. Long-only means no shorting, not fully
-invested, so a long-only book may hold cash.
+Cash is a sleeve (*Add cash*), earning the base currency's overnight rate.
+**Net exposure** exists only for long/short optimizers, where it is longs minus
+shorts; gross is limited separately.
 
 Exposure is reported as it actually is, including the volatility overlay: a book
 running at 0.34x shows as 34% exposed, not 100%.
@@ -325,8 +353,10 @@ Alongside the performance statistics, every backtest reports:
 
 - **Exposure** — net, gross, long and short over time. Net and gross coincide for
   a long-only book and separate as soon as it shorts.
-- **Asset classes** — weight by class over time, and each class's average and
-  latest weight against its budget.
+- **Holdings** (above the diagnostics) — the latest weights and stacked bars at
+  each rebalance, for the book (sleeves just before each rebalance, so drift
+  shows) or for one sleeve's names.
+- **Asset classes** — weight by class over time.
 - **Concentration** — weight in the top five positions, the Herfindahl index, and
   the effective number of equally weighted holdings (its reciprocal).
 - **Turnover** — one-way, halved because every sale funds a purchase.
@@ -393,11 +423,11 @@ structure rather than a static latest-cap vector. GBM is disabled here because
 the engine does not simulate shares outstanding, corporate actions or cap-rank
 dynamics.
 
-**PM classics and class budgets** — strategy return bootstrap. These resample the realized strategy
-return stream produced by the historical backtest, rather than re-optimizing
-inside every simulated constituent path. Pathwise re-optimization is not
-implemented. A book with class budgets takes this route too, since the
-constituent engines apply one weighting rule across every name.
+**PM classics, sleeves, other currencies** — strategy return bootstrap. These
+resample the realized return stream of the historical backtest rather than
+re-optimizing inside every simulated constituent path, which is not
+implemented. A book of sleeves takes this route too, since the constituent
+engines apply one weighting rule across every name.
 
 ### Funding
 
@@ -466,17 +496,19 @@ $$
 If every sampled market cap is unavailable for a simulation row, that row falls
 back to equal weight.
 
-### Class budgets
+### Sleeves
 
-With budgets $b_k$ (summing to one) and invested fraction $f$, the target weight
-of holding $i$ in class $k$ is
+Each sleeve $s$ is backtested alone, giving daily returns $r_{s,t}$. With
+budgets $b_s$ (scaled to sum to one) and start-of-day shares $v_{s,t}$:
 
 $$
-w_i = f \cdot b_k \cdot w_i^{(k)}
+r_t = \sum_s v_{s,t}\, r_{s,t}, \qquad
+v_{s,t+1} = \frac{v_{s,t}(1 + r_{s,t})}{1 + r_t}
 $$
 
-where $w^{(k)}$ is what the construction method gives when run on class $k$
-alone.
+and $v_{s,t} = b_s$ on rebalance dates, or on any day when
+$\max_s |v_{s,t} - b_s|$ exceeds the drift band. A holding's weight in the book
+is $\sum_s v_{s,t}\, w_{i,s,t}$, so a name in two sleeves adds up.
 
 ### FX hedging
 
@@ -591,7 +623,8 @@ index_lib/datasets.py      data loading and the loaded panels
 index_lib/library.py       saved strategies and portfolios
 index_lib/runs.py          saved runs
 index_lib/diagnostics.py   exposure, concentration, turnover, drawdowns
-index_lib/allocation.py    class budgets resolved against holdings
+index_lib/allocation.py    weight by asset class
+index_lib/core/sleeves.py  a book of sleeves held at their budgets
 index_lib/macro.py         indicator views, key figures, catalogue status
 index_lib/compare.py       comparables and comparison statistics
 ```
@@ -652,8 +685,9 @@ uv run pytest
 
 They cover the storage layers, the diagnostics and comparison maths, and the app
 itself end to end through Streamlit's `AppTest`: saving and reopening strategies,
-portfolios and runs, switching stock sets, and the comparison tab. Class
-budgets are checked against the engine: every rebalance must restore them.
+portfolios and runs, switching stock sets, and the comparison tab. Sleeves
+are checked against the engine: shares near budget, methods inside each sleeve,
+overlapping names adding up, and drafts with class budgets loading as sleeves.
 
 Screenshots are generated from the running app, so they cannot drift from it:
 
@@ -685,8 +719,9 @@ Data Inspection tab with Rates & Funding (3D curve surface and heatmap, PCA and
 model-free curve factors, steepener/flattener classification), Universe (asset
 class overview, relative performance, correlation) and Macro Indicators (34
 series from FRED, the ECB, Eurostat and the Bundesbank, catalogue as CSV with a
-key checker). Asset classes, a multi-asset ETF set, an asset-class selector and
-class budgets in the Strategy Forge.
+key checker). Asset classes, a multi-asset ETF set, synthetic government bonds
+(beta), FX hedging, portfolios of sleeves with a cash sleeve and bond rules in
+the Strategy Forge.
 
 ### 2026-09-19 — v0.3
 

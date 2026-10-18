@@ -58,11 +58,10 @@ Global settings (which data, from where, how fresh) belong to none of them.
 > "Build a 60/30/10 multi-asset book with risk parity inside each class and see
 > how it did."
 
-1. Pick the stock set.
-2. Pick the asset classes, then the holdings.
-3. Pick the method and the rebalance frequency.
-4. Set constraints if needed: caps, invested fraction, long/short.
-5. Set the class budgets.
+1. Pick the asset set.
+2. Portfolio: base currency, rebalance, period.
+3. Sleeves: *Add sleeve* or *By class*; per sleeve a budget, a method and its names.
+4. Rarely: a sleeve's ⚙ (caps, exposure, hedge, optimizer) or the portfolio's ⚙ (drift band, hedge cost).
 6. Optionally add volatility targeting.
 7. Read the backtest, then the diagnostics.
 8. Keep it: save the strategy, record the run.
@@ -249,9 +248,10 @@ Settings). Nothing is removed.
 
 Strategy Forge
  [Open ▾] [Save as strategy / portfolio]  Open: Sixty-forty               ← toolbar
- 1 HOLDINGS      asset classes → constituents
- 2 CONSTRUCTION  method · rebalance · max weight · net exposure
-                 ▸ Optimizer options  ▸ Class budgets (table)  ▸ Financing & vol target
+ PORTFOLIO       base currency · rebalance · start · end · ⚙ (band, hedge cost, vol target)
+ SLEEVES         [By class] [Add sleeve]
+                 one line each: name · budget · method · [n names] · ⚙ · 🗑
+ RESULTS         backtest · Holdings (book or one sleeve) · diagnostics
  3 RESULTS       stats · index level · [Record run]                       ← action at the result
                  Diagnostics tabs · ▸ What the optimizer did
  4 SIMULATION    ▸ Monte Carlo (closed until wanted)
