@@ -18,7 +18,7 @@ import streamlit as st
 from index_lib import macro
 from index_lib.config.macro import FREQUENCIES, Indicator, macro_catalogue
 from index_lib.loaders.macro_cache import STATUS_MISSING, MacroData
-from index_lib.ui import figures, tables
+from index_lib.ui import figures, filters, tables
 from index_lib.ui.window import window_start
 
 #: The rows ticked on the previous run, so a newly ticked one can be told apart.
@@ -78,19 +78,25 @@ def _filtered(catalogue: List[Indicator]) -> List[Indicator]:
     regions = list(dict.fromkeys(i.region for i in catalogue))
     categories = sorted({i.category for i in catalogue})
 
-    region_col, category_col = st.columns(2)
-    chosen_regions = region_col.multiselect(
-        "Region", options=regions, default=regions, key="macro_regions"
-    )
-    chosen_categories = category_col.multiselect(
-        "Category", options=categories, default=categories, key="macro_categories"
-    )
+    region_col, category_col, search_col = st.columns([2, 4, 2])
+    with region_col:
+        chosen_regions = filters.pills("Region", regions, "macro_regions")
+    with category_col:
+        chosen_categories = filters.pills("Category", categories, "macro_categories")
+    with search_col:
+        st.caption("Search")
+        needle = filters.search("macro_q", "Search indicators")
 
-    return [
+    shown = [
         i
         for i in catalogue
-        if i.region in chosen_regions and i.category in chosen_categories
+        if i.region in chosen_regions
+        and i.category in chosen_categories
+        and needle in f"{i.id} {i.name}".lower()
     ]
+    if len(shown) < len(catalogue):
+        st.caption(f"Showing {len(shown)} of {len(catalogue)}")
+    return shown
 
 
 def _catalogue(data: MacroData, shown: List[Indicator]) -> List[Indicator]:
@@ -105,7 +111,8 @@ def _catalogue(data: MacroData, shown: List[Indicator]) -> List[Indicator]:
         height=min(38 + 35 * len(shown), 420),
         on_select="rerun",
         selection_mode="multi-row",
-        key=f"macro_table_{version}",
+        # Ticks are row positions, so a different filter needs a fresh table.
+        key=f"macro_table_{version}_{hash(tuple(i.id for i in shown))}",
     )
 
     rows = list(getattr(getattr(event, "selection", None), "rows", []) or [])

@@ -238,6 +238,23 @@ h1, h2, h3,
   background: var(--accent-soft);
 }
 
+/* Filter pills: square like everything else, wrapping rather than cut off. */
+[data-testid="stButtonGroup"] [role="toolbar"] {
+  flex-wrap: wrap;
+}
+
+[data-testid="stButtonGroup"] button[data-variant="pills"] {
+  border-radius: 0 !important;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+[data-testid="stButtonGroup"] button[data-variant="pills"][data-selected="true"] {
+  color: var(--accent);
+  border-color: var(--accent) !important;
+  background: var(--accent-soft);
+}
+
 /* Chosen items in multiselects: outlined, not filled - quieter in bulk. */
 [data-testid="stMultiSelectTagsContainer"] [data-tag] {
   background: var(--accent-soft) !important;
