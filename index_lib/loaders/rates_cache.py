@@ -27,6 +27,12 @@ DEFAULT_USD_FRED_SERIES: Dict[str, str] = {
     "USD_30Y": "DGS30",
 }
 
+#: Effective fed funds, the cash rate before SOFR existed (April 2018). Kept as
+#: its own column; the funding series below splices it in only where SOFR has
+#: no fixing, so anything after 2018 still runs on SOFR alone.
+FEDFUNDS_COLUMN = "USD_FEDFUNDS"
+FEDFUNDS_FRED_ID = "DFF"
+
 CACHE_FUNDING = "rates_funding.parquet"
 CACHE_CURVE = "rates_curve.parquet"
 CACHE_META = "rates_meta.json"
@@ -181,8 +187,14 @@ def _fetch_funding_panel(
         end=end,
         api_key=fred_api_key,
     ).rename("USD_SOFR")
+    fed_funds = _fred_fetch_series(
+        FEDFUNDS_FRED_ID,
+        start=start,
+        end=end,
+        api_key=fred_api_key,
+    ).rename(FEDFUNDS_COLUMN)
 
-    funding = pd.concat([usd_sofr], axis=1)
+    funding = pd.concat([usd_sofr, fed_funds], axis=1)
     funding = _to_datetime_index(funding)
     return funding
 
@@ -363,7 +375,15 @@ def build_daily_funding_series(
     if base_col not in funding_df.columns:
         raise KeyError(f"Missing funding column: {base_col}")
 
-    base = funding_df[base_col].reindex(pd.to_datetime(index)).ffill().bfill()
+    rate = funding_df[base_col]
+    if FEDFUNDS_COLUMN in funding_df.columns:
+        # Before SOFR's first fixing, fed funds stands in; SOFR wins wherever
+        # it exists. Without this, back-filling would charge pre-2018 cash at
+        # SOFR's 2018 level.
+        rate = rate.combine_first(funding_df[FEDFUNDS_COLUMN])
+
+    target = pd.to_datetime(index)
+    base = rate.reindex(rate.index.union(target)).ffill().reindex(target).bfill()
 
     cash_rate = _annual_percent_to_daily_decimal(base, basis=day_count).rename(
         "cash_rate"

@@ -770,6 +770,19 @@ def _net_exposure_control(method: str) -> float:
     )
 
 
+def _first_priced(
+    data: UniverseData, selection: UniverseSelection
+) -> Dict[str, pd.Timestamp]:
+    """Each selected name's first priced day in the loaded data."""
+    out = {}
+    for name in selection.constituents:
+        if name in data.close.columns:
+            first = data.close[name].first_valid_index()
+            if first is not None:
+                out[name] = pd.Timestamp(first)
+    return out
+
+
 def _construction_controls(
     data: UniverseData, selection: UniverseSelection
 ) -> StrategyConfig:
@@ -814,12 +827,19 @@ def _construction_controls(
 
     first_day = data.close.index.min().date()
     last_day = data.close.index.max().date()
+    first_priced = _first_priced(data, selection)
+    common_start = max(first_priced.values()).date() if first_priced else first_day
     start = start_col.date_input(
         "Start date",
         key="forge_start",
-        value=first_day,
+        value=common_start,
         min_value=first_day,
         max_value=last_day,
+        help=(
+            "Opens on the first day every selected name has a price. Earlier "
+            "is allowed: until a name's first price the book holds only the "
+            "others."
+        ),
     )
     end = end_col.date_input(
         "End date",
@@ -828,6 +848,15 @@ def _construction_controls(
         min_value=first_day,
         max_value=last_day,
     )
+
+    late = sorted((d, name) for name, d in first_priced.items() if d.date() > start)
+    if late:
+        listed = ", ".join(f"{name} ({d.date()})" for d, name in late[:6])
+        more = f" and {len(late) - 6} more" if len(late) > 6 else ""
+        st.caption(
+            f":orange[Not every name has prices from {start}: {listed}{more}. "
+            "Until then the book holds only those that do.]"
+        )
 
     options = _optimizer_controls(method)
     budgets_pct = _budget_controls(selection)

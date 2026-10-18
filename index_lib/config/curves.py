@@ -103,3 +103,53 @@ FUNDING: Dict[str, FundingSpec] = {
 }
 
 DEFAULT_CURVE = "usd_treasury"
+
+
+@dataclass(frozen=True)
+class SyntheticBond:
+    """
+    A constant-maturity government bond, priced from a curve rather than traded.
+
+    A stand-in until real bond data is wired in: the id is what a portfolio
+    holds, so swapping the source later need not change saved work.
+    """
+
+    id: str
+    curve: str
+    tenor: str
+    #: Coupons a year: 2 for US Treasuries, 1 for euro government bonds.
+    frequency: int
+    currency: str
+    label: str
+
+
+def _bonds(prefix, curve, frequency, currency, issuer, tenors):
+    return [
+        SyntheticBond(
+            f"{prefix}{tenor}",
+            curve,
+            tenor,
+            frequency,
+            currency,
+            f"{issuer} {tenor}, synthetic constant maturity ({currency})",
+        )
+        for tenor in tenors
+    ]
+
+
+SYNTHETIC_BONDS: Dict[str, SyntheticBond] = {
+    bond.id: bond
+    for bond in (
+        _bonds(
+            "UST", "usd_treasury", 2, "USD", "US Treasury", ("2Y", "5Y", "10Y", "30Y")
+        )
+        + _bonds("DE", "de_bund", 1, "EUR", "German Bund", ("2Y", "5Y", "10Y", "30Y"))
+        + _bonds(
+            "EUAAA", "eur_aaa", 1, "EUR", "EUR AAA govt", ("2Y", "5Y", "10Y", "30Y")
+        )
+    )
+}
+
+
+def is_synthetic_bond(ticker: str) -> bool:
+    return ticker in SYNTHETIC_BONDS

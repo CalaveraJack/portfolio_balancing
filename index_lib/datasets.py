@@ -5,6 +5,7 @@ from typing import Callable, Dict, Optional, Sequence, TypeVar
 
 import pandas as pd
 
+from index_lib.config.curves import is_synthetic_bond
 from index_lib.config.macro import macro_catalogue
 from index_lib.loaders import (
     inspect_rates_cache,
@@ -17,6 +18,7 @@ from index_lib.loaders.market_caps import (
     align_market_caps_to_prices,
     load_market_caps,
 )
+from index_lib.loaders.synthetic_bonds import synthetic_bond_prices
 
 CACHE_MODES = ("refresh", "cache", "auto")
 
@@ -102,14 +104,74 @@ def load_data(
     end: Optional[str] = None,
     data_dir: str = "data",
     cache_mode: str = "refresh",
+    curves: Optional[CurveData] = None,
 ) -> UniverseData:
     """
-    Load Yahoo universe data under an explicit cache policy.
+    Load a stock set's prices under an explicit cache policy.
+
+    Traded tickers come from Yahoo; synthetic bonds are priced from the yield
+    curves (``curves``, or the curve cache when not given). Both land in one
+    panel, so nothing downstream needs to know which is which.
 
     refresh -> fetch fresh data, update cache, fail loudly on API/data errors.
     cache   -> use the local cache only.
     auto    -> fetch fresh data, fall back to cache on API/data errors.
     """
+    tickers = list(tickers)
+    synthetic = [t for t in tickers if is_synthetic_bond(t)]
+    traded = [t for t in tickers if not is_synthetic_bond(t)]
+
+    parts = []
+    if traded:
+        parts.append(
+            _load_yahoo(
+                traded, start=start, end=end, data_dir=data_dir, cache_mode=cache_mode
+            )
+        )
+    if synthetic:
+        if curves is None:
+            curves = load_curves_cached(data_dir=data_dir, cache_mode=cache_mode)
+        prices = synthetic_bond_prices(synthetic, curves, start=start, end=end)
+        if prices.empty:
+            raise ValueError(
+                "No curve data for the synthetic bonds. Reload with a refreshing "
+                "data mode to fetch the yield curves."
+            )
+        parts.append(
+            UniverseData(
+                close=prices,
+                volume=pd.DataFrame(index=prices.index, columns=prices.columns),
+                market_caps=pd.DataFrame(index=prices.index, columns=prices.columns),
+            )
+        )
+
+    if len(parts) == 1:
+        return parts[0]
+
+    # Bonds and stocks trade on slightly different calendars; the union keeps
+    # every day either priced, and the backtest treats a missing price as a
+    # stale one, not a sale.
+    close = pd.concat([p.close for p in parts], axis=1, sort=True)
+    return UniverseData(
+        close=close,
+        volume=pd.concat([p.volume for p in parts], axis=1, sort=True).reindex(
+            close.index
+        ),
+        market_caps=pd.concat([p.market_caps for p in parts], axis=1, sort=True)
+        .reindex(close.index)
+        .ffill(),
+    )
+
+
+def _load_yahoo(
+    tickers: Sequence[str],
+    *,
+    start: str,
+    end: Optional[str],
+    data_dir: str,
+    cache_mode: str,
+) -> UniverseData:
+    """Yahoo prices, volumes and approximate market caps for traded tickers."""
     tickers = list(tickers)
 
     def _fetch_prices(mode: str):

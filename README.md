@@ -51,8 +51,10 @@ Only what applies to every tab:
 
 - **Working set**: the stock set Universe, Strategy Forge and Compare use, with
   its real date range.
-- **Settings** (closed by default): data mode, reload, and **Data status**, the
-  latest observation of every source and any failures.
+- **Settings** (closed by default): data mode, **History from** (2022 to
+  1990), reload, and **Data status**, the latest observation of every source
+  and any failures. History before 2022 needs one refresh the first time.
+  Before SOFR (April 2018) cash earns the effective fed funds rate.
 
 | Data mode | Behaviour |
 | --- | --- |
@@ -134,6 +136,8 @@ The sidebar picks which stocks are loaded. Three ship with the app:
 | Mega-cap Core | 10 |
 | Diversified + ETFs | 21 |
 | Multi-asset (ETFs) | 17 |
+| Government bonds (synthetic) | 12 |
+| Multi-asset, long history | 11 |
 
 Switching reloads the data and clears selections made against the previous set,
 since they are not valid against the new one.
@@ -148,6 +152,14 @@ Every ticker belongs to one of seven asset classes: equities, government bonds,
 inflation-linked bonds, corporate & EM credit, real estate, commodities, gold.
 ETFs are tagged in `index_lib/config/asset_classes.py`; anything untagged is a
 single stock and so an equity, which is why the equity sets need no tagging.
+
+**Synthetic government bonds.** `UST2Y` to `UST30Y`, `DE2Y` to `DE30Y` and
+`EUAAA2Y` to `EUAAA30Y` are constant-maturity bonds priced from the yield
+curves: exact daily repricing with coupon income and roll-down. They track
+SHY, IEF and TLT within 0.1–0.4 pp a year after fees since 2002, and reach
+back to 1990 (Treasuries), 1997 (Bunds) and 2004 (EUR AAA). EUR bonds are in
+local currency. They stand in for real bond data, which will replace them
+under the same ids. Method, validation and limitations: `docs/BONDS.md`.
 
 The **Multi-asset (ETFs)** set holds proxies for each class: SPY, IWM, VEA, VGK,
 EWJ, EEM; SHY, IEF, TLT, BWX; TIP; LQD, HYG, EMB; VNQ; DBC; GLD. Bond returns
@@ -488,7 +500,7 @@ $$
 | --- | --- | --- |
 | Yahoo Finance | Close and volume | `data/*.parquet` |
 | Yahoo Finance | Market caps, sector metadata | `data/*.parquet` |
-| FRED | SOFR and the Treasury curve | `data/*.parquet` |
+| FRED | SOFR, effective fed funds, and the Treasury curve | `data/*.parquet` |
 | FRED, ECB, Eurostat, Bundesbank | Macro indicators | `data/macro_series.parquet` |
 | FRED, ECB, Bundesbank | Inspectable curves, SOFR, €STR | `data/curves_series.parquet` |
 
@@ -570,6 +582,8 @@ index_lib/portfolio/covariance.py               covariance estimators
 index_lib/simulation/                           funding paths, strategy bootstrap
 index_lib/vectorization_utilities/              vectorized MC engines
 index_lib/core/rates.py                         curve factors and curve moves
+index_lib/core/bonds.py                         constant-maturity bond returns from yields
+index_lib/loaders/synthetic_bonds.py            synthetic bond prices for the price panel
 index_lib/config/universes.py                   stock sets and benchmarks
 index_lib/config/asset_classes.py               asset classes and ETF tags
 index_lib/config/macro_catalogue.csv            the macro indicator catalogue

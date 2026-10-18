@@ -9,7 +9,7 @@ calls lives in index_lib/runner.py and knows nothing about Streamlit.
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import streamlit as st
 
@@ -34,8 +34,15 @@ def get_universe_data(
     start: str,
     data_dir: str,
     cache_mode: str,
+    _curves: Optional[CurveData] = None,
 ) -> UniverseData:
-    return load_data(tickers, start=start, data_dir=data_dir, cache_mode=cache_mode)
+    """
+    Prices for a stock set. ``_curves`` prices any synthetic bonds in it; the
+    leading underscore keeps it out of the cache key, and Reload clears both.
+    """
+    return load_data(
+        tickers, start=start, data_dir=data_dir, cache_mode=cache_mode, curves=_curves
+    )
 
 
 @st.cache_resource(show_spinner="Loading rates data...")

@@ -114,6 +114,40 @@ MULTI_ASSET: List[str] = [
 ]
 
 
+#: Synthetic constant-maturity government bonds, priced from yield curves
+#: (see config/curves.py). History back to 1990 for US Treasuries.
+GOVT_BONDS: List[str] = [
+    "UST2Y",
+    "UST5Y",
+    "UST10Y",
+    "UST30Y",
+    "DE2Y",
+    "DE5Y",
+    "DE10Y",
+    "DE30Y",
+    "EUAAA2Y",
+    "EUAAA5Y",
+    "EUAAA10Y",
+    "EUAAA30Y",
+]
+
+#: Long-lived ETFs alongside synthetic bonds, for allocations that need more
+#: history than the bond ETFs have. Set "History from" earlier in Settings.
+MULTI_ASSET_LONG: List[str] = [
+    "SPY",
+    "IWM",
+    "EFA",
+    "EEM",
+    "UST2Y",
+    "UST10Y",
+    "UST30Y",
+    "DE10Y",
+    "VNQ",
+    "DBC",
+    "GLD",
+]
+
+
 DEFAULT_UNIVERSE: List[str] = PHARMA_48
 
 
@@ -141,6 +175,12 @@ UNIVERSES: Dict[str, Universe] = {
         Universe("megacap", "Mega-cap Core", tuple(BASE_10)),
         Universe("diversified", "Diversified + ETFs", tuple(PLUS_20)),
         Universe("multi_asset", "Multi-asset (ETFs)", tuple(MULTI_ASSET)),
+        Universe("govt_bonds", "Government bonds (synthetic)", tuple(GOVT_BONDS)),
+        Universe(
+            "multi_asset_long",
+            "Multi-asset, long history",
+            tuple(MULTI_ASSET_LONG),
+        ),
     )
 }
 

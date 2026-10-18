@@ -137,6 +137,16 @@ Each line: **what to do** → what should happen.
 - [ ] **J3** In Cache only, pick a benchmark never downloaded → warning naming it and telling how to fetch it.
 - [ ] **J4** Shared period vs Since each start → charts change; disjoint series give the explanatory warning.
 
+## L. Bonds and long history
+
+- [ ] **L1** Stock set *Government bonds (synthetic)* → twelve bonds, all under Government bonds; Universe overview shows descriptions with "synthetic constant maturity".
+- [ ] **L2** Settings → History from *1990* → Reload in a refreshing mode once → *Multi-asset, long history* shows SPY from 1993, EFA 2001, UST from 1990, DE10Y 1997.
+- [ ] **L3** Forge on the long set → Start date opens on the first day every name has a price; move it earlier → orange note naming the late names.
+- [ ] **L4** 60/40 class budgets SPY + UST10Y from 2005 → 2008 calendar year about −14%, 2022 about −17% (Compare or Diagnostics → Drawdowns).
+- [ ] **L5** Compare UST10Y against IEF (benchmark) since 2022 → close tracking; small gap.
+- [ ] **L6** Net exposure 80% on a pre-2018 window → runs; cash earns fed funds (no flat 2018 SOFR back-fill).
+- [ ] **L7** Change History from → Forge dates and Snapshot dates reset without errors.
+
 ## K. Overall
 
 - [ ] **K1** At ~1280 px width nothing overlaps or clips (sidebar table, pills, toolbar, budget table).

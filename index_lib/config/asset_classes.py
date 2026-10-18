@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Tuple
 
+from index_lib.config.curves import SYNTHETIC_BONDS
+
 #: Class key -> label, in the order the controls list them. Keys are saved in
 #: strategies with class budgets, so they must never change; labels can.
 ASSET_CLASSES: Dict[str, str] = {
@@ -38,6 +40,7 @@ INSTRUMENTS: Dict[str, Instrument] = {
     "IWM": Instrument("equity", "US small cap (Russell 2000)"),
     "ACWI": Instrument("equity", "Global all-country"),
     "VEA": Instrument("equity", "Developed ex-US"),
+    "EFA": Instrument("equity", "Developed ex-US (EAFE)"),
     "VGK": Instrument("equity", "Europe"),
     "EWJ": Instrument("equity", "Japan"),
     "EEM": Instrument("equity", "Emerging markets"),
@@ -77,6 +80,11 @@ INSTRUMENTS: Dict[str, Instrument] = {
     "XLRE": Instrument("real_estate", "US real estate sector"),
     "DBC": Instrument("commodities", "Broad commodities"),
     "GLD": Instrument("gold", "Gold"),
+    # Synthetic constant-maturity government bonds, priced from yield curves.
+    **{
+        bond.id: Instrument("govt_bonds", bond.label)
+        for bond in SYNTHETIC_BONDS.values()
+    },
 }
 
 

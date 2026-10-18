@@ -100,6 +100,26 @@ def reset_universe_dependent_widgets(universe_key: str) -> None:
     st.session_state[ACTIVE_UNIVERSE_KEY] = universe_key
 
 
+#: Date pickers whose valid range moves with the "History from" setting.
+HISTORY_DEPENDENT_KEYS = ("forge_start", "forge_end")
+ACTIVE_HISTORY_KEY = "_active_history_start"
+
+
+def reset_history_dependent_widgets(history_start: str) -> None:
+    """Clear date picks made against a different history range."""
+    if st.session_state.get(ACTIVE_HISTORY_KEY) == history_start:
+        return
+
+    for key in HISTORY_DEPENDENT_KEYS:
+        st.session_state.pop(key, None)
+    for key in [k for k in st.session_state if str(k).startswith("rates_snapshot_")]:
+        st.session_state.pop(key, None)
+    for key in [k for k in st.session_state if str(k).startswith("rates_compare_")]:
+        st.session_state.pop(key, None)
+
+    st.session_state[ACTIVE_HISTORY_KEY] = history_start
+
+
 def control_values(config: StrategyConfig, overlay: OverlayConfig) -> Dict[str, object]:
     """
     Map saved settings back onto the controls.
