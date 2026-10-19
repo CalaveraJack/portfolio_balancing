@@ -466,7 +466,7 @@ def _render_currency(contrib: pd.DataFrame, base: str, by_sleeve: bool) -> None:
     with table_col:
         st.dataframe(table, hide_index=True, width="stretch")
         if by_sleeve:
-            last = contrib[contrib["date"] == contrib["date"].max()]
+            last = diagnostics.latest(contrib)
             where = (
                 last[last["currency"] != base]
                 .pivot_table(

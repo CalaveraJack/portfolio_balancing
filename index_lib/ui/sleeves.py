@@ -249,11 +249,14 @@ def _portfolio(data: UniverseData, held: List[str], several: bool, foreign: bool
     )
     first_day = data.close.index.min().date()
     last_day = data.close.index.max().date()
+    # The browser sends a date field's last value back on every rerun, so
+    # clearing it does not reset it; a new key per data range does.
+    window_key = f"{first_day}_{last_day}_{session.held_names_key()}"
     first_priced = _first_priced(data, held)
     common_start = max(first_priced.values()).date() if first_priced else first_day
     start = start_col.date_input(
         "Start",
-        key="forge_start",
+        key=f"forge_start_{window_key}",
         value=common_start,
         min_value=first_day,
         max_value=last_day,
@@ -261,7 +264,7 @@ def _portfolio(data: UniverseData, held: List[str], several: bool, foreign: bool
     )
     end = end_col.date_input(
         "End",
-        key="forge_end",
+        key=f"forge_end_{window_key}",
         value=last_day,
         min_value=first_day,
         max_value=last_day,

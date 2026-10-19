@@ -219,11 +219,24 @@ def contributions(result, cfg) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)[columns]
 
 
+def latest(contrib: pd.DataFrame) -> pd.DataFrame:
+    """
+    Each sleeve's holdings at its own last rebalance.
+
+    Sleeves of bonds and of funds trade on slightly different calendars, so
+    their last rebalances need not fall on the same day.
+    """
+    if contrib.empty:
+        return contrib
+    last_date = contrib.groupby("sleeve")["date"].transform("max")
+    return contrib[contrib["date"] == last_date]
+
+
 def currency_exposure(contrib: pd.DataFrame) -> pd.DataFrame:
     """At the last rebalance, per currency: exposure, share hedged, what is left."""
     if contrib.empty:
         return pd.DataFrame(columns=["exposure", "hedged", "net"])
-    last = contrib[contrib["date"] == contrib["date"].max()]
+    last = latest(contrib)
     hedged_weight = (last["weight"] * last["hedged"]).groupby(last["currency"]).sum()
     exposure = last.groupby("currency")["weight"].sum()
     out = pd.DataFrame({"exposure": exposure})
@@ -237,7 +250,9 @@ def unhedged_history(contrib: pd.DataFrame, base: str) -> pd.DataFrame:
     foreign = contrib[contrib["currency"] != base]
     if foreign.empty:
         return pd.DataFrame()
-    net = foreign["weight"] * (1.0 - foreign["hedged"])
-    return (
-        net.groupby([foreign["date"], foreign["currency"]]).sum().unstack().fillna(0.0)
-    )
+    open_weight = foreign.assign(open=foreign["weight"] * (1.0 - foreign["hedged"]))
+    by_sleeve = open_weight.pivot_table(
+        index="date", columns=["sleeve", "currency"], values="open", aggfunc="sum"
+    ).sort_index()
+    # Each sleeve carries its holdings forward over the other calendars' days.
+    return by_sleeve.ffill().fillna(0.0).T.groupby(level="currency").sum().T

@@ -97,6 +97,12 @@ def sleeve_state(
     return state
 
 
+def held_names_key() -> str:
+    """Changes when the asset set changes or a portfolio is opened."""
+    universe = st.session_state.get(ACTIVE_UNIVERSE_KEY, "")
+    return f"{universe}_{st.session_state.get(LOADED_NAME_KEY, '')}"
+
+
 def held_names() -> List[str]:
     """Every name any sleeve holds, once each."""
     sleeves = st.session_state.get(SLEEVES_KEY) or []
@@ -109,8 +115,6 @@ def held_names() -> List[str]:
 UNIVERSE_DEPENDENT_KEYS = (
     SLEEVES_KEY,
     "univ_compared",
-    "forge_start",
-    "forge_end",
     "univ_ticker",
 )
 
@@ -160,18 +164,18 @@ def reset_universe_dependent_widgets(universe_key: str) -> None:
     st.session_state[ACTIVE_UNIVERSE_KEY] = universe_key
 
 
-#: Date pickers whose valid range moves with the "History from" setting.
-HISTORY_DEPENDENT_KEYS = ("forge_start", "forge_end")
 ACTIVE_HISTORY_KEY = "_active_history_start"
 
 
 def reset_history_dependent_widgets(history_start: str) -> None:
-    """Clear date picks made against a different history range."""
+    """
+    Clear date picks made against a different history range.
+
+    The Forge's dates need no clearing: their keys carry the data range.
+    """
     if st.session_state.get(ACTIVE_HISTORY_KEY) == history_start:
         return
 
-    for key in HISTORY_DEPENDENT_KEYS:
-        st.session_state.pop(key, None)
     for key in [k for k in st.session_state if str(k).startswith("rates_snapshot_")]:
         st.session_state.pop(key, None)
     for key in [k for k in st.session_state if str(k).startswith("rates_compare_")]:
