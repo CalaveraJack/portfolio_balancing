@@ -400,3 +400,101 @@ hr {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+
+/* ---------------------------------------------------------------
+   Loading: a triangle spinning fast, a smaller one pulsing inside
+   it, in the screen's accent. Replaces Streamlit's
+   ring spinner and the running figure in the top bar alike.
+   --------------------------------------------------------------- */
+
+@keyframes forge-turn {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes forge-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+[data-testid="stSpinnerIcon"],
+[data-testid="stStatusWidgetRunningIcon"] {
+  position: relative;
+  display: inline-block;
+  width: 1.15rem !important;
+  height: 1.15rem !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: none !important;
+  animation: forge-turn 0.6s linear infinite !important;
+}
+
+[data-testid="stSpinnerIcon"]::before,
+[data-testid="stSpinnerIcon"]::after,
+[data-testid="stStatusWidgetRunningIcon"]::before,
+[data-testid="stStatusWidgetRunningIcon"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+/* The outline: a hollow triangle whose centroid is the box's centre, so it
+   turns in place. */
+[data-testid="stSpinnerIcon"]::before,
+[data-testid="stStatusWidgetRunningIcon"]::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpolygon points='12,2.8 20,16.6 4,16.6' fill='none' stroke='black' stroke-width='2' stroke-linejoin='miter'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpolygon points='12,2.8 20,16.6 4,16.6' fill='none' stroke='black' stroke-width='2' stroke-linejoin='miter'/%3E%3C/svg%3E");
+}
+
+/* The core: a small solid triangle, pulsing. */
+[data-testid="stSpinnerIcon"]::after,
+[data-testid="stStatusWidgetRunningIcon"]::after {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpolygon points='12,8 15.5,14 8.5,14' fill='black'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpolygon points='12,8 15.5,14 8.5,14' fill='black'/%3E%3C/svg%3E");
+  animation: forge-pulse 0.9s ease-in-out infinite;
+}
+
+[data-testid="stStatusWidgetRunningIcon"] svg {
+  display: none !important;
+}
+
+/* The words beside it: terminal-like, quiet. */
+[data-testid="stSpinner"] [role="status"] p {
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-testid="stSpinnerIcon"],
+  [data-testid="stStatusWidgetRunningIcon"],
+  [data-testid="stSpinnerIcon"]::after,
+  [data-testid="stStatusWidgetRunningIcon"]::after {
+    animation-duration: 6s !important;
+  }
+}
+
+/* ---------------------------------------------------------------
+   No ghosts. While a rerun is drawing, Streamlit leaves the previous
+   screen's elements faded on the page until each is replaced. A quick
+   rerun (an edited number) should not blink, so the old elements only
+   vanish once the rerun has taken a quarter of a second, as switching
+   to another view does. New elements appear at once.
+   --------------------------------------------------------------- */
+
+[data-testid="stElementContainer"][data-stale="true"] {
+  opacity: 0 !important;
+  pointer-events: none;
+  transition: opacity 120ms ease 250ms !important;
+}
+
+[data-testid="stElementContainer"][data-stale="false"] {
+  transition: none !important;
+}

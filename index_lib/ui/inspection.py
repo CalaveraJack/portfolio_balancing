@@ -53,11 +53,13 @@ def render(
     view = view or VIEWS[0]
     window = window or DEFAULT_WINDOW
 
-    if view == "Rates":
-        rates.render(curves, window)
-    elif view == "FX":
-        fx_view.render(fx, rates_data, curves, window)
-    elif view == "Universe":
-        universe.render(data, window)
-    else:
-        macro.render(macro_data, cache_mode, window)
+    # Shown only if the view takes more than half a second to build.
+    with st.spinner(f"Building {view.lower()} view"):
+        if view == "Rates":
+            rates.render(curves, window)
+        elif view == "FX":
+            fx_view.render(fx, rates_data, curves, window)
+        elif view == "Universe":
+            universe.render(data, window)
+        else:
+            macro.render(macro_data, cache_mode, window)

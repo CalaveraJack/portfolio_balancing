@@ -131,18 +131,16 @@ def render(
             ),
         )
 
-    comparables = (
-        _run_comparables(chosen_runs)
-        + [
-            c
-            for c in (
-                compare.from_price(t, t, data.close, t, kind="stock")
-                for t in chosen_stocks
-            )
-            if c is not None
-        ]
-        + _benchmark_comparables(chosen_benchmarks, cache_mode, history_start, data_dir)
-    )
+    with st.spinner("Gathering runs and benchmarks"):
+        comparables = _gather(
+            data,
+            chosen_runs,
+            chosen_stocks,
+            chosen_benchmarks,
+            cache_mode,
+            history_start,
+            data_dir,
+        )
 
     if len(comparables) < 1:
         note("Pick at least one thing to compare.")
@@ -155,6 +153,36 @@ def render(
             "Measure against", key="cmp_baseline", options=labels, index=0
         )
 
+    with st.spinner("Comparing"):
+        _performance(comparables, alignment, baseline)
+
+
+def _gather(
+    data,
+    chosen_runs,
+    chosen_stocks,
+    chosen_benchmarks,
+    cache_mode,
+    history_start,
+    data_dir,
+):
+    """Everything picked, as comparables: recorded runs, stocks, benchmarks."""
+    return (
+        _run_comparables(chosen_runs)
+        + [
+            c
+            for c in (
+                compare.from_price(t, t, data.close, t, kind="stock")
+                for t in chosen_stocks
+            )
+            if c is not None
+        ]
+        + _benchmark_comparables(chosen_benchmarks, cache_mode, history_start, data_dir)
+    )
+
+
+def _performance(comparables, alignment: str, baseline: str) -> None:
+    """Growth, statistics, drawdowns and relative performance of the picks."""
     if len(comparables) > MAX_SENSIBLE:
         note(
             f"Showing {len(comparables)} series; charts get hard to read "

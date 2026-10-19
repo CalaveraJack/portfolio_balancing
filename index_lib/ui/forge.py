@@ -928,10 +928,12 @@ def render(
 
     _render_backtest(result, cfg, recording=opened is None)
     _handle_run_actions(cfg, overlay_cfg, selection, live, data_mode, data.vintage)
-    _render_holdings(result, opened.config if opened is not None else cfg)
+    with st.spinner("Reading holdings"):
+        _render_holdings(result, opened.config if opened is not None else cfg)
 
     st.divider()
-    _render_diagnostics(result, opened.config if opened is not None else cfg)
+    with st.spinner("Running diagnostics"):
+        _render_diagnostics(result, opened.config if opened is not None else cfg)
 
     _render_monte_carlo(
         data,
