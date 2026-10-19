@@ -232,6 +232,23 @@ h1, h2, h3,
   letter-spacing: 0.06em;
 }
 
+/* Same height as text and number inputs, so a row of mixed controls shares
+   one baseline. */
+[data-testid="stButtonGroup"] [role="radiogroup"] button,
+[data-testid="stButtonGroup"] [role="toolbar"] button {
+  min-height: 2.5rem;
+}
+
+/* Streamlit pads the group by a negative margin, so pills overhang their box
+   by a few pixels and sit below a neighbouring input. Flush instead. */
+[data-testid="stButtonGroup"] [role="radiogroup"],
+[data-testid="stButtonGroup"] [role="toolbar"] {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
 [data-testid="stButtonGroup"] button[aria-checked="true"] {
   color: var(--accent);
   border-color: var(--accent);

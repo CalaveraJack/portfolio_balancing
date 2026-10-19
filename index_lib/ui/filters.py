@@ -34,13 +34,13 @@ def pills(
     return list(picked) if picked else list(options)
 
 
-def search(key: str, placeholder: str = "Search") -> str:
+def search(key: str, placeholder: str = "Search", label: str = "") -> str:
     return (
         st.text_input(
-            placeholder,
+            label or placeholder,
             key=key,
             placeholder=placeholder,
-            label_visibility="collapsed",
+            label_visibility="visible" if label else "collapsed",
         )
         .strip()
         .lower()

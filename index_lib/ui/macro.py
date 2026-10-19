@@ -78,14 +78,13 @@ def _filtered(catalogue: List[Indicator]) -> List[Indicator]:
     regions = list(dict.fromkeys(i.region for i in catalogue))
     categories = sorted({i.category for i in catalogue})
 
-    region_col, category_col, search_col = st.columns([2, 4, 2])
+    region_col, category_col, search_col = st.columns([2, 6, 2])
     with region_col:
         chosen_regions = filters.pills("Region", regions, "macro_regions")
     with category_col:
         chosen_categories = filters.pills("Category", categories, "macro_categories")
     with search_col:
-        st.caption("Search")
-        needle = filters.search("macro_q", "Search indicators")
+        needle = filters.search("macro_q", "Search indicators", label="Search")
 
     shown = [
         i

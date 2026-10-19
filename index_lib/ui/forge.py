@@ -27,7 +27,7 @@ from index_lib.strategy import (
     UniverseSelection,
     method_name,
 )
-from index_lib.ui import cache, figures, session, sleeves, tables
+from index_lib.ui import cache, figures, grid, session, sleeves, tables
 from index_lib.ui.help_text import HELP, MC_METHOD_HELP
 from index_lib.ui.theme import SERIES_COLORS, note, screen, section
 
@@ -318,7 +318,7 @@ def _resolve_open_run(
         st.error(str(exc))
         return live, None
 
-    header, close_col = st.columns([4, 1])
+    header, close_col = grid.row((4, 2))
     header.info(f"Showing the recorded run **{record.name}** ({record.period}).")
     if close_col.button("Back to live", key="run_close", width="stretch"):
         st.session_state.pop(OPEN_RUN_KEY, None)
@@ -357,7 +357,7 @@ def _resolve_open_run(
 
 def _record_controls(cfg: StrategyConfig) -> None:
     """Record the run where its numbers are, not above them."""
-    name_col, button_col = st.columns([3, 1], vertical_alignment="bottom")
+    name_col, button_col = grid.row((4, 2))
     name_col.text_input(
         "Run name",
         key="run_name",
@@ -381,7 +381,7 @@ def _render_backtest(
     if recording:
         _record_controls(cfg)
 
-    stats_col, chart_col = st.columns([1, 3], gap="large")
+    stats_col, chart_col = grid.row((2, 4), vertical_alignment="top")
 
     with stats_col:
         leverage = (
@@ -462,7 +462,7 @@ def _render_currency(contrib: pd.DataFrame, base: str, by_sleeve: bool) -> None:
             ],
         }
     )
-    table_col, chart_col = st.columns([1, 3], gap="large")
+    table_col, chart_col = grid.row((2, 4), vertical_alignment="top")
     with table_col:
         st.dataframe(table, hide_index=True, width="stretch")
         if by_sleeve:
@@ -544,7 +544,7 @@ def _render_holdings(result: runner.BacktestResult, cfg: StrategyConfig) -> None
         latest = _latest(history, "Ticker")
         title = f"{view}: weights inside the sleeve"
 
-    table_col, chart_col = st.columns([1, 3], gap="large")
+    table_col, chart_col = grid.row((2, 4), vertical_alignment="top")
     with table_col:
         st.dataframe(
             latest,
@@ -885,7 +885,7 @@ def render(
     selection, cfg, overlay_cfg = sleeves.render(data, universe_key, available)
 
     with toolbar:
-        saved_col, open_col = st.columns([1, 4], vertical_alignment="center")
+        saved_col, open_col = grid.row((2, 4), vertical_alignment="center")
         with saved_col:
             _saved_popover(selection)
         loaded = session.loaded_name()

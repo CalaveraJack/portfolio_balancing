@@ -40,14 +40,15 @@ from index_lib.strategy import (
     method_uses_lookback,
     unavailable_methods,
 )
-from index_lib.ui import filters, session
+from index_lib.ui import filters, grid, session
 from index_lib.ui.help_text import HELP
 from index_lib.ui.theme import section
 
 DEFAULT_CONSTITUENT_COUNT = 6
 
-#: Column widths of a sleeve line: name, budget, method, names, settings, delete.
-ROW = [3, 2, 4, 3, 1, 1]
+#: The portfolio row on the grid: base, rebalance, start, end, settings (two
+#: columns, so it ends on the page edge like the sleeve lines' delete).
+PORTFOLIO = (1, 1, 1, 1, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +208,11 @@ def _overlay_settings() -> OverlayConfig:
 
 
 def _currency_hedges(held: List[str], base: str) -> Dict[str, float]:
-    """One hedge ratio per foreign currency held, in a short visible line."""
+    """One hedge ratio per foreign currency held, on the portfolio row's grid."""
     foreign = sorted({currency_of(t) for t in held} - {base})
     if not foreign:
         return {}
-    columns = st.columns([2, *([2] * len(foreign)), max(1, 8 - 2 * len(foreign))])
-    columns[0].caption("Currency hedge", help=HELP["currency_hedge"])
+    columns = grid.row(PORTFOLIO)
     return {
         ccy: column.number_input(
             f"{ccy} hedged (%)",
@@ -221,16 +221,15 @@ def _currency_hedges(held: List[str], base: str) -> Dict[str, float]:
             max_value=100.0,
             step=5.0,
             value=0.0,
+            help=HELP["currency_hedge"],
         )
-        for ccy, column in zip(foreign, columns[1:])
+        for ccy, column in zip(foreign, columns)
     }
 
 
 def _portfolio(data: UniverseData, held: List[str], several: bool, foreign: bool):
     """Base currency, rebalance, period; the rest behind one settings button."""
-    base_col, rebalance_col, start_col, end_col, more_col = st.columns(
-        [3, 3, 3, 3, 1], vertical_alignment="bottom"
-    )
+    base_col, rebalance_col, start_col, end_col, more_col = grid.row(PORTFOLIO)
     base = (
         base_col.segmented_control(
             "Base currency",
@@ -269,7 +268,9 @@ def _portfolio(data: UniverseData, held: List[str], several: bool, foreign: bool
     )
 
     band = cost = 0.0
-    with more_col.popover(":material/tune:", help=HELP["portfolio_more"]):
+    with more_col.popover(
+        ":material/tune:", help=HELP["portfolio_more"], width="stretch"
+    ):
         if several:
             band = st.number_input(
                 "Drift band (%)",
@@ -474,7 +475,9 @@ def _sleeve_row(
 ) -> bool:
     """One line: name, budget, method, names, settings, delete. True if deleted."""
     columns = iter(
-        st.columns(ROW if several else [4, 3, 1], vertical_alignment="center")
+        # Bottom-aligned: a labelled box beside unlabelled buttons must share
+        # the box's baseline, not its centre.
+        grid.row((1, 1, 1, 1, 1, 1) if several else (3, 1, 2))
     )
 
     if several:
@@ -501,8 +504,13 @@ def _sleeve_row(
         )
 
     if sleeve["cash"]:
-        next(columns).caption(
-            f"Cash at the {base} overnight rate", help=HELP["cash_sleeve"]
+        next(columns).text_input(
+            "Method",
+            value=f"Cash at the {base} overnight rate",
+            key=f"{_key(sleeve, 'cash')}_{base}",
+            disabled=True,
+            label_visibility="collapsed",
+            help=HELP["cash_sleeve"],
         )
         next(columns)
         next(columns)
@@ -510,6 +518,7 @@ def _sleeve_row(
             ":material/delete:",
             key=_key(sleeve, "delete"),
             help=HELP["delete_sleeve"],
+            width="stretch",
         )
 
     # Only what applies to these names: no cap weight without caps, no price
@@ -546,7 +555,9 @@ def _sleeve_row(
     ):
         _names_picker(sleeve, available)
 
-    with next(columns).popover(":material/tune:", help=HELP["sleeve_more"]):
+    with next(columns).popover(
+        ":material/tune:", help=HELP["sleeve_more"], width="stretch"
+    ):
         _sleeve_settings(sleeve, base)
 
     if several:
@@ -554,8 +565,45 @@ def _sleeve_row(
             ":material/delete:",
             key=_key(sleeve, "delete"),
             help=HELP["delete_sleeve"],
+            width="stretch",
         )
     return False
+
+
+def _sleeve_actions(sleeves: List[Dict[str, object]], several: bool) -> None:
+    """Add sleeve, Add cash, By class: under the lines, on the sleeves' grid."""
+    add_col, cash_col, split_col, _ = grid.row((1, 1, 1, 3))
+    if add_col.button(
+        "Add sleeve",
+        key="forge_add",
+        icon=":material/add:",
+        width="stretch",
+        help=HELP["add_sleeve"],
+    ):
+        _add_sleeve(sleeves)
+        st.rerun()
+    if not any(s["cash"] for s in sleeves) and cash_col.button(
+        "Add cash",
+        key="forge_add_cash",
+        icon=":material/savings:",
+        width="stretch",
+        help=HELP["cash_sleeve"],
+    ):
+        _add_cash(sleeves)
+        st.rerun()
+    if (
+        not several
+        and len(classes_present(sleeves[0]["names"])) > 1
+        and split_col.button(
+            "By class",
+            key="forge_split",
+            icon=":material/call_split:",
+            width="stretch",
+            help=HELP["split"],
+        )
+    ):
+        st.session_state[session.SLEEVES_KEY] = _split_by_class(sleeves[0])
+        st.rerun()
 
 
 def _sleeve_notes(sleeves: List[Dict[str, object]], several: bool) -> None:
@@ -632,43 +680,11 @@ def render(
     portfolio, overlay = _portfolio(data, held, several, foreign_any)
     base = portfolio["base_currency"]
 
-    title_col, split_col, cash_col, add_col = st.columns(
-        [3, 1, 1, 1], vertical_alignment="bottom"
-    )
-    with title_col:
-        section("Sleeves", help=HELP["sleeves"])
-    if not several and len(classes_present(sleeves[0]["names"])) > 1:
-        if split_col.button(
-            "By class",
-            key="forge_split",
-            icon=":material/call_split:",
-            width="stretch",
-            help=HELP["split"],
-        ):
-            st.session_state[session.SLEEVES_KEY] = _split_by_class(sleeves[0])
-            st.rerun()
-    if not any(s["cash"] for s in sleeves) and cash_col.button(
-        "Add cash",
-        key="forge_add_cash",
-        icon=":material/savings:",
-        width="stretch",
-        help=HELP["cash_sleeve"],
-    ):
-        _add_cash(sleeves)
-        st.rerun()
-    if add_col.button(
-        "Add sleeve",
-        key="forge_add",
-        icon=":material/add:",
-        width="stretch",
-        help=HELP["add_sleeve"],
-    ):
-        _add_sleeve(sleeves)
-        st.rerun()
+    section("Sleeves", help=HELP["sleeves"])
 
     if several:
         for column, label in zip(
-            st.columns(ROW), ("Sleeve", "Budget (%)", "Method", "Names")
+            grid.row((1, 1, 1, 1, 1, 1)), ("Sleeve", "Budget (%)", "Method", "Names")
         ):
             column.caption(label)
 
@@ -683,6 +699,7 @@ def render(
         ]
         st.rerun()
 
+    _sleeve_actions(sleeves, several)
     _sleeve_notes(sleeves, several)
 
     funded = [

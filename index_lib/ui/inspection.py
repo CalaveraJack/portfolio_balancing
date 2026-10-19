@@ -40,13 +40,14 @@ def render(
         key="inspect_view",
         label_visibility="collapsed",
     )
-    window = window_col.segmented_control(
-        "Window",
-        options=list(WINDOWS),
-        default=DEFAULT_WINDOW,
-        key="inspect_window",
-        help="How far back every view looks, counted from its latest data.",
-    )
+    with window_col.container(horizontal_alignment="right"):
+        window = st.segmented_control(
+            "Window",
+            options=list(WINDOWS),
+            default=DEFAULT_WINDOW,
+            key="inspect_window",
+            help="How far back every view looks, counted from its latest data.",
+        )
 
     # Clicking the selected pill clears it; fall back rather than show nothing.
     view = view or VIEWS[0]
