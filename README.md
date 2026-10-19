@@ -1,15 +1,23 @@
 # Strategy Forge
 
-A Streamlit research terminal for building systematic equity and multi-asset
-strategies, saving them, re-running them, comparing them, and working out why
-they behaved the way they did. Alongside it sits a data inspection layer for the
-USD curve, the stock sets and a catalogue of macro indicators.
+A Streamlit research terminal for building **multi-asset portfolios** and
+systematic equity strategies, saving them, re-running them, comparing them, and
+working out why they behaved the way they did. Alongside it sits a data
+inspection layer for yield curves, FX, the asset sets and a catalogue of macro
+indicators.
 
 > UI/UX co-authored with Claude (Anthropic).
 
-It covers passive construction rules and the PM classics, funding-aware
-volatility targeting, forward simulation, and a persistence layer that separates
-the logic of a strategy from any one execution of it.
+| Area | What it covers |
+| --- | --- |
+| Asset classes | Equities, government bonds, inflation-linked bonds, corporate & EM credit, real estate, commodities, gold |
+| Portfolios | Built from **sleeves**: semi-portfolios with their own names, method and settings, held at fixed budgets, plus an optional cash sleeve |
+| Construction | Passive rules, the PM classics (min variance, risk parity, max Sharpe, max diversification) and bond rules (duration, target duration, carry) |
+| Bonds | Synthetic constant-maturity government bonds (US Treasuries, Bunds, EUR AAA) priced from the curve, back to 1990 |
+| Currency | USD or EUR base, ECB FX rates, per-currency forward hedging with a per-sleeve override |
+| Risk and funding | Funding-aware volatility targeting, cash at SOFR or €STR, long/short optimizers |
+| Research | Diagnostics, holdings by sleeve and currency, comparison with benchmarks (e.g. SPY), Monte Carlo |
+| Persistence | Strategies, portfolios and recorded runs, kept apart from any one execution |
 
 Repository: <https://github.com/CalaveraJack/portfolio_balancing>
 
@@ -73,8 +81,8 @@ Controls that need explaining carry an info button (ⓘ / ?).
 
 | Tab | What it is for |
 | --- | --- |
-| **Data Inspection** | Rates, Universe and Macro, chosen with pills, over one shared window (1Y to Max) |
-| **Strategy Forge** | Build, save, backtest, diagnose and simulate a strategy |
+| **Data Inspection** | Rates, FX, Universe and Macro, chosen with pills, over one shared window (1Y to Max) |
+| **Strategy Forge** | Build a single strategy or a multi-asset portfolio of sleeves; save, backtest, diagnose and simulate it |
 | **Compare** | Recorded runs, single stocks and benchmarks side by side |
 
 ### Rates
@@ -101,7 +109,17 @@ four views:
 
 ![Rates](docs/screenshots/rates.png)
 
+![US Treasury curve over time](docs/screenshots/rates_surface.png)
+
 ![Rates factors](docs/screenshots/rates_factors.png)
+
+### FX
+
+A currency pair against the base (USD or EUR), the hedge carry (the base minus
+the foreign overnight rate), and a foreign bond three ways: in its own
+currency, converted unhedged, and with a rolling forward hedge.
+
+![FX](docs/screenshots/fx.png)
 
 ### Universe
 
@@ -128,7 +146,8 @@ level changes in percent; a rate (unemployment, a yield) in percentage points.
 
 ### Asset sets
 
-The sidebar picks which stocks are loaded. Three ship with the app:
+The sidebar picks which instruments are loaded. Single-stock sets and
+multi-asset sets ship with the app:
 
 | Set | Names |
 | --- | --- |
@@ -137,7 +156,7 @@ The sidebar picks which stocks are loaded. Three ship with the app:
 | Diversified + ETFs | 21 |
 | Multi-asset (ETFs) | 17 |
 | Government bonds (synthetic) | 12 |
-| Multi-asset, long history | 11 |
+| Multi-asset, long history | 17 |
 
 Switching reloads the data and clears selections made against the previous set,
 since they are not valid against the new one.
@@ -168,6 +187,12 @@ are total returns from the adjusted close.
 ---
 
 ## 🧩 Building a strategy
+
+A single strategy and a multi-asset portfolio are the same object: a
+portfolio of sleeves. One sleeve is a plain strategy; **Add sleeve** or **By
+class** turns it into a multi-asset book, for example equities on risk parity,
+government bonds on target duration and hedged to the base currency, gold, and
+a cash sleeve, each at a fixed budget.
 
 ![Strategy Forge](docs/screenshots/strategy_forge.png)
 
@@ -355,7 +380,13 @@ Alongside the performance statistics, every backtest reports:
   a long-only book and separate as soon as it shorts.
 - **Holdings** (above the diagnostics) — the latest weights and stacked bars at
   each rebalance, for the book (sleeves just before each rebalance, so drift
-  shows) or for one sleeve's names.
+  shows) or for one sleeve's names; **Currency** shows what the book holds in
+  each currency, how much is hedged, what is left open, and which sleeve it
+  sits in.
+
+![Holdings by sleeve](docs/screenshots/holdings.png)
+
+![Currency exposure](docs/screenshots/holdings_currency.png)
 - **Asset classes** — weight by class over time.
 - **Concentration** — weight in the top five positions, the Herfindahl index, and
   the effective number of equally weighted holdings (its reciprocal).
@@ -769,7 +800,9 @@ and no market impact; short-borrow cost is modelled only where noted.
 
 v0.3 set out to make the object model solid — what a strategy *is*, how it is
 stored, how one execution is compared with another — before adding more on top.
-v0.4 turns it multi-asset and adds the macro layer. Next: bond history from
-the curve, indicator-vs-return analysis, market weights for asset classes, and
-Black-Litterman with views drawn from the macro data. After that, v0.5:
-fundamentals, factor strategies, trend following and attribution.
+v0.4 makes it multi-asset: seven asset classes, synthetic government bonds with
+history back to 1990, FX and hedging, portfolios of sleeves with bond rules and
+a cash sleeve, and the macro layer. Next: indicator-vs-return analysis, market
+weights for asset classes, and Black-Litterman with views drawn from the macro
+data. After that, v0.5: fundamentals, factor strategies, trend following and
+attribution.
