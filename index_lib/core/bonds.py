@@ -95,21 +95,6 @@ def bond_total_returns(
     return pd.Series(returns, index=y.index[1:], name=yields_pct.name)
 
 
-def bond_index(
-    yields_pct: pd.Series,
-    maturity_years: float,
-    frequency: int = 2,
-    base: float = 100.0,
-) -> pd.Series:
-    """A total return index of the constant-maturity bond, starting at ``base``."""
-    returns = bond_total_returns(yields_pct, maturity_years, frequency)
-    if returns.empty:
-        return returns
-    level = base * (1.0 + returns).cumprod()
-    start = pd.Series([base], index=[yields_pct.dropna().index.min()])
-    return pd.concat([start, level]).rename(yields_pct.name)
-
-
 def rolldown_slope(curve_pct: pd.DataFrame, tenor: str, tenor_years) -> pd.Series:
     """
     The curve's slope just below ``tenor``, in percent per year of maturity.

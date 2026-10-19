@@ -124,10 +124,6 @@ def macro_catalogue() -> Tuple[Indicator, ...]:
     return read_catalogue()
 
 
-def indicators_by_id() -> Dict[str, Indicator]:
-    return {i.id: i for i in macro_catalogue()}
-
-
 def categories() -> List[str]:
     return sorted({i.category for i in macro_catalogue()})
 

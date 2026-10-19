@@ -5,9 +5,8 @@ render them with a plain ``st.dataframe`` call.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
-import numpy as np
 import pandas as pd
 
 from index_lib.config import asset_class_label, describe, group_by_class, is_synthetic
@@ -134,63 +133,6 @@ def universe_overview_frame(close: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def latest_weights_frame(
-    weights_history: pd.DataFrame, *, by_class: bool = False
-) -> pd.DataFrame:
-    """
-    Weights as of the last rebalance, descending.
-
-    With ``by_class`` a book spanning several asset classes is listed class by
-    class, each class's names descending, with the class beside each name.
-    """
-    if weights_history is None or weights_history.empty:
-        return pd.DataFrame(columns=["Ticker", "Weight (%)"])
-
-    last = weights_history.loc[weights_history.index.max()].sort_values(ascending=False)
-    groups = group_by_class(last.index)
-
-    if not by_class or len(groups) < 2:
-        return pd.DataFrame(
-            {
-                "Ticker": last.index,
-                "Weight (%)": np.round(last.values * 100.0, 3),
-            }
-        )
-
-    rows = [
-        (asset_class_label(k), ticker, round(float(last[ticker]) * 100.0, 3))
-        for k, names in groups.items()
-        for ticker in names
-    ]
-    return pd.DataFrame(rows, columns=["Class", "Ticker", "Weight (%)"])
-
-
-def mix_frame(
-    mix: pd.DataFrame,
-    targets: Optional[Dict[str, float]] = None,
-    *,
-    label: str = "Asset class",
-) -> pd.DataFrame:
-    """
-    Each part's share of the book: average, latest, and its target if it has
-    one (a sleeve's budget, as a share of the book).
-    """
-    if mix is None or mix.empty:
-        return pd.DataFrame(columns=[label, "Average", "Latest", "Target"])
-
-    def _target(name: str) -> str:
-        return fmt_pct(targets[name]) if targets and name in targets else "-"
-
-    return pd.DataFrame(
-        {
-            label: mix.columns,
-            "Average": [fmt_pct(mix[c].mean()) for c in mix.columns],
-            "Latest": [fmt_pct(mix[c].iloc[-1]) for c in mix.columns],
-            "Target": [_target(c) for c in mix.columns],
-        }
-    )
-
-
 def overlay_stats_frame(overlay_df: pd.DataFrame) -> pd.DataFrame:
     """Funding and leverage summary for the vol-target overlay."""
 
@@ -233,18 +175,6 @@ def move_summary_frame(summary: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-DIAGNOSTIC_ROWS = (
-    ("avg_net_exposure", "Avg net exposure", fmt_pct),
-    ("avg_gross_exposure", "Avg gross exposure", fmt_pct),
-    ("max_gross_exposure", "Peak gross exposure", fmt_pct),
-    ("avg_short_notional", "Avg short notional", fmt_pct),
-    ("avg_top_5", "Avg top-5 weight", fmt_pct),
-    ("avg_effective_names", "Avg effective names", fmt_num),
-    ("annual_turnover", "Turnover p.a. (one-way)", fmt_pct),
-    ("max_daily_turnover", "Busiest day", fmt_pct),
-)
-
-
 def book_numbers_frame(
     stats: Dict[str, object], summary: Dict[str, object]
 ) -> pd.DataFrame:
@@ -267,23 +197,6 @@ def book_numbers_frame(
                 ("Avg gross exposure", fmt_pct(summary.get("avg_gross_exposure"))),
                 ("Avg short notional", fmt_pct(summary.get("avg_short_notional"))),
             ]
-    return _metric_frame(rows)
-
-
-def diagnostics_frame(summary: Dict[str, object]) -> pd.DataFrame:
-    """Headline diagnostics for a finished run."""
-    if not summary:
-        return _metric_frame([])
-
-    rows: List[Tuple[str, str]] = [
-        ("Shorting", "yes" if summary.get("is_shorting") else "no"),
-    ]
-    rows += [
-        (label, formatter(summary.get(key)))
-        for key, label, formatter in DIAGNOSTIC_ROWS
-    ]
-    rows.append(("Drawdown episodes", str(summary.get("n_drawdowns", "-"))))
-
     return _metric_frame(rows)
 
 

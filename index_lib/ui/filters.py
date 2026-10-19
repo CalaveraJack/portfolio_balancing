@@ -54,21 +54,16 @@ def filter_frame(
     category: Optional[str] = None,
     text_columns: Sequence[str] = (),
     placeholder: str = "Search",
-    narrow: bool = False,
 ) -> pd.DataFrame:
     """
     Pills on ``category`` and a search over ``text_columns``, above the table.
 
-    Short tables are returned untouched, with no filter drawn. ``narrow``
-    stacks the two for a side panel.
+    Short tables are returned untouched, with no filter drawn.
     """
     if len(frame) < FILTER_FROM:
         return frame
 
-    if narrow:
-        pill_col, search_col = st.container(), st.container()
-    else:
-        pill_col, search_col = st.columns([3, 1], vertical_alignment="bottom")
+    pill_col, search_col = st.columns([3, 1], vertical_alignment="bottom")
     shown = frame
     if category and frame[category].nunique() > 1:
         with pill_col:

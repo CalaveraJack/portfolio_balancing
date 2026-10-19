@@ -104,8 +104,6 @@ FUNDING: Dict[str, FundingSpec] = {
     )
 }
 
-DEFAULT_CURVE = "usd_treasury"
-
 
 @dataclass(frozen=True)
 class SyntheticBond:

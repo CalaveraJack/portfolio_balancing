@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from index_lib.core.rates import tenor_label, tenor_sort_key, tenor_years
+from index_lib.core.rates import tenor_label, tenor_years
 from index_lib.ui.theme import (
     DOWN_COLOR,
     NEUTRAL,
@@ -139,96 +139,6 @@ def make_stacked_bar_figure(
 # ---------------------------------------------------------------------------
 # Rates
 # ---------------------------------------------------------------------------
-
-
-def make_funding_history_figure(
-    funding_df: pd.DataFrame,
-    *,
-    columns: Optional[Sequence[str]] = None,
-    title: str = "Funding Rates History",
-    height: int = 420,
-) -> go.Figure:
-    cols = list(columns) if columns is not None else ["USD_SOFR"]
-    present = [c for c in cols if c in funding_df.columns]
-
-    if funding_df.empty or not present:
-        return empty_fig(title=title, height=height)
-
-    fig = go.Figure()
-    for column in present:
-        fig.add_trace(
-            go.Scatter(
-                x=funding_df.index,
-                y=funding_df[column],
-                mode="lines",
-                name=column,
-                line_shape="hv",
-            )
-        )
-    return _layout(fig, title, "Date", "Rate (% p.a.)", height)
-
-
-def make_curve_history_figure(
-    curve_df: pd.DataFrame,
-    *,
-    columns: Sequence[str],
-    title: str = "Curve History",
-    height: int = 420,
-) -> go.Figure:
-    return make_multi_line_fig(
-        title,
-        curve_df,
-        columns,
-        "Yield (% p.a.)",
-        height=height,
-    )
-
-
-def make_curve_snapshot_figure(
-    curve_df: pd.DataFrame,
-    *,
-    date: Optional[str] = None,
-    title: Optional[str] = None,
-    height: int = 420,
-) -> go.Figure:
-    cols = sorted(
-        [c for c in curve_df.columns if c.startswith("USD_")],
-        key=tenor_sort_key,
-    )
-    populated = curve_df[cols].dropna(how="all") if cols else pd.DataFrame()
-
-    if populated.empty:
-        return empty_fig(title=title or "USD Curve Snapshot", height=height)
-
-    if date is None:
-        snapshot_dt = populated.index[-1]
-        row = populated.iloc[-1]
-    else:
-        snapshot_dt = pd.to_datetime(date)
-        row = (
-            curve_df[cols]
-            .reindex(curve_df.index.union([snapshot_dt]))
-            .sort_index()
-            .ffill()
-            .loc[snapshot_dt]
-        )
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=[c.split("_", 1)[1] for c in cols],
-            y=[row[c] for c in cols],
-            mode="lines+markers",
-            name="USD curve",
-        )
-    )
-    return _layout(
-        fig,
-        title or f"USD Curve Snapshot ({pd.to_datetime(snapshot_dt).date()})",
-        "Maturity",
-        "Yield (% p.a.)",
-        height,
-    )
 
 
 # ---------------------------------------------------------------------------
