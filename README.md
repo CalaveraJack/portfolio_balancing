@@ -23,7 +23,7 @@ Repository: <https://github.com/CalaveraJack/portfolio_balancing>
 
 ---
 
-## 🚀 Quick start
+## Quick start
 
 ### 1) FRED API key
 
@@ -77,7 +77,7 @@ Controls that need explaining carry an info button (ⓘ / ?).
 
 ---
 
-## 🧭 The three tabs
+## The three tabs
 
 | Tab | What it is for |
 | --- | --- |
@@ -186,7 +186,7 @@ are total returns from the adjusted close.
 
 ---
 
-## 🧩 Building a strategy
+## Building a strategy
 
 A single strategy and a multi-asset portfolio are the same object: a
 portfolio of sleeves. One sleeve is a plain strategy; **Add sleeve** or **By
@@ -329,7 +329,7 @@ leverage, and the borrow spread.
 
 ---
 
-## 💾 Saving your work
+## Saving your work
 
 The **Library** and **Recorded runs** buttons at the top of the Strategy Forge
 open saved work. **Record run** sits under the backtest it records; a run left
@@ -372,7 +372,7 @@ machine only — the folder is gitignored.
 
 ---
 
-## 🔬 Diagnostics
+## Diagnostics
 
 Alongside the performance statistics, every backtest reports:
 
@@ -404,7 +404,7 @@ from what was realized. They say what it was aiming at, not what it achieved.
 
 ---
 
-## ⚖️ Comparison
+## Comparison
 
 A benchmark is a role, not a type. A recorded run, a single stock and an index
 ETF are all a named series of levels, so any of them can sit on either side of a
@@ -435,7 +435,7 @@ Comparison works on **recorded runs**, so record a run before comparing it.
 
 ---
 
-## 🎲 Monte Carlo simulation
+## Monte Carlo simulation
 
 Forward simulation that respects the construction method, simulating asset
 returns, rebalancing, weight drift, volatility targeting and the funding overlay.
@@ -470,7 +470,7 @@ against the mean.
 
 ---
 
-## ⚙️ Methodology
+## Methodology
 
 ### Portfolio return
 
@@ -585,7 +585,7 @@ $$
 
 ---
 
-## 📦 Data and caching
+## Data and caching
 
 | Source | What | Cache |
 | --- | --- | --- |
@@ -641,7 +641,7 @@ the range of the whole cache file.
 
 ---
 
-## 🗂 Project layout
+## Project layout
 
 ### Engine
 
@@ -705,7 +705,7 @@ index_lib/ui/theme.py       page chrome, stylesheet, Plotly template
 
 ---
 
-## ✅ Tests
+## Tests
 
 173 tests, none of which need network access — they run against the local
 cache, and the macro loader is tested against a stub.
