@@ -212,6 +212,7 @@ def load_close_volume_cached(
     data_dir: str = "data",
     use_cache_only: bool = False,
     cache_mode: str = "refresh",
+    fetch_metadata: bool = False,
 ) -> YahooOHLCV:
     """
     Load Yahoo close/volume data under an explicit cache policy.
@@ -228,7 +229,7 @@ def load_close_volume_cached(
     if cache_mode not in {"refresh", "cache", "auto"}:
         raise ValueError("cache_mode must be one of: refresh, cache, auto")
 
-    tickers_list = list(tickers) if tickers is not None else list(DEFAULT_TICKERS_10)
+    tickers_list = list(dict.fromkeys(tickers)) if tickers is not None else list(DEFAULT_TICKERS_10)
 
     data_path = Path(data_dir)
     _ensure_dir(data_path)
@@ -279,7 +280,7 @@ def load_close_volume_cached(
     )
 
     missing_meta = [t for t in tickers_list if t not in ticker_meta.index]
-    if missing_meta:
+    if missing_meta and fetch_metadata:
         meta_new = _fetch_ticker_meta_yahoo(missing_meta)
         ticker_meta = pd.concat([ticker_meta, meta_new]).sort_index()
         ticker_meta = ticker_meta[~ticker_meta.index.duplicated(keep="last")]

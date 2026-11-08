@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import List
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 
 from index_lib.config import asset_class_label, asset_class_of, describe, group_by_class
@@ -167,13 +168,52 @@ def _single_name(close: pd.DataFrame, tickers: List[str]) -> None:
         )
 
 
+def _quality_filter(close: pd.DataFrame, min_observations: int = 60,
+                    min_coverage: float = 0.70):
+    """Exclude unusable price series from the Universe inspection tab only.
+
+    Coverage uses the observed trading-date index in the selected window.
+    Nonpositive/infinite prices are invalid. This does not alter cached data,
+    other tabs, or the configured investment universe.
+    """
+    if close.empty:
+        return close.copy(), pd.DataFrame(columns=["Ticker", "Reason"])
+    numeric = close.apply(pd.to_numeric, errors="coerce")
+    numeric = numeric.replace([np.inf, -np.inf], np.nan).where(lambda x: x > 0)
+    # Ignore dates with no instrument priced (e.g. calendar-only rows).
+    numeric = numeric.loc[numeric.notna().any(axis=1)]
+    n_dates = len(numeric)
+    keep, rejected = [], []
+    for ticker in close.columns:
+        series = numeric[ticker] if ticker in numeric else pd.Series(dtype=float)
+        n = int(series.notna().sum())
+        coverage = n / n_dates if n_dates else 0.0
+        if n < min_observations:
+            rejected.append({"Ticker": ticker, "Reason": f"Only {n} valid prices (< {min_observations})"})
+        elif coverage < min_coverage:
+            rejected.append({"Ticker": ticker, "Reason": f"Coverage {coverage:.0%} (< {min_coverage:.0%})"})
+        else:
+            keep.append(ticker)
+    return numeric[keep], pd.DataFrame(rejected, columns=["Ticker", "Reason"])
+
+
 def render(data: UniverseData, window: str) -> None:
     if data.close.empty:
         st.warning("No price data loaded.")
         return
 
     tickers = [t for t in data.close.columns if isinstance(t, str)]
-    close = cut(data.close[tickers], window)
+    raw = cut(data.close[tickers], window)
+    close = raw
+    rejected = pd.DataFrame(columns=["Ticker", "Reason"])
+    tickers = list(close.columns)
+    st.caption(f"{len(tickers)} globally eligible instruments · inspection window: {window}")
+    if not rejected.empty:
+        with st.expander(f"Excluded instruments ({len(rejected)})"):
+            st.dataframe(rejected, hide_index=True, width="stretch")
+    if not tickers:
+        st.warning("No instruments meet the data-quality requirements for this window.")
+        return
 
     view = (
         st.segmented_control(

@@ -18,6 +18,7 @@ from index_lib.config import (
     universe_tickers,
 )
 from index_lib.datasets import CACHE_MODES
+from index_lib.quality import QualityPolicy, screen as screen_prices
 from index_lib.logging_config import configure_logging
 from index_lib.ui import (
     cache,
@@ -48,6 +49,7 @@ class Sidebar:
     history_start: str
     range_slot: object
     status_slot: object
+    quality_policy: QualityPolicy
 
 
 def sidebar() -> Sidebar:
@@ -105,10 +107,15 @@ def sidebar() -> Sidebar:
                 st.cache_data.clear()
                 st.rerun()
 
+            st.markdown("**Price quality — all tabs**")
+            quality_enabled = st.checkbox("Exclude low-quality instruments", value=True, key="quality_enabled")
+            min_obs = st.number_input("Minimum valid daily prices", min_value=1, max_value=5000, value=60, step=10, key="quality_min_obs")
+            min_cov = st.slider("Minimum history coverage", min_value=0, max_value=100, value=70, step=5, key="quality_min_cov")
+            st.caption("Applied globally before Strategy Forge, inspection and comparison. Evaluated on the loaded history, not at each historical rebalance.")
             st.markdown("**Data status**")
             status_slot = st.container()
 
-    return Sidebar(universe_key, cache_mode, history_start, range_slot, status_slot)
+    return Sidebar(universe_key, cache_mode, history_start, range_slot, status_slot, QualityPolicy(quality_enabled, int(min_obs), min_cov / 100))
 
 
 def main() -> None:
@@ -147,9 +154,17 @@ def main() -> None:
         st.error(f"Could not load data: {exc}")
         st.stop()
 
+    data, quality_report = screen_prices(data, side.quality_policy)
+    if data.close.empty:
+        st.error("No instruments pass the price-quality screen. Lower the thresholds in Settings or reload more history.")
+        st.stop()
     side.range_slot.caption(settings.range_caption(data))
     with side.status_slot:
         settings.render_status(data, rates_data, curve_data, macro_data, fx_data)
+        eligible = int(quality_report['Status'].isin(['Eligible', 'Screen disabled']).sum())
+        st.caption(f"Price quality: {eligible}/{len(quality_report)} eligible · {len(quality_report)-eligible} excluded")
+        with st.expander("Price eligibility details"):
+            st.dataframe(quality_report, hide_index=True, width="stretch")
 
     inspection_tab, forge_tab, compare_tab = st.tabs(
         ["Data Inspection", "Strategy Forge", "Compare"]
@@ -170,6 +185,7 @@ def main() -> None:
             cache_mode=side.cache_mode,
             history_start=side.history_start,
             data_dir=DATA_DIR,
+            quality_policy=side.quality_policy,
         )
 
 

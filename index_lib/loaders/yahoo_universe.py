@@ -110,68 +110,62 @@ def load_universe_close_volume_cached(
             cache_mode="cache",
         )
 
+    # Each batch is downloaded once. Only symbols without valid price observations
+    # are retried, and existing cached history is never discarded on network errors.
     errors: dict[str, str] = {}
+    for i, batch in enumerate(_chunks(tickers_list, chunk_size), start=1):
+        try:
+            load_close_volume_cached(
+                tickers=batch, start=start, end=end, period=period,
+                interval=interval, auto_adjust=auto_adjust,
+                data_dir=data_dir, cache_mode="refresh", fetch_metadata=False,
+            )
+        except Exception as exc:
+            errors[f"chunk_{i}"] = repr(exc)
+        if sleep_s > 0 and i * chunk_size < len(tickers_list):
+            time.sleep(sleep_s)
+
+    def cached_result() -> YahooOHLCV:
+        return load_close_volume_cached(
+            tickers=tickers_list, start=start, end=end, period=period,
+            interval=interval, auto_adjust=auto_adjust,
+            data_dir=data_dir, cache_mode="cache",
+        )
 
     try:
-        for i, batch in enumerate(_chunks(tickers_list, chunk_size), start=1):
-            try:
-                load_close_volume_cached(
-                    tickers=batch,
-                    start=start,
-                    end=end,
-                    period=period,
-                    interval=interval,
-                    auto_adjust=auto_adjust,
-                    data_dir=data_dir,
-                    cache_mode="refresh",
-                )
-            except Exception as e:
-                errors[f"chunk_{i}"] = repr(e)
+        out = cached_result()
+    except RuntimeError:
+        if cache_mode == "refresh":
+            raise RuntimeError("Yahoo returned no data; cache is empty")
+        raise
 
-            if sleep_s > 0 and i * chunk_size < len(tickers_list):
-                time.sleep(sleep_s)
-
-        if errors:
-            raise RuntimeError(
-                f"Yahoo refresh failed for {len(errors)} chunk(s): {errors}"
+    missing = [t for t in tickers_list if t not in out.close.columns
+               or out.close[t].dropna().empty]
+    # Retry only missing symbols, in smaller batches. Do not retry a whole
+    # 25-symbol batch because one member was unavailable.
+    for batch in _chunks(missing, min(5, chunk_size)):
+        try:
+            load_close_volume_cached(
+                tickers=batch, start=start, end=end, period=period,
+                interval=interval, auto_adjust=auto_adjust,
+                data_dir=data_dir, cache_mode="refresh", fetch_metadata=False,
             )
-
-        out = load_close_volume_cached(
-            tickers=tickers_list,
-            start=start,
-            end=end,
-            period=period,
-            interval=interval,
-            auto_adjust=auto_adjust,
-            data_dir=data_dir,
-            cache_mode="cache",
-        )
-    except Exception:
-        if cache_mode != "auto":
-            raise
-        out = load_close_volume_cached(
-            tickers=tickers_list,
-            start=start,
-            end=end,
-            period=period,
-            interval=interval,
-            auto_adjust=auto_adjust,
-            data_dir=data_dir,
-            cache_mode="cache",
-        )
+        except Exception as exc:
+            errors["retry_" + ",".join(batch)] = repr(exc)
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+    out = cached_result()
+    failed = [t for t in tickers_list if t not in out.close.columns
+              or out.close[t].dropna().empty]
+    for t in failed:
+        errors.setdefault(t, "No valid close observations; network failure or unavailable symbol")
 
     _write_universe_manifest(
-        data_dir=data_dir,
-        tickers_requested=tickers_list,
-        result=out,
-        start=start,
-        end=end,
-        period=period,
-        interval=interval,
-        auto_adjust=auto_adjust,
-        chunk_size=chunk_size,
-        sleep_s=sleep_s,
-        errors=errors,
+        data_dir=data_dir, tickers_requested=tickers_list, result=out,
+        start=start, end=end, period=period, interval=interval,
+        auto_adjust=auto_adjust, chunk_size=chunk_size,
+        sleep_s=sleep_s, errors=errors,
     )
-
+    if failed and cache_mode == "refresh" and len(failed) == len(tickers_list):
+        raise RuntimeError(f"No usable prices for any requested ticker ({len(failed)} failures)")
     return out

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from typing import Callable, Dict, Optional, Sequence, TypeVar
 
 import pandas as pd
@@ -51,7 +52,7 @@ class UniverseData:
         """
         if self.close.empty:
             return "empty"
-        return f"{self.close.shape}|{self.close.index.max()}"
+        return f"{self.close.shape}|{self.close.index.max()}|{hashlib.sha256(repr(tuple(self.close.columns)).encode()).hexdigest()[:16]}"
 
 
 @dataclass(frozen=True)

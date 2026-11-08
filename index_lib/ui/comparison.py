@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from index_lib.quality import QualityPolicy, screen as screen_prices
+
 from typing import List
 
 import streamlit as st
@@ -31,7 +33,7 @@ def _run_comparables(selected_ids: List[str]) -> List[compare.Comparable]:
 
 
 def _benchmark_comparables(
-    tickers: List[str], cache_mode: str, history_start: str, data_dir: str
+    tickers: List[str], cache_mode: str, history_start: str, data_dir: str, policy: QualityPolicy
 ) -> List[compare.Comparable]:
     """Load the chosen benchmarks, reporting any the local data cannot supply."""
     if not tickers:
@@ -48,13 +50,14 @@ def _benchmark_comparables(
         st.warning(f"Could not load benchmarks: {exc}")
         return []
 
+    panel, _ = screen_prices(panel, policy)
     picked = []
     missing = []
 
     for ticker in tickers:
-        comparable = compare.from_price(
+        comparable = (compare.from_price(
             ticker, ticker, panel.close, ticker, kind="benchmark"
-        )
+        ) if ticker in panel.close.columns else None)
         if comparable is None:
             missing.append(ticker)
         else:
@@ -76,6 +79,7 @@ def render(
     cache_mode: str = "cache",
     history_start: str = "2022-01-01",
     data_dir: str = "data",
+    quality_policy: QualityPolicy = QualityPolicy(),
 ) -> None:
     screen("compare")
 
@@ -140,6 +144,7 @@ def render(
             cache_mode,
             history_start,
             data_dir,
+            quality_policy,
         )
 
     if len(comparables) < 1:
@@ -165,6 +170,7 @@ def _gather(
     cache_mode,
     history_start,
     data_dir,
+    quality_policy,
 ):
     """Everything picked, as comparables: recorded runs, stocks, benchmarks."""
     return (
@@ -177,7 +183,7 @@ def _gather(
             )
             if c is not None
         ]
-        + _benchmark_comparables(chosen_benchmarks, cache_mode, history_start, data_dir)
+        + _benchmark_comparables(chosen_benchmarks, cache_mode, history_start, data_dir, quality_policy)
     )
 
 

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 """Investable universes for Strategy Forge.
 
+Includes broad single-stock and ETF research universes, plus curated menus.
+The legacy universe keys remain available for compatibility. A ticker is not evidence of
+valid price history: filter downloaded data before optimization.
+
 The S&P 500 membership list is fetched from Wikipedia when requested, with a
 local cache. This is a CURRENT-membership universe, not a historical point-in-
 time constituent database. Market-data availability must be checked separately.
@@ -114,7 +118,51 @@ def load_sp500_constituents(*, refresh: bool = False, cache_path: Optional[Path]
         raise RuntimeError("Cannot load S&P 500 constituents: no valid cache and live fetch failed") from exc
 
 
-DEFAULT_UNIVERSE: List[str] = PHARMA_48
+# Curated, economically interpretable universes for portfolio construction.
+# These are candidate instruments, not predetermined index weights.
+# All are Yahoo-style exchange-listed symbols; download success is not guaranteed.
+# A single representative ETF is preferred for each major exposure.
+# These symbols were observed with nonempty historical data in the user's 2026-11-08 export.
+# This is empirical evidence of a successful prior download, NOT a guarantee of future Yahoo access.
+VERIFIED_HISTORY_TICKERS = ('ACWI', 'ANGL', 'BCI', 'BNDX', 'BNO', 'BTAL', 'BWX', 'BWZ', 'CANE', 'CMDY', 'CORN', 'CPER', 'CTA', 'CWB', 'DBA', 'DBC', 'DBMF', 'EEM', 'EFA', 'EMB', 'EMLC', 'EWA', 'EWC', 'EWG', 'EWJ', 'EWL', 'EWQ', 'EWT', 'EWU', 'EWW', 'EWY', 'EWZ', 'EZA', 'FXE', 'FXI', 'FXY', 'GLD', 'GOVT', 'GSG', 'HYG', 'IEF', 'IGOV', 'INDA', 'IWM', 'JNK', 'LQD', 'MCHI', 'MTUM', 'PDBC', 'QQQ', 'QUAL', 'SCHP', 'SHY', 'SIZE', 'SLV', 'SPY', 'STIP', 'TIP', 'TLT', 'UNG', 'USMV', 'USO', 'UUP', 'VCIT', 'VEA', 'VGIT', 'VGK', 'VGSH', 'VLUE', 'VNQ', 'VWO', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY')
+
+CURATED_BALANCED = ("SPY", "VEA", "VWO", "SHY", "IEF", "TLT", "TIP", "LQD", "HYG", "EMB", "GLD", "DBC", "VNQ", "DBMF")
+CURATED_DEFENSIVE = ("SPY", "VEA", "SHY", "VGSH", "IEF", "TIP", "LQD", "GLD")
+CURATED_GROWTH = ("SPY", "QQQ", "IWM", "VEA", "VWO", "QUAL", "USMV", "IEF", "GLD", "VNQ")
+CURATED_GLOBAL_EQUITY = ("SPY", "IWM", "VEA", "VWO", "EFA", "EEM", "QUAL", "USMV")
+CURATED_FIXED_INCOME = ("SHY", "VGSH", "VGIT", "IEF", "TLT", "TIP", "SCHP", "LQD", "VCIT", "HYG", "JNK", "EMB", "EMLC")
+CURATED_REAL_ASSETS = ("GLD", "SLV", "DBC", "PDBC", "GSG", "VNQ", "XLRE")
+CURATED_ALTERNATIVES = ("DBMF", "CTA", "BTAL", "UUP", "GLD")
+CURATED_MACRO = ("SPY", "VEA", "VWO", "SHY", "IEF", "TLT", "TIP", "LQD", "HYG", "EMB", "GLD", "DBC", "VNQ", "DBMF", "UUP")
+
+# Approximate economic-exposure categories for diagnostics and optional limits.
+# ETF exposure should be verified from fund documents before applying hard risk limits.
+EXPOSURE_GROUPS: Dict[str, Tuple[str, ...]] = {
+    "US equity": ("SPY", "VTI", "VOO", "IVV", "IWM", "QUAL", "USMV", "QQQ"),
+    "Developed ex-US equity": ("VEA", "EFA", "IEFA"),
+    "Emerging equity": ("VWO", "EEM", "IEMG"),
+    "US Treasury / cash": ("SGOV", "BIL", "SHY", "IEF", "TLT"),
+    "Inflation-linked bonds": ("TIP", "VTIP"),
+    "Investment-grade credit": ("LQD", "BNDX"),
+    "High-yield credit": ("HYG", "JNK"),
+    "Emerging debt": ("EMB", "EMLC"),
+    "Precious metals": ("GLD", "IAU", "SLV"),
+    "Broad commodities": ("DBC", "PDBC"),
+    "Real estate": ("VNQ", "VNQI"),
+    "Managed futures": ("DBMF", "KMLM"),
+    "Other alternatives": ("BTAL", "MNA"),
+    "USD currency": ("UUP",),
+}
+
+
+def exposure_group(ticker: str) -> str:
+    for group, members in EXPOSURE_GROUPS.items():
+        if ticker in members:
+            return group
+    return "Other / unclassified"
+
+
+DEFAULT_UNIVERSE: List[str] = []  # Set below after full stock + ETF universe is defined
 
 
 @dataclass(frozen=True)
@@ -128,7 +176,47 @@ class Universe:
         return len(self.tickers)
 
 
+# Broad single-stock research lists (Yahoo Finance US symbols).
+# Listing/symbol validity and download availability are NOT guaranteed.
+STOCK_TECH = _unique(
+    ("AAPL","MSFT","NVDA","AVGO","AMD","INTC","QCOM","TXN","MU","AMAT","LRCX","KLAC","ADI","NXPI","ON","MRVL","ARM","TSM","ASML"),
+    ("GOOGL","META","AMZN","NFLX","ADBE","CRM","ORCL","NOW","IBM","CSCO","PANW","CRWD","FTNT","SNOW","PLTR","SHOP","UBER","ABNB","INTU","ADP","CDNS","SNPS","ANET","DELL","HPE"),
+)
+STOCK_FINANCIALS = ("JPM","BAC","WFC","C","GS","MS","BLK","SCHW","BX","KKR","APO","ARES","V","MA","AXP","COF","USB","PNC","TFC","BK","STT","SPGI","MCO","ICE","CME","CB","PGR","TRV","AIG")
+STOCK_HEALTHCARE = _unique(PHARMA_48,("LLY","UNH","ELV","HCA","BSX","HOLX","RMD","IDXX","DXCM","GEHC","VEEV","PODD","STE"))
+STOCK_CONSUMER = ("WMT","COST","TGT","HD","LOW","MCD","SBUX","NKE","LULU","TJX","ROST","ORLY","AZO","CMG","YUM","DPZ","PG","KO","PEP","MDLZ","CL","KMB","GIS","KHC","PM","MO","EL","ULTA","MAR","HLT","BKNG","RCL","CCL","TSLA","F","GM")
+STOCK_INDUSTRIALS = ("CAT","DE","GE","GEV","HON","ETN","EMR","PH","ITW","MMM","LMT","RTX","NOC","GD","BA","TDG","UPS","FDX","UNP","CSX","NSC","WM","RSG","GWW","FAST","URI","PCAR","CMI","JCI","CARR")
+STOCK_ENERGY_MATERIALS = ("XOM","CVX","COP","EOG","OXY","SLB","HAL","MPC","VLO","PSX","KMI","WMB","OKE","LNG","NEE","DUK","SO","AEP","EXC","SRE","D","FCX","NEM","GOLD","NUE","STLD","DOW","DD","LIN","APD","SHW","ECL","CTVA","MOS")
+STOCK_REITS_TELECOM = ("AMT","PLD","EQIX","DLR","O","SPG","PSA","WELL","VTR","AVB","EQR","CBRE","VZ","T","TMUS","CMCSA","DIS","CHTR","WBD")
+STOCK_INTERNATIONAL_ADR = ("NVO","AZN","NVS","SNY","GSK","TAK","SAP","SONY","TM","HMC","BABA","JD","PDD","BIDU","NTES","MELI","SE","INFY","HDB","IBN","RIO","BHP","SHEL","BP","TTE","UL","DEO","NOK","ERIC","TSM","ASML")
+SINGLE_STOCKS_ALL = _unique(STOCK_TECH, STOCK_FINANCIALS, STOCK_HEALTHCARE, STOCK_CONSUMER, STOCK_INDUSTRIALS, STOCK_ENERGY_MATERIALS, STOCK_REITS_TELECOM, STOCK_INTERNATIONAL_ADR)
+ETF_RESEARCH_ALL = MULTI_ASSET_GIANT
+MULTI_ASSET_STOCKS_ETFS = _unique(SINGLE_STOCKS_ALL, ETF_RESEARCH_ALL)
+DEFAULT_UNIVERSE = list(MULTI_ASSET_STOCKS_ETFS)
+# Prior observed successful downloads: ETF export only, not evidence for stocks.
+ETF_PREVIOUSLY_LOADED = tuple(t for t in ETF_RESEARCH_ALL if t in set(VERIFIED_HISTORY_TICKERS))
+
 _UNIVERSE_ITEMS = (
+    Universe("curated_balanced", "Curated | Balanced multi-asset", CURATED_BALANCED),
+    Universe("curated_defensive", "Curated | Defensive multi-asset", CURATED_DEFENSIVE),
+    Universe("curated_growth", "Curated | Growth multi-asset", CURATED_GROWTH),
+    Universe("curated_macro", "Curated | Global macro cross-asset", CURATED_MACRO),
+    Universe("curated_equity", "Curated | Global equities", CURATED_GLOBAL_EQUITY),
+    Universe("curated_fixed_income", "Curated | Fixed income", CURATED_FIXED_INCOME),
+    Universe("curated_real_assets", "Curated | Real assets", CURATED_REAL_ASSETS),
+    Universe("curated_alternatives", "Curated | Liquid alternatives", CURATED_ALTERNATIVES),
+    Universe("stocks_etfs_full", "Research | Stocks + ETFs (full)", MULTI_ASSET_STOCKS_ETFS),
+    Universe("stocks_all", "Research | All single stocks", SINGLE_STOCKS_ALL),
+    Universe("etfs_all", "Research | All ETFs", ETF_RESEARCH_ALL),
+    Universe("etfs_previous_success", "Diagnostic | ETFs loaded in previous run", ETF_PREVIOUSLY_LOADED),
+    Universe("stocks_tech", "Stocks | Technology & software", STOCK_TECH),
+    Universe("stocks_financials", "Stocks | Financials", STOCK_FINANCIALS),
+    Universe("stocks_healthcare", "Stocks | Healthcare", STOCK_HEALTHCARE),
+    Universe("stocks_consumer", "Stocks | Consumer", STOCK_CONSUMER),
+    Universe("stocks_industrials", "Stocks | Industrials", STOCK_INDUSTRIALS),
+    Universe("stocks_energy_materials", "Stocks | Energy, utilities & materials", STOCK_ENERGY_MATERIALS),
+    Universe("stocks_reits_telecom", "Stocks | REITs, telecom & media", STOCK_REITS_TELECOM),
+    Universe("stocks_international", "Stocks | International US listings", STOCK_INTERNATIONAL_ADR),
     Universe("pharma", "Pharma & Healthcare", tuple(PHARMA_48)),
     Universe("megacap", "Mega-cap Core", tuple(BASE_10)),
     Universe("diversified", "Diversified + ETFs", tuple(PLUS_20)),
@@ -148,12 +236,15 @@ _UNIVERSE_ITEMS = (
     Universe("multi_asset_giant", "Global Multi-Asset — Full Universe", MULTI_ASSET_GIANT),
     Universe("multi_asset_giant_synthetic", "Global Multi-Asset + Synthetic Rates", MULTI_ASSET_GIANT_WITH_SYNTHETICS),
 )
+# Keep the full research menu. Historical download success is a diagnostic,
+# not a permanent eligibility filter (network failures are not delistings).
 UNIVERSES: Dict[str, Universe] = {u.key: u for u in _UNIVERSE_ITEMS}
+
 
 # Lazy: importing this module does not require network access.
 # The dynamic S&P 500 universe is resolved by universe_tickers().
-UNIVERSES["sp500_full"] = Universe("sp500_full", "S&P 500 — All Constituents (current)", ())
-DEFAULT_UNIVERSE_KEY = "pharma"
+UNIVERSES["sp500_full"] = Universe("sp500_full", "S&P 500 — Current constituents (UNVERIFIED Yahoo coverage)", ())
+DEFAULT_UNIVERSE_KEY = "stocks_etfs_full"
 
 
 def universe_label(key: str) -> str:
